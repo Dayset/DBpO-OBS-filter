@@ -6,6 +6,10 @@
 //   Flow         cur/prev flow-res    -> per-pixel motion vector (block matching)
 //   Coherence    motion + color       -> motion smoothed within same-colored regions
 //                                        ("per-object" approximation until segmentation lands)
+//   FitSample    motion               -> tiny 32-bit copy read back by the CPU, which fits a
+//                                        camera-motion model (pan/zoom/rotation/shear)
+//   Combine      motion + camera model -> final motion = camera part + object residual,
+//                                        each with its own strength
 //   NeighborMax  motion               -> largest motion in the neighborhood, so blur can
 //                                        smear past an object's silhouette
 //   Blur         full-res color       -> gather along the dominant motion, weighted by
@@ -36,7 +40,12 @@ uniform float  static_bias;     // how much better a non-zero match must be than
 uniform int    coherence_radius;
 uniform float  color_sigma;     // inverse color tolerance for the coherence pass
 uniform int    neighbor_radius;
-uniform float  shutter;         // blur length as a fraction of per-frame motion
+uniform float3 cam_x;           // camera model: motion.x = dot(cam_x, (1, u - 0.5, v - 0.5))
+uniform float3 cam_y;           // camera model: motion.y = dot(cam_y, (1, u - 0.5, v - 0.5))
+uniform float  camera_strength; // blur length for camera motion, fraction of per-frame motion
+uniform float  object_strength; // blur length for object motion, fraction of per-frame motion
+uniform float  object_threshold;// px; residuals smaller than this are treated as camera motion
+uniform int    debug_mode;      // 0 final, 1 camera only, 2 object only
 uniform float  max_radius;      // full-res pixels
 uniform float  min_motion;      // full-res pixels; below this nothing blurs
 uniform int    sample_count;
@@ -76,6 +85,12 @@ float2 clamp_len(float2 v, float max_len)
 {
 	float l = length(v);
 	return (l > max_len && l > 0.0) ? v * (max_len / l) : v;
+}
+
+float2 camera_motion(float2 uv)
+{
+	float3 p = float3(1.0, uv.x - 0.5, uv.y - 0.5);
+	return float2(dot(cam_x, p), dot(cam_y, p));
 }
 
 // ---------------------------------------------------------------- Downsample
@@ -166,6 +181,33 @@ float4 PSCoherence(VertData v_in) : TARGET
 	return float4(v, csum / max(wsum, 1e-5), 1.0);
 }
 
+// ---------------------------------------------------------------- FitSample
+
+// Point-samples the coherent motion field into a tiny float32 target that the
+// CPU reads back to fit the camera model. RG = motion (px), B = confidence.
+float4 PSFitSample(VertData v_in) : TARGET
+{
+	return image.SampleLevel(pointClamp, v_in.uv, 0.0);
+}
+
+// ---------------------------------------------------------------- Combine
+
+// RG = final motion (strengths applied), BA = object-only motion (for debug).
+float4 PSCombine(VertData v_in) : TARGET
+{
+	float4 m = image.SampleLevel(pointClamp, v_in.uv, 0.0);
+	float2 cam = camera_motion(v_in.uv);
+
+	// What the camera model doesn't explain, if we trust the measurement.
+	float2 residual = m.rg - cam;
+	float conf = saturate(m.b * 3.0);
+	float is_object = smoothstep(object_threshold, object_threshold * 2.0 + 0.5, length(residual)) * conf;
+	float2 obj = residual * is_object;
+
+	float2 final_motion = clamp_len(cam * camera_strength + obj * object_strength, max_radius);
+	return float4(final_motion, obj * object_strength);
+}
+
 // ---------------------------------------------------------------- NeighborMax
 
 float4 PSNeighborMax(VertData v_in) : TARGET
@@ -197,12 +239,12 @@ float4 PSBlur(VertData v_in) : TARGET
 {
 	float4 center = image.SampleLevel(pointClamp, v_in.uv, 0.0);
 
-	float2 vn = clamp_len(motion_max.SampleLevel(pointClamp, v_in.uv, 0.0).rg * shutter, max_radius);
+	float2 vn = motion_max.SampleLevel(pointClamp, v_in.uv, 0.0).rg;
 	float vn_len = length(vn);
 	if (vn_len < min_motion)
 		return center;
 
-	float2 vc = clamp_len(motion.SampleLevel(linearClamp, v_in.uv, 0.0).rg * shutter, max_radius);
+	float2 vc = motion.SampleLevel(linearClamp, v_in.uv, 0.0).rg;
 	float vc_len = max(length(vc), 0.5);
 
 	// The center sample's weight matches the McGuire normalization.
@@ -210,13 +252,18 @@ float4 PSBlur(VertData v_in) : TARGET
 	float4 sum = center * wc;
 	float wsum = wc;
 
+	// Per-pixel offset (interleaved gradient noise) turns banding on long
+	// blurs into fine grain.
+	float2 px = v_in.uv / out_texel;
+	float jitter = frac(52.9829189 * frac(dot(px, float2(0.06711056, 0.00583715))));
+
 	float n = max(float(sample_count), 1.0);
 	for (int i = 0; i < sample_count; i++) {
-		float t = lerp(-0.5, 0.5, (float(i) + 0.5) / n);
+		float t = lerp(-0.5, 0.5, (float(i) + jitter) / n);
 		float dist = abs(t) * vn_len;
 		float2 uv = v_in.uv + vn * t * out_texel;
 
-		float2 vs = clamp_len(motion.SampleLevel(linearClamp, uv, 0.0).rg * shutter, max_radius);
+		float2 vs = motion.SampleLevel(linearClamp, uv, 0.0).rg;
 		float vs_len = max(length(vs), 0.5);
 
 		// Sample smears over us if its own motion reaches this far,
@@ -242,7 +289,12 @@ float3 hue_to_rgb(float h)
 
 float4 PSDebugVectors(VertData v_in) : TARGET
 {
-	float2 v = motion.SampleLevel(linearClamp, v_in.uv, 0.0).rg;
+	float4 m = motion.SampleLevel(linearClamp, v_in.uv, 0.0);
+	float2 v = m.rg;
+	if (debug_mode == 1)
+		v = camera_motion(v_in.uv);
+	else if (debug_mode == 2)
+		v = m.ba;
 	float mag = saturate(length(v) / max(debug_range, 1e-3));
 	float hue = atan2(v.y, v.x) / 6.28318530718 + 0.5;
 	float3 col = lerp(float3(0.0, 0.0, 0.0), hue_to_rgb(hue), mag);
@@ -276,6 +328,24 @@ technique Coherence
 	{
 		vertex_shader = VSDefault(v_in);
 		pixel_shader  = PSCoherence(v_in);
+	}
+}
+
+technique FitSample
+{
+	pass
+	{
+		vertex_shader = VSDefault(v_in);
+		pixel_shader  = PSFitSample(v_in);
+	}
+}
+
+technique Combine
+{
+	pass
+	{
+		vertex_shader = VSDefault(v_in);
+		pixel_shader  = PSCombine(v_in);
 	}
 }
 
