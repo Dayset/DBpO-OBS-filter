@@ -3,16 +3,14 @@
 
 file(READ "${INPUT}" content HEX)
 string(REGEX REPLACE "([0-9a-f][0-9a-f])" "0x\\1," bytes "${content}")
-string(
-  REGEX REPLACE "(0x..,0x..,0x..,0x..,0x..,0x..,0x..,0x..,0x..,0x..,0x..,0x..,0x..,0x..,0x..,0x..,)"
-  "\\1\n\t"
-  bytes
-  "${bytes}"
-)
 
-file(
-  WRITE "${OUTPUT}.tmp"
-  "/* Generated from ${INPUT} - do not edit. */\n#pragma once\nstatic const char ${SYMBOL}[] = {\n\t${bytes}0x00};\n"
-)
+# Wrap every 16 bytes.
+string(REPEAT "0x..," 16 row)
+string(REGEX REPLACE "(${row})" "\\1\n\t" bytes "${bytes}")
+
+set(header "/* Generated from ${INPUT} - do not edit. */\n#pragma once\n")
+string(APPEND header "static const char ${SYMBOL}[] = {\n\t${bytes}0x00};\n")
+
+file(WRITE "${OUTPUT}.tmp" "${header}")
 file(COPY_FILE "${OUTPUT}.tmp" "${OUTPUT}" ONLY_IF_DIFFERENT)
 file(REMOVE "${OUTPUT}.tmp")
