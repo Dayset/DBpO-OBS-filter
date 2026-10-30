@@ -43,14 +43,14 @@ struct dob_filter {
 	obs_source_t *context;
 	gs_effect_t *effect;
 
-	gs_texrender_t *input;      /* full-res copy of the source */
-	gs_texrender_t *small[2];   /* flow-res color, ping-pong current/previous */
-	gs_texrender_t *flow;       /* raw block-matching motion */
-	gs_texrender_t *coherent;   /* motion smoothed within color regions */
-	gs_texrender_t *neighbor;   /* neighbor-max motion */
-	gs_texrender_t *output;     /* cached final frame */
+	gs_texrender_t *input;    /* full-res copy of the source */
+	gs_texrender_t *small[2]; /* flow-res color, ping-pong current/previous */
+	gs_texrender_t *flow;     /* raw block-matching motion */
+	gs_texrender_t *coherent; /* motion smoothed within color regions */
+	gs_texrender_t *neighbor; /* neighbor-max motion */
+	gs_texrender_t *output;   /* cached final frame */
 
-	int cur;                    /* index into small[] holding the newest frame */
+	int cur; /* index into small[] holding the newest frame */
 	bool have_prev;
 	bool needs_update;
 	bool output_valid;
