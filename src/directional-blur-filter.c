@@ -148,8 +148,55 @@ static void set_tex(gs_effect_t *e, const char *name, gs_texrender_t *tr)
 		gs_effect_set_texture(p, tr ? gs_texrender_get_texture(tr) : NULL);
 }
 
+/* Textures a pass reads, plus the texel size of the texture it samples. */
+struct pass_inputs {
+	gs_texrender_t *image;
+	gs_texrender_t *prev_image;
+	gs_texrender_t *color_small;
+	gs_texrender_t *motion;
+	gs_texrender_t *motion_max;
+	float texel_x, texel_y;
+};
+
+/* libobs clears every effect parameter when a technique ends, so each pass
+ * must set all of its values itself; nothing carries over between passes.
+ * Setting parameters a technique doesn't use is harmless. */
+static void apply_params(struct dob_filter *f, const struct pass_inputs *in, uint32_t w, uint32_t h)
+{
+	gs_effect_t *e = f->effect;
+	const float scale = (float)f->width / (float)f->flow_w;
+	const float sens = f->sensitivity / 100.0f;
+
+	int nr = (int)ceilf((f->max_radius * 0.5f) / scale);
+	if (nr < 1)
+		nr = 1;
+	if (nr > 8)
+		nr = 8;
+
+	set_tex(e, "image", in->image);
+	set_tex(e, "prev_image", in->prev_image ? in->prev_image : in->image);
+	set_tex(e, "color_small", in->color_small ? in->color_small : in->image);
+	set_tex(e, "motion", in->motion ? in->motion : in->image);
+	set_tex(e, "motion_max", in->motion_max ? in->motion_max : in->image);
+
+	set_vec2(e, "texel", in->texel_x, in->texel_y);
+	set_vec2(e, "out_texel", 1.0f / (float)w, 1.0f / (float)h);
+	set_float(e, "flow_scale", scale);
+	set_int(e, "search_radius", f->have_prev ? f->search_radius : 0);
+	set_float(e, "static_bias", f->static_bias);
+	set_int(e, "coherence_radius", f->coherence_radius);
+	set_float(e, "color_sigma", 5.0f + sens * sens * 400.0f);
+	set_int(e, "neighbor_radius", nr);
+	set_float(e, "shutter", f->strength);
+	set_float(e, "max_radius", f->max_radius);
+	set_float(e, "min_motion", f->min_motion);
+	set_int(e, "sample_count", f->samples);
+	set_float(e, "debug_range", (float)f->search_radius * scale);
+}
+
 /* Draws a full-target quad with the given technique into `target`. */
-static bool run_pass(struct dob_filter *f, gs_texrender_t *target, const char *technique, uint32_t w, uint32_t h)
+static bool run_pass(struct dob_filter *f, gs_texrender_t *target, const char *technique, uint32_t w, uint32_t h,
+		     const struct pass_inputs *in)
 {
 	gs_texrender_reset(target);
 	if (!gs_texrender_begin(target, w, h))
@@ -160,8 +207,7 @@ static bool run_pass(struct dob_filter *f, gs_texrender_t *target, const char *t
 	gs_clear(GS_CLEAR_COLOR, &clear, 0.0f, 0);
 	gs_ortho(0.0f, (float)w, 0.0f, (float)h, -100.0f, 100.0f);
 
-	set_vec2(f->effect, "out_texel", 1.0f / (float)w, 1.0f / (float)h);
-
+	apply_params(f, in, w, h);
 	while (gs_effect_loop(f->effect, technique))
 		gs_draw_sprite(NULL, 0, w, h);
 
@@ -309,60 +355,44 @@ static bool capture_input(struct dob_filter *f, obs_source_t *target, obs_source
 
 static void process_frame(struct dob_filter *f)
 {
-	gs_effect_t *e = f->effect;
-	const float scale = (float)f->width / (float)f->flow_w;
 	const float fw = (float)f->width, fh = (float)f->height;
 	const float sw = (float)f->flow_w, sh = (float)f->flow_h;
 
 	f->cur ^= 1;
 	gs_texrender_t *cur_small = f->small[f->cur];
-	gs_texrender_t *prev_small = f->small[f->cur ^ 1];
+	gs_texrender_t *prev_small = f->have_prev ? f->small[f->cur ^ 1] : cur_small;
 
 	/* 1. Downsample current frame to flow resolution. */
-	set_tex(e, "image", f->input);
-	set_vec2(e, "texel", 1.0f / fw, 1.0f / fh);
-	set_float(e, "flow_scale", scale);
-	run_pass(f, cur_small, "Downsample", f->flow_w, f->flow_h);
+	struct pass_inputs down = {.image = f->input, .texel_x = 1.0f / fw, .texel_y = 1.0f / fh};
+	run_pass(f, cur_small, "Downsample", f->flow_w, f->flow_h, &down);
 
 	/* 2. Block-matching optical flow against the previous frame. */
-	set_tex(e, "image", cur_small);
-	set_tex(e, "prev_image", f->have_prev ? prev_small : cur_small);
-	set_vec2(e, "texel", 1.0f / sw, 1.0f / sh);
-	set_int(e, "search_radius", f->have_prev ? f->search_radius : 0);
-	set_float(e, "static_bias", f->static_bias);
-	run_pass(f, f->flow, "Flow", f->flow_w, f->flow_h);
+	struct pass_inputs flow = {.image = cur_small,
+				   .prev_image = prev_small,
+				   .texel_x = 1.0f / sw,
+				   .texel_y = 1.0f / sh};
+	run_pass(f, f->flow, "Flow", f->flow_w, f->flow_h, &flow);
 	f->have_prev = true;
 
 	/* 3. Pull motion together within same-colored regions. */
-	float sens = f->sensitivity / 100.0f;
-	set_tex(e, "image", f->flow);
-	set_tex(e, "color_small", cur_small);
-	set_int(e, "coherence_radius", f->coherence_radius);
-	set_float(e, "color_sigma", 5.0f + sens * sens * 400.0f);
-	run_pass(f, f->coherent, "Coherence", f->flow_w, f->flow_h);
+	struct pass_inputs coh = {.image = f->flow,
+				  .color_small = cur_small,
+				  .texel_x = 1.0f / sw,
+				  .texel_y = 1.0f / sh};
+	run_pass(f, f->coherent, "Coherence", f->flow_w, f->flow_h, &coh);
 
 	/* 4. Neighbor max, wide enough to cover the longest allowed blur. */
-	int nr = (int)ceilf((f->max_radius * 0.5f) / scale);
-	if (nr < 1)
-		nr = 1;
-	if (nr > 8)
-		nr = 8;
-	set_tex(e, "image", f->coherent);
-	set_int(e, "neighbor_radius", nr);
-	run_pass(f, f->neighbor, "NeighborMax", f->flow_w, f->flow_h);
+	struct pass_inputs nmax = {.image = f->coherent, .texel_x = 1.0f / sw, .texel_y = 1.0f / sh};
+	run_pass(f, f->neighbor, "NeighborMax", f->flow_w, f->flow_h, &nmax);
 
 	/* 5. Final gather at full resolution (or the debug view). */
-	set_tex(e, "image", f->input);
-	set_tex(e, "motion", f->coherent);
-	set_tex(e, "motion_max", f->neighbor);
-	set_float(e, "shutter", f->strength);
-	set_float(e, "max_radius", f->max_radius);
-	set_float(e, "min_motion", f->min_motion);
-	set_int(e, "sample_count", f->samples);
-	set_float(e, "debug_range", (float)f->search_radius * scale);
-
+	struct pass_inputs blur = {.image = f->input,
+				   .motion = f->coherent,
+				   .motion_max = f->neighbor,
+				   .texel_x = 1.0f / fw,
+				   .texel_y = 1.0f / fh};
 	const char *tech = f->view == VIEW_VECTORS ? "DebugVectors" : "Blur";
-	f->output_valid = run_pass(f, f->output, tech, f->width, f->height);
+	f->output_valid = run_pass(f, f->output, tech, f->width, f->height, &blur);
 }
 
 static void dob_render(void *data, gs_effect_t *unused)
