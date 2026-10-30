@@ -1,0 +1,304 @@
+// Directional Object Blur
+// Multi-pass motion blur driven by image-space optical flow.
+//
+// Passes (all pixel shaders; OBS does not expose compute shaders):
+//   Downsample   full-res color      -> flow-res color (box filtered)
+//   Flow         cur/prev flow-res    -> per-pixel motion vector (block matching)
+//   Coherence    motion + color       -> motion smoothed within same-colored regions
+//                                        ("per-object" approximation until segmentation lands)
+//   NeighborMax  motion               -> largest motion in the neighborhood, so blur can
+//                                        smear past an object's silhouette
+//   Blur         full-res color       -> gather along the dominant motion, weighted by
+//                                        whether each sample's own motion reaches this pixel
+//                                        (after McGuire et al., "A Reconstruction Filter for
+//                                        Plausible Motion Blur", I3D 2012, without depth)
+//   DebugVectors motion               -> color-coded motion field (hue = direction)
+//
+// Motion vectors are stored in RG as full-resolution pixels per frame (cur - prev).
+// B holds match confidence (0..1).
+
+uniform float4x4 ViewProj;
+
+uniform texture2d image;        // pass input (color or motion)
+uniform texture2d prev_image;   // previous flow-res frame (Flow pass)
+uniform texture2d color_small;  // current flow-res color (Coherence pass)
+uniform texture2d motion;       // flow-res motion (Blur / Debug)
+uniform texture2d motion_max;   // flow-res neighbor-max motion (Blur)
+
+uniform float2 texel;           // 1 / size of the texture being sampled at its native res
+uniform float2 out_texel;       // 1 / size of the render target
+uniform float  flow_scale;      // full-res pixels per flow-res pixel
+uniform int    search_radius;   // block-matching search radius, flow-res pixels
+uniform float  static_bias;     // how much better a non-zero match must be than "no motion"
+uniform int    coherence_radius;
+uniform float  color_sigma;     // inverse color tolerance for the coherence pass
+uniform int    neighbor_radius;
+uniform float  shutter;         // blur length as a fraction of per-frame motion
+uniform float  max_radius;      // full-res pixels
+uniform float  min_motion;      // full-res pixels; below this nothing blurs
+uniform int    sample_count;
+uniform float  debug_range;     // full-res pixels mapped to full saturation
+
+sampler_state pointClamp {
+	Filter   = Point;
+	AddressU = Clamp;
+	AddressV = Clamp;
+};
+
+sampler_state linearClamp {
+	Filter   = Linear;
+	AddressU = Clamp;
+	AddressV = Clamp;
+};
+
+struct VertData {
+	float4 pos : POSITION;
+	float2 uv  : TEXCOORD0;
+};
+
+VertData VSDefault(VertData v_in)
+{
+	VertData vert_out;
+	vert_out.pos = mul(float4(v_in.pos.xyz, 1.0), ViewProj);
+	vert_out.uv  = v_in.uv;
+	return vert_out;
+}
+
+float luma(float3 c)
+{
+	return dot(c, float3(0.2126, 0.7152, 0.0722));
+}
+
+float2 clamp_len(float2 v, float max_len)
+{
+	float l = length(v);
+	return (l > max_len && l > 0.0) ? v * (max_len / l) : v;
+}
+
+// ---------------------------------------------------------------- Downsample
+
+float4 PSDownsample(VertData v_in) : TARGET
+{
+	// 4 bilinear taps = 16-texel box when the ratio is 4x.
+	float2 o = texel * 0.5 * flow_scale * 0.5;
+	float4 c = image.Sample(linearClamp, v_in.uv + float2(-o.x, -o.y));
+	c += image.Sample(linearClamp, v_in.uv + float2( o.x, -o.y));
+	c += image.Sample(linearClamp, v_in.uv + float2(-o.x,  o.y));
+	c += image.Sample(linearClamp, v_in.uv + float2( o.x,  o.y));
+	return c * 0.25;
+}
+
+// ---------------------------------------------------------------- Flow
+
+float patch_cost(float2 uv, float2 offset_uv)
+{
+	// 3x3 patch, sum of absolute luma differences.
+	float cost = 0.0;
+	for (int py = -1; py <= 1; py++) {
+		for (int px = -1; px <= 1; px++) {
+			float2 k = float2(px, py) * texel;
+			float a = luma(image.Sample(pointClamp, uv + k).rgb);
+			float b = luma(prev_image.Sample(pointClamp, uv + k + offset_uv).rgb);
+			cost += abs(a - b);
+		}
+	}
+	return cost;
+}
+
+float4 PSFlow(VertData v_in) : TARGET
+{
+	float zero_cost = patch_cost(v_in.uv, float2(0.0, 0.0));
+	float best_cost = zero_cost;
+	float2 best = float2(0.0, 0.0);
+	float worst_cost = zero_cost;
+
+	for (int y = -search_radius; y <= search_radius; y++) {
+		for (int x = -search_radius; x <= search_radius; x++) {
+			float2 o = float2(x, y);
+			// Small penalty for long vectors keeps flat areas from wandering.
+			float c = patch_cost(v_in.uv, o * texel) + length(o) * 0.004;
+			worst_cost = max(worst_cost, c);
+			if (c < best_cost) {
+				best_cost = c;
+				best = o;
+			}
+		}
+	}
+
+	// Treat as static unless moving is clearly better than staying put.
+	if (zero_cost - best_cost < static_bias)
+		best = float2(0.0, 0.0);
+
+	// Confidence: how distinct the best match is (texture-less areas score low).
+	float confidence = saturate((worst_cost - best_cost) / max(worst_cost, 1e-4));
+
+	// Content at uv was at uv + best*texel in the previous frame, so it moved by -best.
+	float2 v = -best * flow_scale;
+	return float4(v, confidence, 1.0);
+}
+
+// ---------------------------------------------------------------- Coherence
+
+float4 PSCoherence(VertData v_in) : TARGET
+{
+	float3 center = color_small.Sample(pointClamp, v_in.uv).rgb;
+	float2 sum = float2(0.0, 0.0);
+	float wsum = 0.0;
+	float csum = 0.0;
+
+	for (int y = -coherence_radius; y <= coherence_radius; y++) {
+		for (int x = -coherence_radius; x <= coherence_radius; x++) {
+			float2 uv = v_in.uv + float2(x, y) * texel;
+			float4 m = image.Sample(pointClamp, uv);
+			float3 c = color_small.Sample(pointClamp, uv).rgb;
+			float3 d = c - center;
+			float w = exp(-dot(d, d) * color_sigma) * (0.05 + m.b);
+			sum += m.rg * w;
+			csum += m.b * w;
+			wsum += w;
+		}
+	}
+
+	float2 v = sum / max(wsum, 1e-5);
+	return float4(v, csum / max(wsum, 1e-5), 1.0);
+}
+
+// ---------------------------------------------------------------- NeighborMax
+
+float4 PSNeighborMax(VertData v_in) : TARGET
+{
+	float2 best = float2(0.0, 0.0);
+	float best_len = 0.0;
+
+	for (int y = -neighbor_radius; y <= neighbor_radius; y++) {
+		for (int x = -neighbor_radius; x <= neighbor_radius; x++) {
+			float2 m = image.Sample(pointClamp, v_in.uv + float2(x, y) * texel).rg;
+			float l = dot(m, m);
+			if (l > best_len) {
+				best_len = l;
+				best = m;
+			}
+		}
+	}
+	return float4(best, 0.0, 1.0);
+}
+
+// ---------------------------------------------------------------- Blur
+
+float cone(float dist, float speed)
+{
+	return saturate(1.0 - dist / max(speed, 1e-3));
+}
+
+float4 PSBlur(VertData v_in) : TARGET
+{
+	float4 center = image.Sample(pointClamp, v_in.uv);
+
+	float2 vn = clamp_len(motion_max.Sample(pointClamp, v_in.uv).rg * shutter, max_radius);
+	float vn_len = length(vn);
+	if (vn_len < min_motion)
+		return center;
+
+	float2 vc = clamp_len(motion.Sample(linearClamp, v_in.uv).rg * shutter, max_radius);
+	float vc_len = max(length(vc), 0.5);
+
+	// The center sample's weight matches the McGuire normalization.
+	float wc = 1.0 / vc_len;
+	float4 sum = center * wc;
+	float wsum = wc;
+
+	float n = max(float(sample_count), 1.0);
+	for (int i = 0; i < sample_count; i++) {
+		float t = lerp(-0.5, 0.5, (float(i) + 0.5) / n);
+		float dist = abs(t) * vn_len;
+		float2 uv = v_in.uv + vn * t * out_texel;
+
+		float2 vs = clamp_len(motion.Sample(linearClamp, uv).rg * shutter, max_radius);
+		float vs_len = max(length(vs), 0.5);
+
+		// Sample smears over us if its own motion reaches this far,
+		// and we smear over it if ours does. No depth, so both count.
+		float w = cone(dist, vs_len) / vs_len + cone(dist, vc_len) / vc_len;
+
+		sum += image.Sample(linearClamp, uv) * w;
+		wsum += w;
+	}
+
+	return sum / max(wsum, 1e-5);
+}
+
+// ---------------------------------------------------------------- Debug
+
+float3 hue_to_rgb(float h)
+{
+	float r = abs(h * 6.0 - 3.0) - 1.0;
+	float g = 2.0 - abs(h * 6.0 - 2.0);
+	float b = 2.0 - abs(h * 6.0 - 4.0);
+	return saturate(float3(r, g, b));
+}
+
+float4 PSDebugVectors(VertData v_in) : TARGET
+{
+	float2 v = motion.Sample(linearClamp, v_in.uv).rg;
+	float mag = saturate(length(v) / max(debug_range, 1e-3));
+	float hue = atan2(v.y, v.x) / 6.28318530718 + 0.5;
+	float3 col = lerp(float3(0.0, 0.0, 0.0), hue_to_rgb(hue), mag);
+	float3 base = image.Sample(linearClamp, v_in.uv).rgb * 0.25;
+	return float4(base + col, 1.0);
+}
+
+// ---------------------------------------------------------------- Techniques
+
+technique Downsample
+{
+	pass
+	{
+		vertex_shader = VSDefault(v_in);
+		pixel_shader  = PSDownsample(v_in);
+	}
+}
+
+technique Flow
+{
+	pass
+	{
+		vertex_shader = VSDefault(v_in);
+		pixel_shader  = PSFlow(v_in);
+	}
+}
+
+technique Coherence
+{
+	pass
+	{
+		vertex_shader = VSDefault(v_in);
+		pixel_shader  = PSCoherence(v_in);
+	}
+}
+
+technique NeighborMax
+{
+	pass
+	{
+		vertex_shader = VSDefault(v_in);
+		pixel_shader  = PSNeighborMax(v_in);
+	}
+}
+
+technique Blur
+{
+	pass
+	{
+		vertex_shader = VSDefault(v_in);
+		pixel_shader  = PSBlur(v_in);
+	}
+}
+
+technique DebugVectors
+{
+	pass
+	{
+		vertex_shader = VSDefault(v_in);
+		pixel_shader  = PSDebugVectors(v_in);
+	}
+}
