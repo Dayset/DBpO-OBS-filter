@@ -38,7 +38,23 @@ cmake --preset windows-x64
 cmake --build --preset windows-x64 --config RelWithDebInfo
 ```
 
-The first configure downloads OBS sources and dependencies (pinned in `buildspec.json`). Copy the build output into `C:\ProgramData\obs-studio\plugins\directional-object-blur\` (`bin\64bit\directional-object-blur.dll` and `data\`), then restart OBS. The filter appears under **Effect Filters → Directional Object Blur**.
+The first configure downloads OBS sources and dependencies (pinned in `buildspec.json`).
+
+## Installing
+
+Download the **windows-x64** artifact from the latest GitHub Actions run and unzip it so you end up with exactly this layout:
+
+```
+C:\ProgramData\obs-studio\plugins\directional-object-blur\
+├── bin\64bit\directional-object-blur.dll
+└── data\
+    ├── directional_object_blur.effect
+    └── locale\en-US.ini
+```
+
+Remove any older copy of `directional-object-blur.dll` from `C:\Program Files\obs-studio\obs-plugins\64bit\`, then restart OBS. The filter appears under **Effect Filters → Directional Object Blur**.
+
+The shader is also compiled into the DLL, so the filter works even if `data\` is missing; a `.effect` file in `data\` takes priority, which makes live shader tweaking possible.
 
 GitHub Actions builds Windows, macOS and Linux packages on every push (`.github/workflows`).
 

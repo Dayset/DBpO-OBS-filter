@@ -36,4 +36,19 @@ endif()
 
 target_sources(${CMAKE_PROJECT_NAME} PRIVATE src/plugin-main.c src/directional-blur-filter.c)
 
+# Bake the shader into the DLL so the filter still works if the data folder is missing.
+set(_effect_src "${CMAKE_CURRENT_SOURCE_DIR}/data/directional_object_blur.effect")
+set(_effect_hdr "${CMAKE_CURRENT_BINARY_DIR}/generated/embedded-effect.h")
+add_custom_command(
+  OUTPUT "${_effect_hdr}"
+  COMMAND
+    "${CMAKE_COMMAND}" -DINPUT=${_effect_src} -DOUTPUT=${_effect_hdr} -DSYMBOL=dob_embedded_effect -P
+    "${CMAKE_CURRENT_SOURCE_DIR}/cmake/embed-effect.cmake"
+  DEPENDS "${_effect_src}" "${CMAKE_CURRENT_SOURCE_DIR}/cmake/embed-effect.cmake"
+  COMMENT "Embedding shader"
+  VERBATIM
+)
+target_sources(${CMAKE_PROJECT_NAME} PRIVATE "${_effect_hdr}")
+target_include_directories(${CMAKE_PROJECT_NAME} PRIVATE "${CMAKE_CURRENT_BINARY_DIR}/generated")
+
 set_target_properties_plugin(${CMAKE_PROJECT_NAME} PROPERTIES OUTPUT_NAME ${_name})
