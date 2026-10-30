@@ -16,6 +16,9 @@
 //
 // Motion vectors are stored in RG as full-resolution pixels per frame (cur - prev).
 // B holds match confidence (0..1).
+//
+// Every texture read uses SampleLevel: implicit-LOD Sample() inside variable-length
+// loops forces FXC to unroll them, which fails for the larger search windows.
 
 uniform float4x4 ViewProj;
 
@@ -81,10 +84,10 @@ float4 PSDownsample(VertData v_in) : TARGET
 {
 	// 4 bilinear taps = 16-texel box when the ratio is 4x.
 	float2 o = texel * 0.5 * flow_scale * 0.5;
-	float4 c = image.Sample(linearClamp, v_in.uv + float2(-o.x, -o.y));
-	c += image.Sample(linearClamp, v_in.uv + float2( o.x, -o.y));
-	c += image.Sample(linearClamp, v_in.uv + float2(-o.x,  o.y));
-	c += image.Sample(linearClamp, v_in.uv + float2( o.x,  o.y));
+	float4 c = image.SampleLevel(linearClamp, v_in.uv + float2(-o.x, -o.y), 0.0);
+	c += image.SampleLevel(linearClamp, v_in.uv + float2( o.x, -o.y), 0.0);
+	c += image.SampleLevel(linearClamp, v_in.uv + float2(-o.x,  o.y), 0.0);
+	c += image.SampleLevel(linearClamp, v_in.uv + float2( o.x,  o.y), 0.0);
 	return c * 0.25;
 }
 
@@ -97,8 +100,8 @@ float patch_cost(float2 uv, float2 offset_uv)
 	for (int py = -1; py <= 1; py++) {
 		for (int px = -1; px <= 1; px++) {
 			float2 k = float2(px, py) * texel;
-			float a = luma(image.Sample(pointClamp, uv + k).rgb);
-			float b = luma(prev_image.Sample(pointClamp, uv + k + offset_uv).rgb);
+			float a = luma(image.SampleLevel(pointClamp, uv + k, 0.0).rgb);
+			float b = luma(prev_image.SampleLevel(pointClamp, uv + k + offset_uv, 0.0).rgb);
 			cost += abs(a - b);
 		}
 	}
@@ -141,7 +144,7 @@ float4 PSFlow(VertData v_in) : TARGET
 
 float4 PSCoherence(VertData v_in) : TARGET
 {
-	float3 center = color_small.Sample(pointClamp, v_in.uv).rgb;
+	float3 center = color_small.SampleLevel(pointClamp, v_in.uv, 0.0).rgb;
 	float2 sum = float2(0.0, 0.0);
 	float wsum = 0.0;
 	float csum = 0.0;
@@ -149,8 +152,8 @@ float4 PSCoherence(VertData v_in) : TARGET
 	for (int y = -coherence_radius; y <= coherence_radius; y++) {
 		for (int x = -coherence_radius; x <= coherence_radius; x++) {
 			float2 uv = v_in.uv + float2(x, y) * texel;
-			float4 m = image.Sample(pointClamp, uv);
-			float3 c = color_small.Sample(pointClamp, uv).rgb;
+			float4 m = image.SampleLevel(pointClamp, uv, 0.0);
+			float3 c = color_small.SampleLevel(pointClamp, uv, 0.0).rgb;
 			float3 d = c - center;
 			float w = exp(-dot(d, d) * color_sigma) * (0.05 + m.b);
 			sum += m.rg * w;
@@ -172,7 +175,7 @@ float4 PSNeighborMax(VertData v_in) : TARGET
 
 	for (int y = -neighbor_radius; y <= neighbor_radius; y++) {
 		for (int x = -neighbor_radius; x <= neighbor_radius; x++) {
-			float2 m = image.Sample(pointClamp, v_in.uv + float2(x, y) * texel).rg;
+			float2 m = image.SampleLevel(pointClamp, v_in.uv + float2(x, y) * texel, 0.0).rg;
 			float l = dot(m, m);
 			if (l > best_len) {
 				best_len = l;
@@ -192,14 +195,14 @@ float cone(float dist, float speed)
 
 float4 PSBlur(VertData v_in) : TARGET
 {
-	float4 center = image.Sample(pointClamp, v_in.uv);
+	float4 center = image.SampleLevel(pointClamp, v_in.uv, 0.0);
 
-	float2 vn = clamp_len(motion_max.Sample(pointClamp, v_in.uv).rg * shutter, max_radius);
+	float2 vn = clamp_len(motion_max.SampleLevel(pointClamp, v_in.uv, 0.0).rg * shutter, max_radius);
 	float vn_len = length(vn);
 	if (vn_len < min_motion)
 		return center;
 
-	float2 vc = clamp_len(motion.Sample(linearClamp, v_in.uv).rg * shutter, max_radius);
+	float2 vc = clamp_len(motion.SampleLevel(linearClamp, v_in.uv, 0.0).rg * shutter, max_radius);
 	float vc_len = max(length(vc), 0.5);
 
 	// The center sample's weight matches the McGuire normalization.
@@ -213,14 +216,14 @@ float4 PSBlur(VertData v_in) : TARGET
 		float dist = abs(t) * vn_len;
 		float2 uv = v_in.uv + vn * t * out_texel;
 
-		float2 vs = clamp_len(motion.Sample(linearClamp, uv).rg * shutter, max_radius);
+		float2 vs = clamp_len(motion.SampleLevel(linearClamp, uv, 0.0).rg * shutter, max_radius);
 		float vs_len = max(length(vs), 0.5);
 
 		// Sample smears over us if its own motion reaches this far,
 		// and we smear over it if ours does. No depth, so both count.
 		float w = cone(dist, vs_len) / vs_len + cone(dist, vc_len) / vc_len;
 
-		sum += image.Sample(linearClamp, uv) * w;
+		sum += image.SampleLevel(linearClamp, uv, 0.0) * w;
 		wsum += w;
 	}
 
@@ -239,11 +242,11 @@ float3 hue_to_rgb(float h)
 
 float4 PSDebugVectors(VertData v_in) : TARGET
 {
-	float2 v = motion.Sample(linearClamp, v_in.uv).rg;
+	float2 v = motion.SampleLevel(linearClamp, v_in.uv, 0.0).rg;
 	float mag = saturate(length(v) / max(debug_range, 1e-3));
 	float hue = atan2(v.y, v.x) / 6.28318530718 + 0.5;
 	float3 col = lerp(float3(0.0, 0.0, 0.0), hue_to_rgb(hue), mag);
-	float3 base = image.Sample(linearClamp, v_in.uv).rgb * 0.25;
+	float3 base = image.SampleLevel(linearClamp, v_in.uv, 0.0).rgb * 0.25;
 	return float4(base + col, 1.0);
 }
 
