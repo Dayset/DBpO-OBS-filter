@@ -46,6 +46,10 @@ uniform float  camera_strength; // blur length for camera motion, fraction of pe
 uniform float  object_strength; // blur length for object motion, fraction of per-frame motion
 uniform float  object_threshold;// px; residuals smaller than this are treated as camera motion
 uniform int    debug_mode;      // 0 final, 1 camera only, 2 object only
+uniform int    clear_shape;     // 0 off, 1 oval (frame proportions), 2 square
+uniform float  clear_size;      // spot diameter / side as a fraction of frame height (oval: of each axis)
+uniform float  clear_feather;   // soft edge width, fraction of the spot size
+uniform float  temporal_blend;  // 1 = also use motion out of this frame (look-ahead), 0 = off
 uniform float  max_radius;      // full-res pixels
 uniform float  min_motion;      // full-res pixels; below this nothing blurs
 uniform int    sample_count;
@@ -193,9 +197,19 @@ float4 PSFitSample(VertData v_in) : TARGET
 // ---------------------------------------------------------------- Combine
 
 // RG = final motion (strengths applied), BA = object-only motion (for debug).
+// image = motion into this frame; with look-ahead, motion = motion out of it.
+// Blending both, weighted by confidence, centers the blur on the frame and
+// lets whichever side sees an occluded region supply its motion.
 float4 PSCombine(VertData v_in) : TARGET
 {
-	float4 m = image.SampleLevel(pointClamp, v_in.uv, 0.0);
+	float4 m_in = image.SampleLevel(pointClamp, v_in.uv, 0.0);
+	float4 m_out = motion.SampleLevel(pointClamp, v_in.uv, 0.0);
+	float w_in = 0.05 + m_in.b;
+	float w_out = (0.05 + m_out.b) * temporal_blend;
+	float4 m;
+	m.rg = (m_in.rg * w_in + m_out.rg * w_out) / (w_in + w_out);
+	m.b = max(m_in.b, m_out.b * temporal_blend);
+	m.a = 1.0;
 	float2 cam = camera_motion(v_in.uv);
 
 	// What the camera model doesn't explain, if we trust the measurement.
@@ -235,9 +249,32 @@ float cone(float dist, float speed)
 	return saturate(1.0 - dist / max(speed, 1e-3));
 }
 
+// 1 inside the center clear spot (no blur), 0 outside, soft in between.
+float clear_mask(float2 uv)
+{
+	if (clear_shape == 0 || clear_size <= 0.0)
+		return 0.0;
+	float2 d = uv - 0.5;
+	float dist;
+	if (clear_shape == 1) {
+		// Oval: the frame's own proportions, so 16:9 gives a wide ellipse.
+		dist = length(d) / (0.5 * clear_size);
+	} else {
+		// Square in pixels: measure x in units of frame height.
+		float aspect = out_texel.y / out_texel.x;
+		float2 dp = float2(d.x * aspect, d.y);
+		dist = max(abs(dp.x), abs(dp.y)) / (0.5 * clear_size);
+	}
+	return 1.0 - smoothstep(1.0, 1.0 + max(clear_feather, 1e-4), dist);
+}
+
 float4 PSBlur(VertData v_in) : TARGET
 {
 	float4 center = image.SampleLevel(pointClamp, v_in.uv, 0.0);
+
+	float keep = clear_mask(v_in.uv);
+	if (keep >= 0.999)
+		return center;
 
 	float2 vn = motion_max.SampleLevel(pointClamp, v_in.uv, 0.0).rg;
 	float vn_len = length(vn);
@@ -274,7 +311,7 @@ float4 PSBlur(VertData v_in) : TARGET
 		wsum += w;
 	}
 
-	return sum / max(wsum, 1e-5);
+	return lerp(sum / max(wsum, 1e-5), center, keep);
 }
 
 // ---------------------------------------------------------------- Debug
@@ -298,6 +335,7 @@ float4 PSDebugVectors(VertData v_in) : TARGET
 	float mag = saturate(length(v) / max(debug_range, 1e-3));
 	float hue = atan2(v.y, v.x) / 6.28318530718 + 0.5;
 	float3 col = lerp(float3(0.0, 0.0, 0.0), hue_to_rgb(hue), mag);
+	col *= 1.0 - clear_mask(v_in.uv); // show the clear spot as an unblurred hole
 	float3 base = image.SampleLevel(linearClamp, v_in.uv, 0.0).rgb * 0.25;
 	return float4(base + col, 1.0);
 }

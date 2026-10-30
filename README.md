@@ -20,7 +20,7 @@ All passes run on the GPU as pixel shaders (`data/directional_object_blur.effect
 
 The Blur pass follows the reconstruction filter from McGuire et al., *A Reconstruction Filter for Plausible Motion Blur* (I3D 2012), minus depth, with optical flow standing in for a game's velocity buffer.
 
-Expect a one-frame delay: motion is always measured between frame N−1 and N.
+Without look-ahead, motion is measured between frame N−1 and N and blur is applied to frame N. With **Look-ahead** set to L frames, the filter outputs frame N−L, so it knows the motion both into and out of every frame it blurs.
 
 ## Settings
 
@@ -32,6 +32,8 @@ Expect a one-frame delay: motion is always measured between frame N−1 and N.
   - **Camera blur strength** — separate from object strength.
   - **Camera motion smoothing** — damps jitter in the fitted model.
   - **Object threshold** — how far (px) a region must move against the camera to count as an object.
+- **Look-ahead (frames)** — 0–6. Delays video by that many frames (6 = 100 ms at 60 fps) to average the camera model across frames before *and* after the output frame (smooth without lag) and to blend motion into and out of each frame (cleaner edges where objects appear or disappear). The settings show the exact delay; add the same **Sync Offset** to your audio sources in *Edit → Advanced Audio Properties*. Uses one extra full-res frame of GPU memory per frame of look-ahead (about 15 MB each at 1440p).
+- **Center clear spot** — keeps the middle of the frame sharp (e.g. your crosshair/aim point). *Oval* follows the frame's proportions; *Square* is square in pixels. Size is a percentage of frame height; edge softness blends the spot into the blur.
 - **Advanced** — analysis resolution, search radius (max detectable motion = radius × downscale px/frame), coherence radius, minimum motion, static bias (noise rejection).
 - **View** — result, or debug overlays (hue = direction, brightness = speed) for the final motion, camera motion only, or object motion only.
 
@@ -68,9 +70,9 @@ GitHub Actions builds Windows, macOS and Linux packages on every push (`.github/
 
 1. ✅ Block-matching flow + velocity-driven directional blur
 1. ✅ Camera-motion model (pan/zoom/rotation) with separate camera/object strengths
+1. ✅ Optional look-ahead (0–6 frames) and center clear spot
 2. Coarse-to-fine (pyramid) flow for larger motions at low cost
 3. Real per-object masks (e.g. from a background-removal source) to replace color coherence
 4. Optional ONNX optical-flow model
-5. Temporal smoothing of vectors to reduce flicker
 
 Built on [obs-plugintemplate](https://github.com/obsproject/obs-plugintemplate).
