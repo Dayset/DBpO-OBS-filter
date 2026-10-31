@@ -16,18 +16,24 @@ All passes run on the GPU as pixel shaders (`data/directional_object_blur.effect
 | StaticMask + UIDilate | flow-res | Counts how long each spot stays identical; spots unchanged while the scene moves are screen UI, protected from blur (grown by a margin) |
 | FitSample + CPU fit | 64×36 | Reads back a tiny copy of the motion field and robustly fits a camera model (pan, zoom, rotation, shear), ignoring moving objects and HUD as outliers |
 | Combine | flow-res | Final motion = camera motion × camera strength + object motion (what the camera model doesn't explain) × object strength |
-| NeighborMax | flow-res | Spreads the strongest nearby motion so blur extends past object edges |
-| Blur | full-res | Gathers samples along the dominant motion, weighting each by whether its own motion reaches this pixel |
+| JFAInit + JFAStep | flow-res | Velocity dilation by jump flooding: every pixel inside some moving pixel's blur trail learns that pixel's blur vector, out to the full blur length in log₂(length) passes, so blur extends past silhouettes |
+| Blur | full-res | For each time slice of the exposure, decides whether a moving thing covered this pixel (its motion reaches here, or ours reaches it) and averages; trailing or centered shutter, optional tail fade and highlight weighting |
 | Effects + TrailMask | full-res / flow-res | Optional non-directional blur and glow on moving objects, and trails via frame feedback |
 | Present | full-res | Opacity mix with the original |
 
-The Blur pass follows the reconstruction filter from McGuire et al., *A Reconstruction Filter for Plausible Motion Blur* (I3D 2012), minus depth, with optical flow standing in for a game's velocity buffer.
+Motion blur here is reconstructed the way a camera exposure works: per time slice, a pixel shows a moving object if that object's own motion carried it over the pixel, otherwise its own color. Velocities are first dilated with the jump flood algorithm so trails reach their full length beyond object silhouettes (as proposed in the video *How I Solved Real Time Motion Blur*, building on McGuire et al., *A Reconstruction Filter for Plausible Motion Blur*, I3D 2012). By default the blur **trails** the object like a real shutter instead of being centered on it, so nothing smears ahead of a moving object.
+
+`tests/reference_blur.py` is a numpy model of the shader compared against a true box-shutter exposure of a moving object; it runs in CI. At 12–90 px/frame the reconstruction closes ~92–94 % of the gap between the sharp frame and the real exposure (the previous centered neighbor-max method: 13–33 %).
 
 Without look-ahead, motion is measured between frame N−1 and N and blur is applied to frame N. With **Look-ahead** set to L frames, the filter outputs frame N−L, so it knows the motion both into and out of every frame it blurs.
 
 ## Settings
 
-- **Object blur strength** — blur length for moving objects, as a fraction of their per-frame motion (1.0 ≈ 360° shutter, up to 20× for stylized smears).
+- **Object blur strength** — blur length for moving objects, as a fraction of their per-frame motion (0.5 = 180° film shutter, 1.0 = 360°, up to 20× for stylized smears).
+- **Cinematic shutter**
+  - **Blur placement** — 0 = trailing (real camera: the smear ends at the object's current position), 100 = centered (typical game motion blur, smears ahead too). With look-ahead, the camera model and motion blending center on the matching point of the exposure.
+  - **Tail fade** — older parts of the exposure fade out, for a comet-like streak.
+  - **Highlight streaks** — bright samples weigh more, so lights and muzzle flashes keep their intensity when smeared, like on film.
 - **Opacity** — mix of the effect over the original frame.
 - **Max blur radius** — caps blur length in pixels (up to 512).
 - **Object sensitivity** — higher keeps differently-colored objects from sharing motion.
@@ -46,7 +52,7 @@ Without look-ahead, motion is measured between frame N−1 and N and blur is app
 - **Look-ahead (frames)** — 0–6. Delays video by that many frames (6 = 100 ms at 60 fps) to average the camera model across frames before *and* after the output frame (smooth without lag) and to blend motion into and out of each frame (cleaner edges where objects appear or disappear). The settings show the exact delay; add the same **Sync Offset** to your audio sources in *Edit → Advanced Audio Properties*. Uses one extra full-res frame of GPU memory per frame of look-ahead (about 15 MB each at 1440p).
 - **Center clear spot** — keeps the middle of the frame sharp (e.g. your crosshair/aim point). *Oval* follows the frame's proportions; *Square* is square in pixels. Size is a percentage of frame height; edge softness blends the spot into the blur.
 - **Advanced** — analysis resolution, search radius (max detectable motion = radius × downscale px/frame), coherence radius, minimum motion, static bias (noise rejection), dither (off by default: per-pixel grain hides banding in long blurs but costs encoder bitrate).
-- **View** — result, or debug overlays (hue = direction, brightness = speed) for the final motion, camera motion only, or object motion only.
+- **View** — result, or debug overlays (hue = direction, brightness = speed) for the final motion, camera motion only, object motion only, the protected UI mask, or the **dilated blur reach** (where trails will land).
 
 ## Streaming / encoder notes
 
@@ -88,6 +94,7 @@ GitHub Actions builds Windows, macOS and Linux packages on every push (`.github/
 1. ✅ Optional look-ahead (0–6 frames) and center clear spot
 1. ✅ Raw mouse input with auto-calibration; opacity, trails, non-directional blur and glow per moving object
 1. ✅ Static UI protection and speed-to-blur response curve
+1. ✅ Jump-flood velocity dilation, physically based trailing-shutter reconstruction, tail fade, highlight streaks
 1. Manual exclusion zones (e.g. minimap interior, which changes with the view)
 2. Coarse-to-fine (pyramid) flow for larger motions at low cost
 3. Real per-object masks (e.g. from a background-removal source) to replace color coherence

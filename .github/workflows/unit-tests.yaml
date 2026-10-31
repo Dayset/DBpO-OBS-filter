@@ -5,6 +5,7 @@ on:
       - 'src/camera-model.*'
       - 'src/mouse-sync.*'
       - 'tests/**'
+      - 'data/**.effect'
       - '.github/workflows/unit-tests.yaml'
   pull_request:
   workflow_dispatch:
@@ -23,3 +24,7 @@ jobs:
           gcc -O2 -Wall -Wextra -std=c17 -Isrc src/mouse-sync.c tests/test_mouse_sync.c -lm -o test_mouse_sync
           ./test_camera_model
           ./test_mouse_sync
+      - name: Blur reconstruction vs. simulated real exposure
+        run: |
+          pip install --quiet numpy scipy
+          python3 tests/reference_blur.py

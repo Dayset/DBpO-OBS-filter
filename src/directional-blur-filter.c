@@ -71,6 +71,9 @@ with this program. If not, see <https://www.gnu.org/licenses/>
 #define S_CAM_SPEED_MIN "camera_speed_min"
 #define S_CAM_SPEED_FULL "camera_speed_full"
 #define S_CAM_CURVE "camera_response_curve"
+#define S_SHUTTER_PHASE "shutter_phase"
+#define S_TAIL_FADE "tail_fade"
+#define S_HIGHLIGHTS "highlight_streaks"
 
 enum object_blur_type {
 	OBJ_BLUR_DIRECTIONAL = 0,
@@ -111,6 +114,7 @@ enum view_mode {
 	VIEW_CAMERA = 2,
 	VIEW_OBJECTS = 3,
 	VIEW_UI = 4,
+	VIEW_DILATED = 5,
 };
 
 struct dob_filter {
@@ -131,7 +135,7 @@ struct dob_filter {
 	int stage_idx;
 	bool stage_ready[2];
 	gs_texrender_t *combined;    /* final motion: camera + object residual */
-	gs_texrender_t *neighbor;    /* neighbor-max motion */
+	gs_texrender_t *jfa[2];      /* velocity dilation (jump flood), ping-pong */
 	gs_texrender_t *ui_state[2]; /* frames-unchanged score, flow-res, ping-pong */
 	gs_texrender_t *ui_mask;     /* protected UI (dilated), flow-res */
 	int ui_idx;
@@ -208,6 +212,9 @@ struct dob_filter {
 	float cam_speed_min;
 	float cam_speed_full;
 	float cam_curve;
+	float shutter_phase; /* 0 trailing .. 0.5 centered */
+	float tail_fade;
+	float highlight_boost;
 };
 
 /* English fallbacks used when the locale file can't be found. */
@@ -216,7 +223,7 @@ static const struct {
 	const char *text;
 } dob_default_text[] = {
 	{"DirectionalObjectBlur", "Directional Object Blur"},
-	{"Strength", "Object blur strength"},
+	{"Strength", "Object blur strength (0.5 = 180° film shutter, 1.0 = 360°)"},
 	{"MaxBlurRadius", "Max blur radius (px)"},
 	{"ObjectSensitivity", "Object sensitivity"},
 	{"Samples", "Blur samples"},
@@ -294,6 +301,11 @@ static const struct {
 	{"CameraSpeedMin", "Blur starts at speed (px/frame)"},
 	{"CameraSpeedFull", "Full blur at speed (px/frame)"},
 	{"CameraCurve", "Response curve (<1 strong early, >1 only fast swings)"},
+	{"Cinematic", "Cinematic shutter"},
+	{"ShutterPhase", "Blur placement: trailing (real camera, 0) ... centered (games, 100)"},
+	{"TailFade", "Tail fade (comet-like trail, %)"},
+	{"Highlights", "Highlight streaks (bright lights keep intensity, %)"},
+	{"View.Dilated", "Dilated blur reach (debug)"},
 };
 
 static const char *T(const char *key)
@@ -373,6 +385,7 @@ struct pass_inputs {
 	gs_texrender_t *ui_state;
 	float texel_x, texel_y;
 	float temporal_blend;
+	int jfa_step;
 };
 
 /* libobs clears every effect parameter when a technique ends, so each pass
@@ -383,12 +396,6 @@ static void apply_params(struct dob_filter *f, const struct pass_inputs *in, uin
 	gs_effect_t *e = f->effect;
 	const float scale = (float)f->width / (float)f->flow_w;
 	const float sens = f->sensitivity / 100.0f;
-
-	int nr = (int)ceilf((f->max_radius * 0.5f) / scale);
-	if (nr < 1)
-		nr = 1;
-	if (nr > 16)
-		nr = 16;
 
 	set_tex(e, "image", in->image);
 	set_tex_or(e, "prev_image", in->prev_image, in->image);
@@ -408,7 +415,10 @@ static void apply_params(struct dob_filter *f, const struct pass_inputs *in, uin
 	set_float(e, "static_bias", f->static_bias);
 	set_int(e, "coherence_radius", f->coherence_radius);
 	set_float(e, "color_sigma", 5.0f + sens * sens * 400.0f);
-	set_int(e, "neighbor_radius", nr);
+	set_int(e, "jfa_step", in->jfa_step);
+	set_float(e, "shutter_phase", f->shutter_phase);
+	set_float(e, "tail_fade", f->tail_fade);
+	set_float(e, "highlight_boost", f->highlight_boost);
 	const struct camera_model *cm = &f->camera;
 	gs_eparam_t *cx = gs_effect_get_param_by_name(e, "cam_x");
 	gs_eparam_t *cy = gs_effect_get_param_by_name(e, "cam_y");
@@ -449,7 +459,12 @@ static void apply_params(struct dob_filter *f, const struct pass_inputs *in, uin
 	set_int(e, "clear_shape", (int)f->clear_shape);
 	set_float(e, "clear_size", f->clear_size);
 	set_float(e, "clear_feather", f->clear_feather);
-	set_int(e, "debug_mode", f->view == VIEW_CAMERA ? 1 : f->view == VIEW_OBJECTS ? 2 : f->view == VIEW_UI ? 3 : 0);
+	set_int(e, "debug_mode",
+		f->view == VIEW_CAMERA    ? 1
+		: f->view == VIEW_OBJECTS ? 2
+		: f->view == VIEW_UI      ? 3
+		: f->view == VIEW_DILATED ? 4
+					  : 0);
 	set_float(e, "max_radius", f->max_radius);
 	set_float(e, "min_motion", f->min_motion);
 	set_int(e, "sample_count", f->samples);
@@ -492,7 +507,9 @@ static void free_textures(struct dob_filter *f)
 	gs_stagesurface_destroy(f->stage[0]);
 	gs_stagesurface_destroy(f->stage[1]);
 	gs_texrender_destroy(f->combined);
-	gs_texrender_destroy(f->neighbor);
+	gs_texrender_destroy(f->jfa[0]);
+	gs_texrender_destroy(f->jfa[1]);
+	f->jfa[0] = f->jfa[1] = NULL;
 	gs_texrender_destroy(f->output);
 	gs_texrender_destroy(f->blurred);
 	gs_texrender_destroy(f->ui_state[0]);
@@ -506,7 +523,7 @@ static void free_textures(struct dob_filter *f)
 	}
 	f->blurred = f->display = NULL;
 	f->small[0] = f->small[1] = NULL;
-	f->flow = f->fit = f->combined = f->neighbor = f->output = NULL;
+	f->flow = f->fit = f->combined = f->output = NULL;
 	f->stage[0] = f->stage[1] = NULL;
 }
 
@@ -528,7 +545,8 @@ static void create_textures(struct dob_filter *f)
 	f->stage[0] = gs_stagesurface_create(FIT_W, FIT_H, GS_RGBA32F);
 	f->stage[1] = gs_stagesurface_create(FIT_W, FIT_H, GS_RGBA32F);
 	f->combined = gs_texrender_create(GS_RGBA16F, GS_ZS_NONE);
-	f->neighbor = gs_texrender_create(GS_RGBA16F, GS_ZS_NONE);
+	f->jfa[0] = gs_texrender_create(GS_RGBA32F, GS_ZS_NONE);
+	f->jfa[1] = gs_texrender_create(GS_RGBA32F, GS_ZS_NONE);
 }
 
 /* ------------------------------------------------------------------ lifecycle */
@@ -590,6 +608,9 @@ static void dob_update(void *data, obs_data_t *settings)
 	f->cam_speed_min = (float)obs_data_get_double(settings, S_CAM_SPEED_MIN);
 	f->cam_speed_full = (float)obs_data_get_double(settings, S_CAM_SPEED_FULL);
 	f->cam_curve = (float)obs_data_get_double(settings, S_CAM_CURVE);
+	f->shutter_phase = 0.5f * (float)obs_data_get_double(settings, S_SHUTTER_PHASE) / 100.0f;
+	f->tail_fade = 0.9f * (float)obs_data_get_double(settings, S_TAIL_FADE) / 100.0f;
+	f->highlight_boost = 4.0f * (float)obs_data_get_double(settings, S_HIGHLIGHTS) / 100.0f;
 
 	if (f->downscale < 1)
 		f->downscale = 4;
@@ -850,7 +871,7 @@ static void mouse_apply(struct dob_filter *f, uint64_t t, uint64_t newest)
 
 	float pan[2] = {0.0f, 0.0f};
 	if (f->lookahead > 0) {
-		const double center = (double)t + 0.5;
+		const double center = (double)t + (double)f->shutter_phase;
 		const double sigma = 0.5 + (double)f->camera_smoothing * (double)f->lookahead;
 		double wsum = 0.0, acc[2] = {0.0, 0.0};
 		for (uint64_t k = t; k <= newest && k <= t + 1 + (uint64_t)f->lookahead; k++) {
@@ -956,7 +977,9 @@ static void update_camera_model(struct dob_filter *f, gs_texrender_t *motion, ui
  * is smooth without lagging behind the real camera. */
 static void centered_camera(struct dob_filter *f, uint64_t t, int lookahead)
 {
-	const double center = (double)t + 0.5;
+	/* Fit k is the motion into frame k. A trailing shutter ends at frame t
+	 * (center on k = t); a centered one spans t..t+1 (center t + 0.5). */
+	const double center = (double)t + (double)f->shutter_phase;
 	const double sigma = 0.5 + (double)f->camera_smoothing * (double)lookahead;
 	double wsum = 0.0, x[3] = {0}, y[3] = {0};
 
@@ -1089,21 +1112,48 @@ static void process_frame(struct dob_filter *f, obs_source_t *target, obs_source
 	const bool have_next = t + 1 <= newest;
 	struct pass_inputs comb = {.image = f->coh_ring[ring_idx(f, t)],
 				   .motion = have_next ? f->coh_ring[ring_idx(f, t + 1)] : NULL,
-				   .temporal_blend = have_next ? 1.0f : 0.0f,
+				   /* motion out of frame t only matters for a centered shutter */
+				   .temporal_blend = have_next ? 2.0f * f->shutter_phase : 0.0f,
 				   .texel_x = 1.0f / sw,
 				   .texel_y = 1.0f / sh};
 	run_pass(f, f->combined, "Combine", f->flow_w, f->flow_h, &comb);
 
-	/* 6. Neighbor max, wide enough to cover the longest allowed blur. */
-	struct pass_inputs nmax = {.image = f->combined, .texel_x = 1.0f / sw, .texel_y = 1.0f / sh};
-	run_pass(f, f->neighbor, "NeighborMax", f->flow_w, f->flow_h, &nmax);
+	/* 6. Velocity dilation by jump flooding: spread each moving pixel's blur
+	 * vector over its whole trail, so blur extends past silhouettes. Steps
+	 * halve from the longest possible trail (in flow px) down to 1, plus a
+	 * final 1-px step (1+JFA) to fix the rare misses. */
+	gs_texrender_t *dilated = NULL;
+	{
+		const float scale = (float)f->width / (float)f->flow_w;
+		int longest = (int)ceilf(f->max_radius / scale);
+		int k = 1;
+		while (k < longest && k < 1024)
+			k <<= 1;
+		struct pass_inputs ji = {.image = f->combined, .texel_x = 1.0f / sw, .texel_y = 1.0f / sh};
+		int steps[16], nsteps = 0;
+		for (int step = k; step >= 1 && nsteps < 15; step /= 2)
+			steps[nsteps++] = step;
+		steps[nsteps++] = 1; /* 1+JFA: one more 1-px step fixes rare misses */
+
+		int cur_jfa = 0;
+		bool ok = run_pass(f, f->jfa[cur_jfa], "JFAInit", f->flow_w, f->flow_h, &ji);
+		for (int i = 0; ok && i < nsteps; i++) {
+			struct pass_inputs js = {.image = f->jfa[cur_jfa],
+						 .jfa_step = steps[i],
+						 .texel_x = 1.0f / sw,
+						 .texel_y = 1.0f / sh};
+			ok = run_pass(f, f->jfa[cur_jfa ^ 1], "JFAStep", f->flow_w, f->flow_h, &js);
+			cur_jfa ^= 1;
+		}
+		dilated = f->jfa[cur_jfa]; /* on a failed pass this is stale but well-formed */
+	}
 
 	/* 7. Final gather at full resolution (or the debug view) on frame t. */
 	gs_texrender_t *frame_t = f->frames[ring_idx(f, t)];
 	const bool debug = f->view != VIEW_RESULT;
 	struct pass_inputs blur = {.image = frame_t,
 				   .motion = f->combined,
-				   .motion_max = f->neighbor,
+				   .motion_max = dilated,
 				   .texel_x = 1.0f / fw,
 				   .texel_y = 1.0f / fh};
 	f->output_valid = run_pass(f, f->blurred, debug ? "DebugVectors" : "Blur", f->width, f->height, &blur);
@@ -1258,6 +1308,12 @@ static obs_properties_t *dob_properties(void *data)
 	obs_properties_add_int_slider(props, S_SAMPLES, T("Samples"), 4, 64, 1);
 	obs_properties_add_float_slider(props, S_OPACITY, T("Opacity"), 0.0, 100.0, 1.0);
 
+	obs_properties_t *cine = obs_properties_create();
+	obs_properties_add_float_slider(cine, S_SHUTTER_PHASE, T("ShutterPhase"), 0.0, 100.0, 1.0);
+	obs_properties_add_float_slider(cine, S_TAIL_FADE, T("TailFade"), 0.0, 100.0, 1.0);
+	obs_properties_add_float_slider(cine, S_HIGHLIGHTS, T("Highlights"), 0.0, 100.0, 1.0);
+	obs_properties_add_group(props, "cinematic", T("Cinematic"), OBS_GROUP_NORMAL, cine);
+
 	obs_properties_t *obj = obs_properties_create();
 	obs_property_t *bt = obs_properties_add_list(obj, S_OBJECT_BLUR_TYPE, T("ObjectBlurType"), OBS_COMBO_TYPE_LIST,
 						     OBS_COMBO_FORMAT_INT);
@@ -1346,6 +1402,7 @@ static obs_properties_t *dob_properties(void *data)
 	obs_property_list_add_int(view, T("View.Camera"), VIEW_CAMERA);
 	obs_property_list_add_int(view, T("View.Objects"), VIEW_OBJECTS);
 	obs_property_list_add_int(view, T("View.UI"), VIEW_UI);
+	obs_property_list_add_int(view, T("View.Dilated"), VIEW_DILATED);
 
 	return props;
 }
@@ -1390,6 +1447,9 @@ static void dob_defaults(obs_data_t *settings)
 	obs_data_set_default_double(settings, S_CAM_SPEED_MIN, 2.0);
 	obs_data_set_default_double(settings, S_CAM_SPEED_FULL, 12.0);
 	obs_data_set_default_double(settings, S_CAM_CURVE, 1.0);
+	obs_data_set_default_double(settings, S_SHUTTER_PHASE, 0.0); /* trailing, like a real camera */
+	obs_data_set_default_double(settings, S_TAIL_FADE, 0.0);
+	obs_data_set_default_double(settings, S_HIGHLIGHTS, 0.0);
 }
 
 struct obs_source_info directional_object_blur_filter = {

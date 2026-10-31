@@ -13,12 +13,15 @@
 //                                        camera-motion model (pan/zoom/rotation/shear)
 //   Combine      motion + camera model -> final motion = camera part + object residual,
 //                                        each with its own strength
-//   NeighborMax  motion               -> largest motion in the neighborhood, so blur can
-//                                        smear past an object's silhouette
-//   Blur         full-res color       -> gather along the dominant motion, weighted by
-//                                        whether each sample's own motion reaches this pixel
-//                                        (after McGuire et al., "A Reconstruction Filter for
-//                                        Plausible Motion Blur", I3D 2012, without depth)
+//   JFAInit/Step motion               -> velocity dilation by jump flooding: every pixel
+//                                        inside some moving pixel's blur trail learns that
+//                                        pixel's blur vector, out to the full blur length
+//                                        (log2(length) passes), so blur extends past
+//                                        silhouettes instead of stopping at them
+//   Blur         full-res color       -> per time slice of the exposure, decide whether a
+//                                        moving thing covered this pixel (its own motion
+//                                        reaches here, or ours reaches it) and average;
+//                                        trailing (real camera) or centered shutter
 //   DebugVectors motion               -> color-coded motion field (hue = direction)
 //
 //   Effects      blurred + motion     -> optional non-directional (area) blur and glow on
@@ -39,7 +42,7 @@ uniform texture2d image;        // pass input (color or motion)
 uniform texture2d prev_image;   // previous flow-res frame (Flow pass)
 uniform texture2d color_small;  // current flow-res color (Coherence pass)
 uniform texture2d motion;       // flow-res motion (Blur / Debug)
-uniform texture2d motion_max;   // flow-res neighbor-max motion (Blur)
+uniform texture2d motion_max;   // dilated motion, flow-res: RG = offset to source (flow px), BA = blur vector
 
 uniform float2 texel;           // 1 / size of the texture being sampled at its native res
 uniform float2 out_texel;       // 1 / size of the render target
@@ -48,7 +51,10 @@ uniform int    search_radius;   // block-matching search radius, flow-res pixels
 uniform float  static_bias;     // how much better a non-zero match must be than "no motion"
 uniform int    coherence_radius;
 uniform float  color_sigma;     // inverse color tolerance for the coherence pass
-uniform int    neighbor_radius;
+uniform int    jfa_step;        // jump-flood step this pass, flow px
+uniform float  shutter_phase;   // 0 = trailing blur (real camera), 0.5 = centered
+uniform float  tail_fade;       // 0..1, older parts of the exposure fade (comet tail)
+uniform float  highlight_boost; // extra weight for bright samples (film-like light streaks)
 uniform float3 cam_x;           // camera model: motion.x = dot(cam_x, (1, u - 0.5, v - 0.5))
 uniform float3 cam_y;           // camera model: motion.y = dot(cam_y, (1, u - 0.5, v - 0.5))
 uniform float  camera_strength; // blur length for camera motion, fraction of per-frame motion
@@ -304,32 +310,67 @@ float4 PSCombine(VertData v_in) : TARGET
 	return float4(final_motion, obj);
 }
 
-// ---------------------------------------------------------------- NeighborMax
+// ---------------------------------------------------------------- Velocity dilation (JFA)
 
-float4 PSNeighborMax(VertData v_in) : TARGET
+// Does a pixel moving with blur vector `vel` (full-res px), located at offset
+// `d` (flow px) from here, smear over this pixel? The gather at p samples
+// p + vel * t for t in [-shutter_phase, 1 - shutter_phase], so the source
+// covers p when d = vel * t for such a t (within a pixel sideways).
+bool trail_covers(float2 d, float2 vel)
 {
-	float2 best = float2(0.0, 0.0);
-	float best_len = 0.0;
+	float2 vf = vel / flow_scale;
+	float l2 = dot(vf, vf);
+	if (l2 < 1e-4)
+		return dot(d, d) < 0.25;
+	float t = dot(d, vf) / l2;
+	float margin = 0.75 / sqrt(l2);
+	if (t < -shutter_phase - margin || t > 1.0 - shutter_phase + margin)
+		return false;
+	float2 side = d - vf * t;
+	return dot(side, side) <= 1.0;
+}
 
-	for (int y = -neighbor_radius; y <= neighbor_radius; y++) {
-		for (int x = -neighbor_radius; x <= neighbor_radius; x++) {
-			float2 m = image.SampleLevel(pointClamp, v_in.uv + float2(x, y) * texel, 0.0).rg;
-			float l = dot(m, m);
-			if (l > best_len) {
-				best_len = l;
-				best = m;
+// image = combined motion. Moving pixels become seeds of themselves.
+float4 PSJFAInit(VertData v_in) : TARGET
+{
+	float2 v = image.SampleLevel(pointClamp, v_in.uv, 0.0).rg;
+	if (length(v) < min_motion)
+		return float4(0.0, 0.0, 0.0, 0.0);
+	return float4(0.0, 0.0, v);
+}
+
+// image = previous step. Look at 9 points jfa_step apart and keep the
+// fastest source whose trail covers this pixel.
+float4 PSJFAStep(VertData v_in) : TARGET
+{
+	float4 best = image.SampleLevel(pointClamp, v_in.uv, 0.0);
+	float best_speed = dot(best.ba, best.ba) > 0.0 && trail_covers(best.rg, best.ba) ? length(best.ba) : 0.0;
+	if (best_speed <= 0.0)
+		best = float4(0.0, 0.0, 0.0, 0.0);
+
+	for (int y = -1; y <= 1; y++) {
+		for (int x = -1; x <= 1; x++) {
+			if (x == 0 && y == 0)
+				continue;
+			float2 o = float2(x, y) * float(jfa_step);
+			float2 uv = v_in.uv + o * texel;
+			if (uv.x < 0.0 || uv.y < 0.0 || uv.x > 1.0 || uv.y > 1.0)
+				continue;
+			float4 c = image.SampleLevel(pointClamp, uv, 0.0);
+			float speed = length(c.ba);
+			if (speed <= best_speed)
+				continue;
+			float2 d = o + c.rg; // source position relative to this pixel
+			if (trail_covers(d, c.ba)) {
+				best = float4(d, c.ba);
+				best_speed = speed;
 			}
 		}
 	}
-	return float4(best, 0.0, 1.0);
+	return best;
 }
 
 // ---------------------------------------------------------------- Blur
-
-float cone(float dist, float speed)
-{
-	return saturate(1.0 - dist / max(speed, 1e-3));
-}
 
 // 1 inside the center clear spot (no blur), 0 outside, soft in between.
 float clear_mask(float2 uv)
@@ -350,6 +391,19 @@ float clear_mask(float2 uv)
 	return 1.0 - smoothstep(1.0, 1.0 + max(clear_feather, 1e-4), dist);
 }
 
+// Soft 1-px edge: 1 when `reach` covers `dist`, 0 when it doesn't.
+float covered(float dist, float reach)
+{
+	return reach > 0.25 ? saturate(reach - dist + 0.5) : 0.0;
+}
+
+// Bright samples weigh more, so lights keep their intensity when smeared
+// (film keeps highlights; plain averaging of SDR colors dims them).
+float highlight_weight(float3 c)
+{
+	return 1.0 + highlight_boost * smoothstep(0.6, 1.0, luma(c));
+}
+
 float4 PSBlur(VertData v_in) : TARGET
 {
 	float4 center = image.SampleLevel(pointClamp, v_in.uv, 0.0);
@@ -358,43 +412,52 @@ float4 PSBlur(VertData v_in) : TARGET
 	if (keep >= 0.999)
 		return center;
 
-	float2 vn = motion_max.SampleLevel(pointClamp, v_in.uv, 0.0).rg;
+	// Dominant blur vector reaching this pixel (dilated), and our own.
+	float2 vc = motion.SampleLevel(linearClamp, v_in.uv, 0.0).rg;
+	float2 vn = motion_max.SampleLevel(pointClamp, v_in.uv, 0.0).ba;
+	if (dot(vc, vc) > dot(vn, vn))
+		vn = vc;
 	float vn_len = length(vn);
 	if (vn_len < min_motion)
 		return center;
+	float2 dir = vn / vn_len;
 
-	float2 vc = motion.SampleLevel(linearClamp, v_in.uv, 0.0).rg;
-	float vc_len = max(length(vc), 0.5);
+	// How far along `dir` our own content travels during the exposure,
+	// ahead (past part) and behind (future part, centered shutter only).
+	float own = max(dot(vc, dir), 0.0);
+	float own_ahead = own * (1.0 - shutter_phase);
+	float own_behind = own * shutter_phase;
 
-	// The center sample's weight matches the McGuire normalization.
-	float wc = 1.0 / vc_len;
-	float4 sum = center * wc;
-	float wsum = wc;
-
-	// Per-pixel offset (interleaved gradient noise) turns banding on long
-	// blurs into fine grain.
+	float hc = highlight_weight(center.rgb);
 	float2 px = v_in.uv / out_texel;
 	float jitter = lerp(0.5, frac(52.9829189 * frac(dot(px, float2(0.06711056, 0.00583715)))), dither);
 
+	float4 acc = float4(0.0, 0.0, 0.0, 0.0);
+	float wacc = 0.0;
 	float n = max(float(sample_count), 1.0);
 	for (int i = 0; i < sample_count; i++) {
-		float t = lerp(-0.5, 0.5, (float(i) + jitter) / n);
+		// One time slice: the content now at p + vn * t was over p at that
+		// moment if its own motion reaches back here (or ours reaches it).
+		float t = lerp(-shutter_phase, 1.0 - shutter_phase, (float(i) + jitter) / n);
 		float dist = abs(t) * vn_len;
 		float2 uv = v_in.uv + vn * t * out_texel;
 
 		float2 vs = motion.SampleLevel(linearClamp, uv, 0.0).rg;
-		float vs_len = max(length(vs), 0.5);
+		float reach = max(dot(vs, dir), 0.0) * (t >= 0.0 ? 1.0 - shutter_phase : shutter_phase);
+		float c = max(covered(dist, reach), covered(dist, t >= 0.0 ? own_ahead : own_behind));
+		c *= 1.0 - ui_at(uv); // never pull UI colors into the scene
 
-		// Sample smears over us if its own motion reaches this far,
-		// and we smear over it if ours does. No depth, so both count.
-		float w = cone(dist, vs_len) / vs_len + cone(dist, vc_len) / vc_len;
-		w *= 1.0 - ui_at(uv); // don't smear UI into the scene
+		// Older slices fade for a comet-like tail.
+		float age = t >= 0.0 ? t / max(1.0 - shutter_phase, 1e-3) : 0.0;
+		float slice = 1.0 - tail_fade * age;
 
-		sum += image.SampleLevel(linearClamp, uv, 0.0) * w;
-		wsum += w;
+		float4 cs = image.SampleLevel(linearClamp, uv, 0.0);
+		float hs = highlight_weight(cs.rgb);
+		acc += slice * (c * hs * cs + (1.0 - c) * hc * center);
+		wacc += slice * (c * hs + (1.0 - c) * hc);
 	}
 
-	return lerp(sum / max(wsum, 1e-5), center, keep);
+	return lerp(acc / max(wacc, 1e-5), center, keep);
 }
 
 // ---------------------------------------------------------------- Effects
@@ -498,6 +561,8 @@ float4 PSDebugVectors(VertData v_in) : TARGET
 	float2 v = m.rg;
 	if (debug_mode == 1)
 		v = camera_motion(v_in.uv);
+	else if (debug_mode == 4)
+		v = motion_max.SampleLevel(pointClamp, v_in.uv, 0.0).ba;
 	else if (debug_mode == 2)
 		v = m.ba;
 	float mag = saturate(length(v) / max(debug_range, 1e-3));
@@ -573,12 +638,21 @@ technique Combine
 	}
 }
 
-technique NeighborMax
+technique JFAInit
 {
 	pass
 	{
 		vertex_shader = VSDefault(v_in);
-		pixel_shader  = PSNeighborMax(v_in);
+		pixel_shader  = PSJFAInit(v_in);
+	}
+}
+
+technique JFAStep
+{
+	pass
+	{
+		vertex_shader = VSDefault(v_in);
+		pixel_shader  = PSJFAStep(v_in);
 	}
 }
 
