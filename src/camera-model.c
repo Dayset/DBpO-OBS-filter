@@ -182,3 +182,19 @@ void camera_model_smooth(struct camera_model *previous, const struct camera_mode
 		previous->y[i] = fresh->y[i] + (previous->y[i] - fresh->y[i]) * smoothing;
 	}
 }
+
+float camera_match_score(const float *rgba, size_t w, size_t h, size_t stride)
+{
+	size_t good = 0, total = 0;
+	for (size_t y = 0; y < h; y++) {
+		const float *row = rgba + y * stride;
+		for (size_t x = 0; x < w; x++) {
+			float q = row[x * 4 + 3];
+			if (!isfinite(q))
+				continue;
+			good += q > 0.5f;
+			total++;
+		}
+	}
+	return total ? (float)good / (float)total : 0.0f;
+}

@@ -17,6 +17,8 @@ All passes run on the GPU as pixel shaders (`data/directional_object_blur.effect
 | Combine | flow-res | Final motion = camera motion × camera strength + object motion (what the camera model doesn't explain) × object strength |
 | NeighborMax | flow-res | Spreads the strongest nearby motion so blur extends past object edges |
 | Blur | full-res | Gathers samples along the dominant motion, weighting each by whether its own motion reaches this pixel |
+| Effects + TrailMask | full-res / flow-res | Optional non-directional blur and glow on moving objects, and trails via frame feedback |
+| Present | full-res | Opacity mix with the original |
 
 The Blur pass follows the reconstruction filter from McGuire et al., *A Reconstruction Filter for Plausible Motion Blur* (I3D 2012), minus depth, with optical flow standing in for a game's velocity buffer.
 
@@ -25,6 +27,7 @@ Without look-ahead, motion is measured between frame N−1 and N and blur is app
 ## Settings
 
 - **Object blur strength** — blur length for moving objects, as a fraction of their per-frame motion (1.0 ≈ 360° shutter, up to 20× for stylized smears).
+- **Opacity** — mix of the effect over the original frame.
 - **Max blur radius** — caps blur length in pixels (up to 512).
 - **Object sensitivity** — higher keeps differently-colored objects from sharing motion.
 - **Blur samples** — quality vs. cost of the final gather (up to 64; per-pixel jitter hides banding).
@@ -32,10 +35,19 @@ Without look-ahead, motion is measured between frame N−1 and N and blur is app
   - **Camera blur strength** — separate from object strength.
   - **Camera motion smoothing** — damps jitter in the fitted model.
   - **Object threshold** — how far (px) a region must move against the camera to count as an object.
+- **Moving object effects**
+  - **Object blur type** — directional (along motion), non-directional (soften by speed), or both.
+  - **Glow** — light from moving objects spreads outward (screen blend), with adjustable radius.
+  - **Trails** — keep a fading copy of previous frames where objects moved (or everywhere, including camera motion). Trail length sets how slowly it fades.
+- **Raw mouse input (camera turns)** — opt-in, Windows only. Reads relative mouse movement (no clicks, wheel or keys) via Windows Raw Input inside OBS's own process; it never touches the game. The filter learns counts → on-screen pixels per axis (sensitivity, FOV, inversion) and the input-to-capture latency from frames where image analysis is reliable, then uses the mouse for turns too fast to measure. It ignores the mouse when it disagrees with the picture (e.g. in menus). *Fast turns only* (default) or *All camera pan*; automatic or manual calibration. Progress is shown in the settings and logged every ~10 s.
 - **Look-ahead (frames)** — 0–6. Delays video by that many frames (6 = 100 ms at 60 fps) to average the camera model across frames before *and* after the output frame (smooth without lag) and to blend motion into and out of each frame (cleaner edges where objects appear or disappear). The settings show the exact delay; add the same **Sync Offset** to your audio sources in *Edit → Advanced Audio Properties*. Uses one extra full-res frame of GPU memory per frame of look-ahead (about 15 MB each at 1440p).
 - **Center clear spot** — keeps the middle of the frame sharp (e.g. your crosshair/aim point). *Oval* follows the frame's proportions; *Square* is square in pixels. Size is a percentage of frame height; edge softness blends the spot into the blur.
-- **Advanced** — analysis resolution, search radius (max detectable motion = radius × downscale px/frame), coherence radius, minimum motion, static bias (noise rejection).
+- **Advanced** — analysis resolution, search radius (max detectable motion = radius × downscale px/frame), coherence radius, minimum motion, static bias (noise rejection), dither (off by default: per-pixel grain hides banding in long blurs but costs encoder bitrate).
 - **View** — result, or debug overlays (hue = direction, brightness = speed) for the final motion, camera motion only, or object motion only.
+
+## Streaming / encoder notes
+
+Motion blur removes fine detail in moving areas, which is exactly what costs an encoder the most bits, and trails increase frame-to-frame similarity. Things that work against the encoder: per-pixel grain (keep **Dither** off), flickering motion estimates (use **Look-ahead** and **Camera motion smoothing**), and very strong glow on noisy scenes.
 
 ## Building (Windows 11)
 
@@ -71,6 +83,7 @@ GitHub Actions builds Windows, macOS and Linux packages on every push (`.github/
 1. ✅ Block-matching flow + velocity-driven directional blur
 1. ✅ Camera-motion model (pan/zoom/rotation) with separate camera/object strengths
 1. ✅ Optional look-ahead (0–6 frames) and center clear spot
+1. ✅ Raw mouse input with auto-calibration; opacity, trails, non-directional blur and glow per moving object
 2. Coarse-to-fine (pyramid) flow for larger motions at low cost
 3. Real per-object masks (e.g. from a background-removal source) to replace color coherence
 4. Optional ONNX optical-flow model

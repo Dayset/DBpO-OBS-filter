@@ -34,7 +34,10 @@ if(ENABLE_QT)
   )
 endif()
 
-target_sources(${CMAKE_PROJECT_NAME} PRIVATE src/plugin-main.c src/directional-blur-filter.c src/camera-model.c)
+target_sources(
+  ${CMAKE_PROJECT_NAME}
+  PRIVATE src/plugin-main.c src/directional-blur-filter.c src/camera-model.c src/mouse-sync.c src/raw-mouse.c
+)
 
 # Bake the shader into the DLL so the filter still works if the data folder is missing.
 set(_effect_src "${CMAKE_CURRENT_SOURCE_DIR}/data/directional_object_blur.effect")

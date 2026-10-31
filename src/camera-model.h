@@ -23,3 +23,8 @@ bool camera_model_fit(const float *rgba, size_t w, size_t h, size_t stride, floa
 
 /* out = lerp(fresh, previous, smoothing), smoothing in [0, 1). */
 void camera_model_smooth(struct camera_model *previous, const struct camera_model *fresh, float smoothing);
+
+/* Fraction of samples (A channel = match quality) whose motion search found
+ * a real match. Near 1 for normal footage and static menus, low when motion
+ * exceeds the search range (fast turns), which is when mouse data helps. */
+float camera_match_score(const float *rgba, size_t w, size_t h, size_t stride);

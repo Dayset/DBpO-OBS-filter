@@ -1,0 +1,25 @@
+name: Unit Tests
+on:
+  push:
+    paths:
+      - 'src/camera-model.*'
+      - 'src/mouse-sync.*'
+      - 'tests/**'
+      - '.github/workflows/unit-tests.yaml'
+  pull_request:
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  tests:
+    name: Camera model + mouse calibration 🧪
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build and run
+        run: |
+          set -e
+          gcc -O2 -Wall -Wextra -std=c17 -Isrc src/camera-model.c tests/test_camera_model.c -lm -o test_camera_model
+          gcc -O2 -Wall -Wextra -std=c17 -Isrc src/mouse-sync.c tests/test_mouse_sync.c -lm -o test_mouse_sync
+          ./test_camera_model
+          ./test_mouse_sync

@@ -18,8 +18,14 @@
 //                                        Plausible Motion Blur", I3D 2012, without depth)
 //   DebugVectors motion               -> color-coded motion field (hue = direction)
 //
+//   Effects      blurred + motion     -> optional non-directional (area) blur and glow on
+//                                        moving objects, and trails (frame feedback)
+//   TrailMask    object motion        -> decaying mask of where objects recently were
+//   Present      result + original    -> opacity mix
+//
 // Motion vectors are stored in RG as full-resolution pixels per frame (cur - prev).
-// B holds match confidence (0..1).
+// B holds match confidence (0..1), A holds match quality (1 = content found an
+// exact match; near 0 when nothing matched, e.g. motion beyond the search range).
 //
 // Every texture read uses SampleLevel: implicit-LOD Sample() inside variable-length
 // loops forces FXC to unroll them, which fails for the larger search windows.
@@ -50,6 +56,19 @@ uniform int    clear_shape;     // 0 off, 1 oval (frame proportions), 2 square
 uniform float  clear_size;      // spot diameter / side as a fraction of frame height (oval: of each axis)
 uniform float  clear_feather;   // soft edge width, fraction of the spot size
 uniform float  temporal_blend;  // 1 = also use motion out of this frame (look-ahead), 0 = off
+uniform float  object_directional; // 1 = objects get directional blur, 0 = area blur only
+uniform float  object_trust;    // 0..1, suppresses object detection when motion was unmeasurable
+uniform float  dither;          // 1 = jitter blur samples per pixel (hides banding, costs bitrate)
+uniform float  area_strength;   // non-directional blur radius per px of object motion
+uniform float  glow_amount;
+uniform float  glow_radius;     // px
+uniform int    trail_mode;      // 0 off, 1 moving objects, 2 everything
+uniform float  trail_persistence; // 0..1 share of the previous frame kept per frame
+uniform float  history_valid;   // 0 on the first frame after a reset
+uniform float  opacity;         // 0..1 mix of effect over the original
+uniform texture2d original;     // unprocessed frame (Effects / Present)
+uniform texture2d history;      // previous effects output (trails)
+uniform texture2d trail_mask;   // previous trail mask, flow-res
 uniform float  max_radius;      // full-res pixels
 uniform float  min_motion;      // full-res pixels; below this nothing blurs
 uniform int    sample_count;
@@ -156,7 +175,9 @@ float4 PSFlow(VertData v_in) : TARGET
 
 	// Content at uv was at uv + best*texel in the previous frame, so it moved by -best.
 	float2 v = -best * flow_scale;
-	return float4(v, confidence, 1.0);
+	// Absolute match quality: a 3x3 patch that truly reappears costs ~0.
+	float quality = saturate(1.0 - best_cost / 0.6);
+	return float4(v, confidence, quality);
 }
 
 // ---------------------------------------------------------------- Coherence
@@ -167,6 +188,7 @@ float4 PSCoherence(VertData v_in) : TARGET
 	float2 sum = float2(0.0, 0.0);
 	float wsum = 0.0;
 	float csum = 0.0;
+	float qsum = 0.0;
 
 	for (int y = -coherence_radius; y <= coherence_radius; y++) {
 		for (int x = -coherence_radius; x <= coherence_radius; x++) {
@@ -177,12 +199,13 @@ float4 PSCoherence(VertData v_in) : TARGET
 			float w = exp(-dot(d, d) * color_sigma) * (0.05 + m.b);
 			sum += m.rg * w;
 			csum += m.b * w;
+			qsum += m.a * w;
 			wsum += w;
 		}
 	}
 
 	float2 v = sum / max(wsum, 1e-5);
-	return float4(v, csum / max(wsum, 1e-5), 1.0);
+	return float4(v, csum / max(wsum, 1e-5), qsum / max(wsum, 1e-5));
 }
 
 // ---------------------------------------------------------------- FitSample
@@ -215,11 +238,12 @@ float4 PSCombine(VertData v_in) : TARGET
 	// What the camera model doesn't explain, if we trust the measurement.
 	float2 residual = m.rg - cam;
 	float conf = saturate(m.b * 3.0);
-	float is_object = smoothstep(object_threshold, object_threshold * 2.0 + 0.5, length(residual)) * conf;
+	float is_object = smoothstep(object_threshold, object_threshold * 2.0 + 0.5, length(residual)) * conf * object_trust;
 	float2 obj = residual * is_object;
 
-	float2 final_motion = clamp_len(cam * camera_strength + obj * object_strength, max_radius);
-	return float4(final_motion, obj * object_strength);
+	float2 final_motion = clamp_len(cam * camera_strength + obj * (object_strength * object_directional), max_radius);
+	// BA = raw object motion: drives debug view, area blur, glow and trails.
+	return float4(final_motion, obj);
 }
 
 // ---------------------------------------------------------------- NeighborMax
@@ -292,7 +316,7 @@ float4 PSBlur(VertData v_in) : TARGET
 	// Per-pixel offset (interleaved gradient noise) turns banding on long
 	// blurs into fine grain.
 	float2 px = v_in.uv / out_texel;
-	float jitter = frac(52.9829189 * frac(dot(px, float2(0.06711056, 0.00583715))));
+	float jitter = lerp(0.5, frac(52.9829189 * frac(dot(px, float2(0.06711056, 0.00583715)))), dither);
 
 	float n = max(float(sample_count), 1.0);
 	for (int i = 0; i < sample_count; i++) {
@@ -312,6 +336,84 @@ float4 PSBlur(VertData v_in) : TARGET
 	}
 
 	return lerp(sum / max(wsum, 1e-5), center, keep);
+}
+
+// ---------------------------------------------------------------- Effects
+
+float object_mask(float2 uv)
+{
+	float s = length(motion.SampleLevel(linearClamp, uv, 0.0).ba);
+	return smoothstep(min_motion, min_motion + 3.0, s);
+}
+
+// Golden-angle spiral: evenly fills a unit disk for any sample count.
+float2 spiral(int i, float n)
+{
+	float t = (float(i) + 0.5) / n;
+	float a = float(i) * 2.39996323;
+	return sqrt(t) * float2(cos(a), sin(a));
+}
+
+// image = directionally blurred frame, motion = combined motion (BA = objects).
+float4 PSEffects(VertData v_in) : TARGET
+{
+	float4 base = image.SampleLevel(pointClamp, v_in.uv, 0.0);
+	float keep = clear_mask(v_in.uv);
+	if (keep >= 0.999)
+		return base;
+
+	float4 c = base;
+	float2 aspect_px = out_texel; // uv per px
+
+	// Non-directional (area) blur, radius from the object's own speed.
+	if (area_strength > 0.0) {
+		float speed = length(motion.SampleLevel(linearClamp, v_in.uv, 0.0).ba);
+		float r = min(speed * area_strength, max_radius);
+		if (r > 0.75) {
+			float n = clamp(float(sample_count), 8.0, 48.0);
+			float4 sum = base;
+			for (int i = 0; i < int(n); i++)
+				sum += image.SampleLevel(linearClamp, v_in.uv + spiral(i, n) * r * aspect_px, 0.0);
+			c = sum / (n + 1.0);
+		}
+	}
+
+	// Glow: light from moving objects spreads outward (weighted at the
+	// sample, so the halo extends past the object's silhouette).
+	if (glow_amount > 0.0) {
+		float3 halo = float3(0.0, 0.0, 0.0);
+		for (int i = 0; i < 16; i++) {
+			float2 uv = v_in.uv + spiral(i, 16.0) * glow_radius * aspect_px;
+			halo += image.SampleLevel(linearClamp, uv, 0.0).rgb * object_mask(uv);
+		}
+		halo *= glow_amount / 16.0;
+		c.rgb = 1.0 - (1.0 - c.rgb) * (1.0 - saturate(halo)); // screen blend
+	}
+
+	// Trails: keep part of the previous output where objects recently were.
+	if (trail_mode > 0 && history_valid > 0.5) {
+		float w = trail_persistence;
+		if (trail_mode == 1)
+			w *= trail_mask.SampleLevel(linearClamp, v_in.uv, 0.0).r;
+		c = lerp(c, history.SampleLevel(pointClamp, v_in.uv, 0.0), w);
+	}
+
+	return lerp(c, base, keep);
+}
+
+// image unused; motion = combined motion, trail_mask = previous mask.
+float4 PSTrailMask(VertData v_in) : TARGET
+{
+	float now = object_mask(v_in.uv);
+	float old = trail_mask.SampleLevel(linearClamp, v_in.uv, 0.0).r * history_valid;
+	return float4(max(now, old * trail_persistence), 0.0, 0.0, 1.0);
+}
+
+float4 PSPresent(VertData v_in) : TARGET
+{
+	float4 o = original.SampleLevel(pointClamp, v_in.uv, 0.0);
+	float4 e = image.SampleLevel(pointClamp, v_in.uv, 0.0);
+	return lerp(o, e, opacity);
 }
 
 // ---------------------------------------------------------------- Debug
@@ -393,6 +495,33 @@ technique NeighborMax
 	{
 		vertex_shader = VSDefault(v_in);
 		pixel_shader  = PSNeighborMax(v_in);
+	}
+}
+
+technique Effects
+{
+	pass
+	{
+		vertex_shader = VSDefault(v_in);
+		pixel_shader  = PSEffects(v_in);
+	}
+}
+
+technique TrailMask
+{
+	pass
+	{
+		vertex_shader = VSDefault(v_in);
+		pixel_shader  = PSTrailMask(v_in);
+	}
+}
+
+technique Present
+{
+	pass
+	{
+		vertex_shader = VSDefault(v_in);
+		pixel_shader  = PSPresent(v_in);
 	}
 }
 
