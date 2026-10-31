@@ -13,6 +13,7 @@ All passes run on the GPU as pixel shaders (`data/directional_object_blur.effect
 | Downsample | 1/2, 1/4 or 1/8 | Box-filters the frame for motion analysis |
 | Flow | flow-res | Block-matching optical flow against the previous frame (3×3 SAD patches, ±N search) |
 | Coherence | flow-res | Cross-bilateral smoothing: pixels of similar color share one motion vector — a lightweight "per-object" step until real segmentation lands |
+| StaticMask + UIDilate | flow-res | Counts how long each spot stays identical; spots unchanged while the scene moves are screen UI, protected from blur (grown by a margin) |
 | FitSample + CPU fit | 64×36 | Reads back a tiny copy of the motion field and robustly fits a camera model (pan, zoom, rotation, shear), ignoring moving objects and HUD as outliers |
 | Combine | flow-res | Final motion = camera motion × camera strength + object motion (what the camera model doesn't explain) × object strength |
 | NeighborMax | flow-res | Spreads the strongest nearby motion so blur extends past object edges |
@@ -35,11 +36,13 @@ Without look-ahead, motion is measured between frame N−1 and N and blur is app
   - **Camera blur strength** — separate from object strength.
   - **Camera motion smoothing** — damps jitter in the fitted model.
   - **Object threshold** — how far (px) a region must move against the camera to count as an object.
+  - **Blur starts at / Full blur at (px/frame)** and **Response curve** — speed-to-blur mapping for camera motion: no blur below the first speed, full strength from the second, curve shapes the ramp (<1 = strong early, >1 = only fast swings).
+- **Protect static UI** (on by default) — HUD, minimap frame and menus that stay identical while the scene moves are never blurred, and scene blur stops pulling their colors in. *Sensitivity* trades how much change is tolerated / how quickly a region counts as UI; *margin* grows the protected area. Check with **View → Protected UI**.
 - **Moving object effects**
   - **Object blur type** — directional (along motion), non-directional (soften by speed), or both.
   - **Glow** — light from moving objects spreads outward (screen blend), with adjustable radius.
   - **Trails** — keep a fading copy of previous frames where objects moved (or everywhere, including camera motion). Trail length sets how slowly it fades.
-- **Raw mouse input (camera turns)** — opt-in, Windows only. Reads relative mouse movement (no clicks, wheel or keys) via Windows Raw Input inside OBS's own process; it never touches the game. The filter learns counts → on-screen pixels per axis (sensitivity, FOV, inversion) and the input-to-capture latency from frames where image analysis is reliable, then uses the mouse for turns too fast to measure. It ignores the mouse when it disagrees with the picture (e.g. in menus). *Fast turns only* (default) or *All camera pan*; automatic or manual calibration. Progress is shown in the settings and logged every ~10 s.
+- **Raw mouse input (camera turns)** — opt-in, Windows only. Reads relative mouse movement (no clicks, wheel or keys) via Windows Raw Input inside OBS's own process; it never touches the game. The filter learns counts → on-screen pixels per axis (sensitivity, FOV, inversion) and the input-to-capture latency from frames where image analysis is reliable, then uses the mouse for turns too fast to measure. The mouse is only used once it has agreed with the picture (≥50 % on-screen agreement), so wrong manual values or menus don't cause blur; in manual mode the automatic estimate is still shown as a reference. *Fast turns only* (default) or *All camera pan*; automatic or manual calibration. Progress is shown in the settings and logged every ~10 s.
 - **Look-ahead (frames)** — 0–6. Delays video by that many frames (6 = 100 ms at 60 fps) to average the camera model across frames before *and* after the output frame (smooth without lag) and to blend motion into and out of each frame (cleaner edges where objects appear or disappear). The settings show the exact delay; add the same **Sync Offset** to your audio sources in *Edit → Advanced Audio Properties*. Uses one extra full-res frame of GPU memory per frame of look-ahead (about 15 MB each at 1440p).
 - **Center clear spot** — keeps the middle of the frame sharp (e.g. your crosshair/aim point). *Oval* follows the frame's proportions; *Square* is square in pixels. Size is a percentage of frame height; edge softness blends the spot into the blur.
 - **Advanced** — analysis resolution, search radius (max detectable motion = radius × downscale px/frame), coherence radius, minimum motion, static bias (noise rejection), dither (off by default: per-pixel grain hides banding in long blurs but costs encoder bitrate).
@@ -84,6 +87,8 @@ GitHub Actions builds Windows, macOS and Linux packages on every push (`.github/
 1. ✅ Camera-motion model (pan/zoom/rotation) with separate camera/object strengths
 1. ✅ Optional look-ahead (0–6 frames) and center clear spot
 1. ✅ Raw mouse input with auto-calibration; opacity, trails, non-directional blur and glow per moving object
+1. ✅ Static UI protection and speed-to-blur response curve
+1. Manual exclusion zones (e.g. minimap interior, which changes with the view)
 2. Coarse-to-fine (pyramid) flow for larger motions at low cost
 3. Real per-object masks (e.g. from a background-removal source) to replace color coherence
 4. Optional ONNX optical-flow model

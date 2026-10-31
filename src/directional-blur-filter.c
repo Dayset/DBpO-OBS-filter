@@ -65,6 +65,12 @@ with this program. If not, see <https://www.gnu.org/licenses/>
 #define S_MOUSE_GAIN_Y "mouse_gain_y"
 #define S_MOUSE_LAG "mouse_latency"
 #define S_MOUSE_STATUS "mouse_status"
+#define S_UI "ui_protect"
+#define S_UI_SENS "ui_sensitivity"
+#define S_UI_MARGIN "ui_margin"
+#define S_CAM_SPEED_MIN "camera_speed_min"
+#define S_CAM_SPEED_FULL "camera_speed_full"
+#define S_CAM_CURVE "camera_response_curve"
 
 enum object_blur_type {
 	OBJ_BLUR_DIRECTIONAL = 0,
@@ -104,6 +110,7 @@ enum view_mode {
 	VIEW_VECTORS = 1,
 	VIEW_CAMERA = 2,
 	VIEW_OBJECTS = 3,
+	VIEW_UI = 4,
 };
 
 struct dob_filter {
@@ -123,8 +130,12 @@ struct dob_filter {
 	gs_stagesurf_t *stage[2];         /* readback ring, so the CPU never waits on this frame */
 	int stage_idx;
 	bool stage_ready[2];
-	gs_texrender_t *combined; /* final motion: camera + object residual */
-	gs_texrender_t *neighbor; /* neighbor-max motion */
+	gs_texrender_t *combined;    /* final motion: camera + object residual */
+	gs_texrender_t *neighbor;    /* neighbor-max motion */
+	gs_texrender_t *ui_state[2]; /* frames-unchanged score, flow-res, ping-pong */
+	gs_texrender_t *ui_mask;     /* protected UI (dilated), flow-res */
+	int ui_idx;
+	bool ui_valid;
 	gs_texrender_t *blurred;  /* Blur (or debug) pass result */
 	gs_texrender_t *hist[2];  /* effects output, ping-pong (trail history) */
 	gs_texrender_t *tmask[2]; /* trail mask, flow-res, ping-pong */
@@ -145,6 +156,7 @@ struct dob_filter {
 	float agree;        /* 0..1, how consistently mouse matches what's on screen */
 	float object_trust; /* 0 while motion is beyond what image analysis can measure */
 	bool last_fit_ok;
+	bool last_ready;
 	uint64_t log_counter;
 
 	int cur; /* index into small[] holding the newest frame */
@@ -189,6 +201,13 @@ struct dob_filter {
 	bool mouse_auto;
 	float mouse_gain[2];
 	int mouse_lag;
+	bool ui_enabled;
+	float ui_threshold;
+	float ui_rise;
+	int ui_margin_px;
+	float cam_speed_min;
+	float cam_speed_full;
+	float cam_curve;
 };
 
 /* English fallbacks used when the locale file can't be found. */
@@ -251,11 +270,12 @@ static const struct {
 	{"MouseStatus.Unsupported", "Raw mouse input is only available on Windows."},
 	{"MouseStatus.Off", "Off. Enable the checkbox to start reading mouse movement."},
 	{"MouseStatus.Error", "Unavailable"},
-	{"MouseStatus.Manual", "Active (manual calibration). On-screen agreement: %.0f%%"},
+	{"MouseStatus.Manual",
+	 "Active (manual). On-screen agreement %.0f%% (mouse is used above 50%%). Automatic estimate for reference: %.3f / %.3f px per count, latency %d, match %.0f%%."},
 	{"MouseStatus.Learning",
 	 "Learning: move the camera normally in game for ~10 s (match so far %.0f%%). Reopen settings to refresh."},
 	{"MouseStatus.Ready",
-	 "Calibrated: %.3f / %.3f px per count, latency %d frames, match %.0f%%, on-screen agreement %.0f%%"},
+	 "Calibrated: %.3f / %.3f px per count, latency %d frames, match %.0f%%, on-screen agreement %.0f%% (mouse is used above 50%%)."},
 	{"MouseMode", "Use mouse for"},
 	{"MouseMode.Assist", "Fast turns only (recommended)"},
 	{"MouseMode.Override", "All camera pan"},
@@ -265,6 +285,15 @@ static const struct {
 	{"MouseGainX", "Manual: px per count, horizontal"},
 	{"MouseGainY", "Manual: px per count, vertical"},
 	{"MouseLatency", "Manual: latency (frames)"},
+	{"View.UI", "Protected UI (debug, red)"},
+	{"UIProtect", "Protect static UI (HUD, minimap frame, menus)"},
+	{"UIInfo",
+	 "Regions that stay identical frame after frame while the scene moves are treated as screen UI and never blurred; scene blur also stops pulling UI colors in. Check with View > Protected UI."},
+	{"UISensitivity", "UI detection sensitivity"},
+	{"UIMargin", "UI protection margin (px)"},
+	{"CameraSpeedMin", "Blur starts at speed (px/frame)"},
+	{"CameraSpeedFull", "Full blur at speed (px/frame)"},
+	{"CameraCurve", "Response curve (<1 strong early, >1 only fast swings)"},
 };
 
 static const char *T(const char *key)
@@ -341,6 +370,7 @@ struct pass_inputs {
 	gs_texrender_t *original;
 	gs_texrender_t *history;
 	gs_texrender_t *trail_mask;
+	gs_texrender_t *ui_state;
 	float texel_x, texel_y;
 	float temporal_blend;
 };
@@ -368,6 +398,8 @@ static void apply_params(struct dob_filter *f, const struct pass_inputs *in, uin
 	set_tex_or(e, "original", in->original, in->image);
 	set_tex_or(e, "history", in->history, in->image);
 	set_tex_or(e, "trail_mask", in->trail_mask, in->image);
+	set_tex_or(e, "ui_state", in->ui_state, in->image);
+	set_tex_or(e, "ui_mask", f->ui_enabled && f->ui_valid ? f->ui_mask : NULL, in->image);
 
 	set_vec2(e, "texel", in->texel_x, in->texel_y);
 	set_vec2(e, "out_texel", 1.0f / (float)w, 1.0f / (float)h);
@@ -403,10 +435,21 @@ static void apply_params(struct dob_filter *f, const struct pass_inputs *in, uin
 	set_float(e, "trail_persistence", f->trail_persistence);
 	set_float(e, "history_valid", f->history_valid ? 1.0f : 0.0f);
 	set_float(e, "opacity", f->opacity);
+	set_float(e, "ui_protect", f->ui_enabled && f->ui_valid ? 1.0f : 0.0f);
+	set_float(e, "ui_valid", f->ui_valid ? 1.0f : 0.0f);
+	set_float(e, "ui_threshold", f->ui_threshold);
+	set_float(e, "ui_rise", f->ui_rise);
+	{
+		int m = (f->ui_margin_px + f->downscale - 1) / f->downscale;
+		set_int(e, "ui_margin", m < 0 ? 0 : (m > 8 ? 8 : m));
+	}
+	set_float(e, "cam_speed_min", f->cam_speed_min);
+	set_float(e, "cam_speed_full", f->cam_speed_full);
+	set_float(e, "cam_curve", f->cam_curve);
 	set_int(e, "clear_shape", (int)f->clear_shape);
 	set_float(e, "clear_size", f->clear_size);
 	set_float(e, "clear_feather", f->clear_feather);
-	set_int(e, "debug_mode", f->view == VIEW_CAMERA ? 1 : (f->view == VIEW_OBJECTS ? 2 : 0));
+	set_int(e, "debug_mode", f->view == VIEW_CAMERA ? 1 : f->view == VIEW_OBJECTS ? 2 : f->view == VIEW_UI ? 3 : 0);
 	set_float(e, "max_radius", f->max_radius);
 	set_float(e, "min_motion", f->min_motion);
 	set_int(e, "sample_count", f->samples);
@@ -452,6 +495,10 @@ static void free_textures(struct dob_filter *f)
 	gs_texrender_destroy(f->neighbor);
 	gs_texrender_destroy(f->output);
 	gs_texrender_destroy(f->blurred);
+	gs_texrender_destroy(f->ui_state[0]);
+	gs_texrender_destroy(f->ui_state[1]);
+	gs_texrender_destroy(f->ui_mask);
+	f->ui_state[0] = f->ui_state[1] = f->ui_mask = NULL;
 	for (int i = 0; i < 2; i++) {
 		gs_texrender_destroy(f->hist[i]);
 		gs_texrender_destroy(f->tmask[i]);
@@ -467,6 +514,9 @@ static void create_textures(struct dob_filter *f)
 {
 	f->output = gs_texrender_create(GS_RGBA, GS_ZS_NONE);
 	f->blurred = gs_texrender_create(GS_RGBA, GS_ZS_NONE);
+	f->ui_state[0] = gs_texrender_create(GS_RGBA16F, GS_ZS_NONE);
+	f->ui_state[1] = gs_texrender_create(GS_RGBA16F, GS_ZS_NONE);
+	f->ui_mask = gs_texrender_create(GS_RGBA16F, GS_ZS_NONE);
 	for (int i = 0; i < 2; i++) {
 		f->hist[i] = gs_texrender_create(GS_RGBA, GS_ZS_NONE);
 		f->tmask[i] = gs_texrender_create(GS_RGBA16F, GS_ZS_NONE);
@@ -530,6 +580,17 @@ static void dob_update(void *data, obs_data_t *settings)
 	if (f->mouse_lag > MOUSE_MAX_LAG)
 		f->mouse_lag = MOUSE_MAX_LAG;
 
+	/* UI detection sensitivity: higher tolerates more change and needs
+	 * fewer unchanged frames before a region counts as UI. */
+	f->ui_enabled = obs_data_get_bool(settings, S_UI);
+	const float us = (float)obs_data_get_double(settings, S_UI_SENS) / 100.0f;
+	f->ui_threshold = 0.004f + 0.06f * us;
+	f->ui_rise = 1.0f / (90.0f - 80.0f * us);
+	f->ui_margin_px = (int)obs_data_get_int(settings, S_UI_MARGIN);
+	f->cam_speed_min = (float)obs_data_get_double(settings, S_CAM_SPEED_MIN);
+	f->cam_speed_full = (float)obs_data_get_double(settings, S_CAM_SPEED_FULL);
+	f->cam_curve = (float)obs_data_get_double(settings, S_CAM_CURVE);
+
 	if (f->downscale < 1)
 		f->downscale = 4;
 
@@ -577,7 +638,7 @@ static void *dob_create(obs_data_t *settings, obs_source_t *context)
 		return NULL;
 	}
 
-	f->agree = 0.6f;
+	f->agree = 0.0f; /* the mouse must agree with the picture before it is used */
 	f->object_trust = 1.0f;
 	mouse_sync_reset(&f->sync);
 	for (int i = 0; i < CAM_HIST; i++)
@@ -603,6 +664,11 @@ static void dob_tick(void *data, float seconds)
 {
 	UNUSED_PARAMETER(seconds);
 	struct dob_filter *f = data;
+
+	/* The previous frame was never rendered (scene not visible): its mouse
+	 * movement would otherwise pile up and land on one frame later. */
+	if (f->needs_update)
+		f->mouse_pending[0] = f->mouse_pending[1] = 0.0f;
 	/* video_render can run several times per frame (preview, program,
 	 * projectors). Only advance the motion history once per frame. */
 	f->needs_update = true;
@@ -746,7 +812,8 @@ static void mouse_learn(struct dob_filter *f, uint64_t frame, bool fit_ok, const
 	const float range = measurable_range(f);
 	const float fit_pan = hypotf(fit->x[0], fit->y[0]);
 
-	if (f->mouse_auto && fit_ok && match > 0.6f && fit_pan < range) {
+	/* Keep learning even in manual mode: the estimate is shown as a hint. */
+	if (fit_ok && match > 0.6f && fit_pan < range) {
 		float m[MOUSE_MAX_LAG + 1][2];
 		bool valid[MOUSE_MAX_LAG + 1];
 		for (int l = 0; l <= MOUSE_MAX_LAG; l++)
@@ -760,11 +827,14 @@ static void mouse_learn(struct dob_filter *f, uint64_t frame, bool fit_ok, const
 	const float pred = hypotf(p[0], p[1]);
 	int consistent = -1;
 	if (pred > range) {
-		/* A real fast turn makes the motion search fail. */
+		/* A real fast turn makes the motion search fail; in a menu the
+		 * static picture still matches perfectly. */
 		consistent = match < 0.5f;
-	} else if (fit_ok && pred + fit_pan > 1.0f) {
+	} else if (fit_ok && pred > 2.0f) {
+		/* The mouse moved noticeably: the picture must move the same way.
+		 * (Picture moving without the mouse, e.g. strafing, says nothing.) */
 		float err = hypotf(fit->x[0] - p[0], fit->y[0] - p[1]);
-		consistent = err < 2.0f + 0.35f * fmaxf(pred, fit_pan);
+		consistent = err < 1.0f + 0.25f * fmaxf(pred, fit_pan);
 	}
 	if (consistent >= 0)
 		f->agree = f->agree * 0.9f + (consistent ? 0.1f : 0.0f);
@@ -823,6 +893,11 @@ static void mouse_apply(struct dob_filter *f, uint64_t t, uint64_t newest)
 
 static void mouse_log(struct dob_filter *f)
 {
+	if (f->mouse_ok && f->sync.ready != f->last_ready) {
+		f->last_ready = f->sync.ready;
+		obs_source_update_properties(f->context); /* refresh the status line */
+		obs_log(LOG_INFO, "mouse calibration %s", f->sync.ready ? "ready" : "lost, relearning");
+	}
 	if (!f->mouse_ok || ++f->log_counter % 600 != 0)
 		return;
 	if (f->mouse_auto)
@@ -918,6 +993,7 @@ static void reset_history(struct dob_filter *f)
 	f->frame_no = 0;
 	f->history_valid = false;
 	f->last_fit_ok = false;
+	f->ui_valid = false;
 }
 
 static void process_frame(struct dob_filter *f, obs_source_t *target, obs_source_t *parent)
@@ -957,6 +1033,24 @@ static void process_frame(struct dob_filter *f, obs_source_t *target, obs_source
 				  .texel_x = 1.0f / sw,
 				  .texel_y = 1.0f / sh};
 	run_pass(f, motion, "Coherence", f->flow_w, f->flow_h, &coh);
+
+	/* 3b. Static UI: regions that stay identical frame after frame. */
+	if (f->ui_enabled) {
+		const int prev = f->ui_idx, next = prev ^ 1;
+		struct pass_inputs sm = {.image = cur_small,
+					 .prev_image = prev_small,
+					 .ui_state = f->ui_state[prev],
+					 .texel_x = 1.0f / sw,
+					 .texel_y = 1.0f / sh};
+		struct pass_inputs dil = {.image = f->ui_state[next], .texel_x = 1.0f / sw, .texel_y = 1.0f / sh};
+		if (run_pass(f, f->ui_state[next], "StaticMask", f->flow_w, f->flow_h, &sm) &&
+		    run_pass(f, f->ui_mask, "UIDilate", f->flow_w, f->flow_h, &dil)) {
+			f->ui_idx = next;
+			f->ui_valid = true;
+		}
+	} else {
+		f->ui_valid = false;
+	}
 
 	/* Mouse movement since the previous frame belongs to this frame. */
 	{
@@ -1143,7 +1237,8 @@ static void mouse_status_text(const struct dob_filter *f, char *buf, size_t size
 	} else if (!f->mouse_ok) {
 		snprintf(buf, size, "%s: %s", T("MouseStatus.Error"), raw_mouse_status());
 	} else if (!f->mouse_auto) {
-		snprintf(buf, size, T("MouseStatus.Manual"), f->agree * 100.0f);
+		snprintf(buf, size, T("MouseStatus.Manual"), f->agree * 100.0f, f->sync.gain[0], f->sync.gain[1],
+			 f->sync.lag, f->sync.correlation * 100.0f);
 	} else if (!f->sync.ready) {
 		snprintf(buf, size, T("MouseStatus.Learning"), f->sync.correlation * 100.0f);
 	} else {
@@ -1184,7 +1279,16 @@ static obs_properties_t *dob_properties(void *data)
 	obs_properties_add_float_slider(cam, S_CAMERA_STRENGTH, T("CameraStrength"), 0.0, 20.0, 0.05);
 	obs_properties_add_float_slider(cam, S_CAMERA_SMOOTHING, T("CameraSmoothing"), 0.0, 0.95, 0.01);
 	obs_properties_add_float_slider(cam, S_OBJECT_THRESHOLD, T("ObjectThreshold"), 0.0, 16.0, 0.25);
+	obs_properties_add_float_slider(cam, S_CAM_SPEED_MIN, T("CameraSpeedMin"), 0.0, 64.0, 0.5);
+	obs_properties_add_float_slider(cam, S_CAM_SPEED_FULL, T("CameraSpeedFull"), 0.0, 256.0, 1.0);
+	obs_properties_add_float_slider(cam, S_CAM_CURVE, T("CameraCurve"), 0.25, 4.0, 0.05);
 	obs_properties_add_group(props, S_CAMERA, T("CameraMotion"), OBS_GROUP_CHECKABLE, cam);
+
+	obs_properties_t *ui = obs_properties_create();
+	obs_properties_add_text(ui, "ui_info", T("UIInfo"), OBS_TEXT_INFO);
+	obs_properties_add_float_slider(ui, S_UI_SENS, T("UISensitivity"), 0.0, 100.0, 1.0);
+	obs_properties_add_int_slider(ui, S_UI_MARGIN, T("UIMargin"), 0, 32, 1);
+	obs_properties_add_group(props, S_UI, T("UIProtect"), OBS_GROUP_CHECKABLE, ui);
 
 	obs_properties_t *mouse = obs_properties_create();
 	obs_properties_add_text(mouse, S_MOUSE_INFO, T("MouseInfo"), OBS_TEXT_INFO);
@@ -1241,6 +1345,7 @@ static obs_properties_t *dob_properties(void *data)
 	obs_property_list_add_int(view, T("View.Vectors"), VIEW_VECTORS);
 	obs_property_list_add_int(view, T("View.Camera"), VIEW_CAMERA);
 	obs_property_list_add_int(view, T("View.Objects"), VIEW_OBJECTS);
+	obs_property_list_add_int(view, T("View.UI"), VIEW_UI);
 
 	return props;
 }
@@ -1276,9 +1381,15 @@ static void dob_defaults(obs_data_t *settings)
 	obs_data_set_default_bool(settings, S_MOUSE, false);  /* opt-in */
 	obs_data_set_default_int(settings, S_MOUSE_MODE, MOUSE_ASSIST);
 	obs_data_set_default_int(settings, S_MOUSE_CAL, 0);
-	obs_data_set_default_double(settings, S_MOUSE_GAIN_X, -1.0);
-	obs_data_set_default_double(settings, S_MOUSE_GAIN_Y, -1.0);
+	obs_data_set_default_double(settings, S_MOUSE_GAIN_X, -0.25);
+	obs_data_set_default_double(settings, S_MOUSE_GAIN_Y, -0.25);
 	obs_data_set_default_int(settings, S_MOUSE_LAG, 1);
+	obs_data_set_default_bool(settings, S_UI, true);
+	obs_data_set_default_double(settings, S_UI_SENS, 50.0);
+	obs_data_set_default_int(settings, S_UI_MARGIN, 6);
+	obs_data_set_default_double(settings, S_CAM_SPEED_MIN, 2.0);
+	obs_data_set_default_double(settings, S_CAM_SPEED_FULL, 12.0);
+	obs_data_set_default_double(settings, S_CAM_CURVE, 1.0);
 }
 
 struct obs_source_info directional_object_blur_filter = {

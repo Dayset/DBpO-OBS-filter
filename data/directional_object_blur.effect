@@ -6,6 +6,9 @@
 //   Flow         cur/prev flow-res    -> per-pixel motion vector (block matching)
 //   Coherence    motion + color       -> motion smoothed within same-colored regions
 //                                        ("per-object" approximation until segmentation lands)
+//   StaticMask   cur/prev color       -> per-pixel count of frames unchanged; regions that
+//                                        stay identical while the scene moves are UI/HUD
+//   UIDilate     static state         -> protected UI mask, grown by a margin
 //   FitSample    motion               -> tiny 32-bit copy read back by the CPU, which fits a
 //                                        camera-motion model (pan/zoom/rotation/shear)
 //   Combine      motion + camera model -> final motion = camera part + object residual,
@@ -69,6 +72,16 @@ uniform float  opacity;         // 0..1 mix of effect over the original
 uniform texture2d original;     // unprocessed frame (Effects / Present)
 uniform texture2d history;      // previous effects output (trails)
 uniform texture2d trail_mask;   // previous trail mask, flow-res
+uniform texture2d ui_state;     // previous static-region state, flow-res
+uniform texture2d ui_mask;      // protected UI mask (dilated), flow-res
+uniform float  ui_protect;      // 1 = keep detected UI sharp, 0 = off
+uniform float  ui_valid;        // 0 on the first frame after a reset
+uniform float  ui_threshold;    // color change that counts as "changed"
+uniform float  ui_rise;         // static score gained per unchanged frame
+uniform int    ui_margin;       // dilation radius, flow-res px
+uniform float  cam_speed_min;   // px/frame: camera motion below this gets no blur
+uniform float  cam_speed_full;  // px/frame: full camera blur strength from here
+uniform float  cam_curve;       // response exponent between the two (1 = linear)
 uniform float  max_radius;      // full-res pixels
 uniform float  min_motion;      // full-res pixels; below this nothing blurs
 uniform int    sample_count;
@@ -114,6 +127,40 @@ float2 camera_motion(float2 uv)
 {
 	float3 p = float3(1.0, uv.x - 0.5, uv.y - 0.5);
 	return float2(dot(cam_x, p), dot(cam_y, p));
+}
+
+// 0..1, how strongly this spot is protected as static UI.
+float ui_at(float2 uv)
+{
+	return ui_mask.SampleLevel(linearClamp, uv, 0.0).r * ui_protect;
+}
+
+// ---------------------------------------------------------------- StaticMask
+
+// image = current flow-res color, prev_image = previous, ui_state = old score.
+// A region that stays identical frame after frame (while things around it
+// change) is screen-space UI. Any change resets it immediately.
+float4 PSStaticMask(VertData v_in) : TARGET
+{
+	float3 c = image.SampleLevel(pointClamp, v_in.uv, 0.0).rgb;
+	float3 p = prev_image.SampleLevel(pointClamp, v_in.uv, 0.0).rgb;
+	float3 d = abs(c - p);
+	float old = ui_state.SampleLevel(pointClamp, v_in.uv, 0.0).r * ui_valid;
+	float changed = step(ui_threshold, max(d.r, max(d.g, d.b)));
+	return float4(changed > 0.5 ? 0.0 : min(old + ui_rise, 1.0), 0.0, 0.0, 1.0);
+}
+
+// image = static score; output = protected mask grown by ui_margin.
+float4 PSUIDilate(VertData v_in) : TARGET
+{
+	float m = 0.0;
+	for (int y = -ui_margin; y <= ui_margin; y++) {
+		for (int x = -ui_margin; x <= ui_margin; x++) {
+			float s = image.SampleLevel(pointClamp, v_in.uv + float2(x, y) * texel, 0.0).r;
+			m = max(m, smoothstep(0.6, 1.0, s));
+		}
+	}
+	return float4(m, 0.0, 0.0, 1.0);
 }
 
 // ---------------------------------------------------------------- Downsample
@@ -214,7 +261,9 @@ float4 PSCoherence(VertData v_in) : TARGET
 // CPU reads back to fit the camera model. RG = motion (px), B = confidence.
 float4 PSFitSample(VertData v_in) : TARGET
 {
-	return image.SampleLevel(pointClamp, v_in.uv, 0.0);
+	float4 m = image.SampleLevel(pointClamp, v_in.uv, 0.0);
+	m.b *= 1.0 - ui_at(v_in.uv); // UI says nothing about the camera
+	return m;
 }
 
 // ---------------------------------------------------------------- Combine
@@ -241,7 +290,16 @@ float4 PSCombine(VertData v_in) : TARGET
 	float is_object = smoothstep(object_threshold, object_threshold * 2.0 + 0.5, length(residual)) * conf * object_trust;
 	float2 obj = residual * is_object;
 
-	float2 final_motion = clamp_len(cam * camera_strength + obj * (object_strength * object_directional), max_radius);
+	// Speed -> blur response for camera motion: nothing below cam_speed_min,
+	// full strength from cam_speed_full, shaped by cam_curve in between.
+	float speed = length(cam);
+	float ramp = saturate((speed - cam_speed_min) / max(cam_speed_full - cam_speed_min, 0.01));
+	float response = pow(ramp, max(cam_curve, 0.05));
+
+	float2 final_motion = clamp_len(cam * (camera_strength * response) + obj * (object_strength * object_directional), max_radius);
+	float keep_ui = 1.0 - ui_at(v_in.uv);
+	final_motion *= keep_ui;
+	obj *= keep_ui;
 	// BA = raw object motion: drives debug view, area blur, glow and trails.
 	return float4(final_motion, obj);
 }
@@ -296,7 +354,7 @@ float4 PSBlur(VertData v_in) : TARGET
 {
 	float4 center = image.SampleLevel(pointClamp, v_in.uv, 0.0);
 
-	float keep = clear_mask(v_in.uv);
+	float keep = max(clear_mask(v_in.uv), ui_at(v_in.uv));
 	if (keep >= 0.999)
 		return center;
 
@@ -330,6 +388,7 @@ float4 PSBlur(VertData v_in) : TARGET
 		// Sample smears over us if its own motion reaches this far,
 		// and we smear over it if ours does. No depth, so both count.
 		float w = cone(dist, vs_len) / vs_len + cone(dist, vc_len) / vc_len;
+		w *= 1.0 - ui_at(uv); // don't smear UI into the scene
 
 		sum += image.SampleLevel(linearClamp, uv, 0.0) * w;
 		wsum += w;
@@ -358,7 +417,7 @@ float2 spiral(int i, float n)
 float4 PSEffects(VertData v_in) : TARGET
 {
 	float4 base = image.SampleLevel(pointClamp, v_in.uv, 0.0);
-	float keep = clear_mask(v_in.uv);
+	float keep = max(clear_mask(v_in.uv), ui_at(v_in.uv));
 	if (keep >= 0.999)
 		return base;
 
@@ -428,6 +487,13 @@ float3 hue_to_rgb(float h)
 
 float4 PSDebugVectors(VertData v_in) : TARGET
 {
+	if (debug_mode == 3) {
+		// UI mask: protected regions in red over the dimmed frame.
+		float3 img = image.SampleLevel(linearClamp, v_in.uv, 0.0).rgb;
+		float u = ui_at(v_in.uv);
+		return float4(lerp(img * 0.45, float3(1.0, 0.15, 0.1), u * 0.65), 1.0);
+	}
+
 	float4 m = motion.SampleLevel(linearClamp, v_in.uv, 0.0);
 	float2 v = m.rg;
 	if (debug_mode == 1)
@@ -468,6 +534,24 @@ technique Coherence
 	{
 		vertex_shader = VSDefault(v_in);
 		pixel_shader  = PSCoherence(v_in);
+	}
+}
+
+technique StaticMask
+{
+	pass
+	{
+		vertex_shader = VSDefault(v_in);
+		pixel_shader  = PSStaticMask(v_in);
+	}
+}
+
+technique UIDilate
+{
+	pass
+	{
+		vertex_shader = VSDefault(v_in);
+		pixel_shader  = PSUIDilate(v_in);
 	}
 }
 

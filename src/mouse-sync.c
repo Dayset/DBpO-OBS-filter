@@ -23,8 +23,8 @@ with this program. If not, see <https://www.gnu.org/licenses/>
 
 /* ~10 s memory at 60 fps. */
 #define FORGET 0.9985
-#define MIN_ACTIVE_FRAMES 40.0
-#define MIN_CORRELATION 0.6
+#define MIN_ACTIVE_FRAMES 30.0
+#define MIN_CORRELATION 0.45
 
 void mouse_sync_reset(struct mouse_sync *s)
 {
