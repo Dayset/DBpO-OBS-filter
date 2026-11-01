@@ -69,7 +69,8 @@ def main():
     for r, p in ((0.75, 0.5), (0.75, 1.0), (0.75, 1.5), (0.65, 0.5), (0.65, 0.75)):
         configs.append((f"X+Y r={r} p={p}", (r, p)))
     reg = regions()
-    for clip, kbps in (("fps_pan_clean", 250), ("fps_pan_grain", 300)):
+    budgets = [int(v) for v in sys.argv[2].split(",")] if len(sys.argv) > 2 else [250]
+    for clip, kbps in [(c, b) for b in budgets for c in ("fps_pan_clean", "fps_pan_grain")]:
         src = list(fb.h.clip_frames(clip, n))
         print(f"\n== CBR {kbps} kbps, {clip}")
         print(f"   {'variant':<26}{'squished size':>15}{'fovea':>8}{'middle':>8}{'outer':>8}  (luma PSNR dB)")

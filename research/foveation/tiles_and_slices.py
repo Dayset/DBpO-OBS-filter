@@ -49,7 +49,7 @@ def tile(frames, i, j):
 
 
 def encode_tile(frames, crf=None, kbps=None):
-    path = os.path.join(TMP, "t.mp4")
+    path = os.path.join(TMP, "t.264")  # raw H.264: no container overhead
     fb.encode(frames, FPS, crf if crf is not None else 0, path, cbr_kbps=kbps)
     bits = os.path.getsize(path) * 8
     h, w = frames[0].shape[:2]
@@ -86,7 +86,7 @@ def tiles_experiment(src, kbps, reg):
     print(f"   plain CBR {kbps} kbps: fovea {psnr(src, base_dec, reg['fovea']):.2f} dB, "
           f"outer {psnr(src, base_dec, reg['outer']):.2f} dB, real {base_bits / secs / 1000:.0f} kbps")
     edge = [(i, j) for i in range(3) for j in range(3) if (i, j) != (1, 1)]
-    for edge_crf in (32, 38, 44, 51):
+    for edge_crf in (28, 34, 40, 46, 51):
         eb, td = 0, {}
         for ij in edge:
             b, d = encode_tile(tile(src, *ij), crf=edge_crf)
@@ -137,7 +137,7 @@ def read_ue(buf, bitpos):
     return (1 << zeros) - 1 + v, bitpos
 
 
-def slices_experiment(src, kbps, reg, n_slices=6, drop=(0, 5)):
+def slices_experiment(src, kbps, reg, n_slices=6, drop=(0, -1)):
     secs = len(src) / FPS
     print(f"\n-- Slice dropping ({n_slices} horizontal slices, CBR {kbps} kbps, "
           f"drop slices {drop} in every non-key frame)")
@@ -152,19 +152,30 @@ def slices_experiment(src, kbps, reg, n_slices=6, drop=(0, 5)):
     p.stdin.close()
     p.wait()
     data = open(raw, "rb").read()
-    mbs_w, mbs_h = (W + 15) // 16, (H + 15) // 16
-    rows_per = -(-mbs_h // n_slices)
-    kept, dropped = bytearray(), 0
-    for s, e in nal_units(data):
-        nal = data[s:e]
-        typ = nal[0] & 0x1F
-        if typ == 1:  # non-IDR slice
-            first_mb, _ = read_ue(nal[1:4], 0)
-            band = (first_mb // mbs_w) // rows_per
-            if band in drop:
-                dropped += e - s + 4
-                continue
-        kept += b"\x00\x00\x00\x01" + nal
+    mbs_w = (W + 15) // 16
+    nals = [(st, e, data[st] & 0x1F) for st, e in nal_units(data)]
+    # Slice index within its frame: a frame starts at first_mb_in_slice == 0.
+    first = {}
+    for st, e, typ in nals:
+        if typ in (1, 5):
+            first[st] = read_ue(data[st + 1:st + 4], 0)[0]
+    order, frame = {}, []
+    for st, e, typ in nals + [(None, None, None)]:
+        if st is None or (st in first and first[st] == 0 and frame):
+            for rank, k in enumerate(sorted(frame, key=lambda k: first[k])):
+                order[k] = rank
+            frame = []
+        if st in first:
+            frame.append(st)
+    drop_idx = {d % n_slices for d in drop}
+    kept, dropped, band_rows = bytearray(), 0, None
+    for st, e, typ in nals:
+        if typ == 1 and order[st] in drop_idx:  # non-IDR slice at the top/bottom
+            dropped += e - st + 4
+            continue
+        kept += b"\x00\x00\x00\x01" + data[st:e]
+    starts = sorted({first[k] // mbs_w for k in first})
+    top_rows, bottom_row = starts[1] * 16, starts[-1] * 16
     cut = os.path.join(TMP, "cut.264")
     open(cut, "wb").write(bytes(kept))
     full = fb.decode(raw, W, H)
@@ -175,9 +186,8 @@ def slices_experiment(src, kbps, reg, n_slices=6, drop=(0, 5)):
     n = min(len(full), len(broken), len(src))
     print(f"   stream {len(data) * 8 / secs / 1000:.0f} kbps -> after dropping {len(kept) * 8 / secs / 1000:.0f} kbps "
           f"({100 * dropped / len(data):.0f}% of bytes removed); decoded {len(broken)}/{len(src)} frames")
-    band_rows = rows_per * 16
     y = np.arange(H)[:, None] * np.ones((1, W), bool)
-    kept_area = (y >= band_rows) & (y < H - band_rows)
+    kept_area = (y >= top_rows) & (y < bottom_row)
     for name, m in (("fovea", reg["fovea"]), ("kept bands", kept_area), ("dropped bands", ~kept_area)):
         a, b = psnr(src[:n], full[:n], m), psnr(src[:n], broken[:n], m)
         print(f"   {name:<14} intact {a:6.2f} dB   with dropped slices {b:6.2f} dB  ({b - a:+.2f})")
@@ -190,10 +200,11 @@ def slices_experiment(src, kbps, reg, n_slices=6, drop=(0, 5)):
 
 def main():
     n = int(sys.argv[1]) if len(sys.argv) > 1 else 60
+    budgets = [int(v) for v in sys.argv[2].split(",")] if len(sys.argv) > 2 else [250, 1500]
     reg = masks()
-    for clip, kbps in (("fps_pan_clean", 250), ("fps_pan_grain", 300)):
+    for clip, kbps in [(c, b) for b in budgets for c in ("fps_pan_clean", "fps_pan_grain")]:
         src = list(fb.h.clip_frames(clip, n))
-        print(f"\n===== {clip}")
+        print(f"\n===== {clip} @ {kbps} kbps")
         tiles_experiment(src, kbps, reg)
         slices_experiment(src, kbps, reg)
 

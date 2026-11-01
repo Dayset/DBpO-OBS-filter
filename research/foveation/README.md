@@ -47,6 +47,51 @@ At fixed quality the encoder simply uses fewer bits, so these numbers say nothin
 
 Held edges are not static during camera pans: they jump 2–3 frames of motion at once and the feather blends two moments in time, which costs bits. This also explains the tearing seen at ring borders.
 
+## Squish curves (the plugin's exact mapping), X+Y, sharp center 30%
+
+`squish_profiles.py [frames] [kbps,...]` — exact area-filtered squish, bilinear unsquish (what the extension does). Luma PSNR: fovea (center box ±15%), middle ring (15–30%), outer.
+
+| CBR budget, clip | no squish | 75%, curve 0.5 | **75%, linear (default)** | 75%, curve 1.5 | 65%, curve 0.5 |
+|---|---|---|---|---|---|
+| 250 kbps clean: fovea / middle / outer | 35.0 / 35.7 / 36.1 | 37.2 / 36.2 / 34.6 | **37.6 / 36.8 / 34.4** | 37.7 / 38.0 / 33.9 | 38.9 / 38.1 / 34.0 |
+| 300 kbps grain | 31.4 / 31.2 / 31.0 | 33.8 / 33.4 / 32.3 | **34.0 / 33.9 / 32.0** | 33.8 / 34.1 / 31.6 | 34.9 / 34.7 / 32.1 |
+| 1500 kbps clean | 43.6 / 43.8 / 44.1 | 43.9 / 39.5 / 37.0 | 43.9 / 41.3 / 37.0 | 43.8 / 43.2 / 36.2 | 43.9 / 42.4 / 35.7 |
+| 1500 kbps grain | 36.9 / 37.1 / 37.1 | 37.5 / 36.0 / 34.6 | 37.5 / 36.7 / 34.6 | 37.5 / 37.2 / 34.1 | 37.6 / 37.0 / 33.7 |
+
+- **The squish only pays when the stream is starved.** At 250–300 kbps (this clip needs ~340 kbps for CRF 23) the center gains +2.5 dB and even the middle ring improves. At 1500 kbps the encoder already has more bits than this simple clip can use (center 43.6 dB, near transparent), so there is nothing to win and the edges just lose detail. Real game streams at 6 Mbps 1080p60 are much closer to the starved case (visible blocking in motion), but this has to be confirmed on real footage.
+- Curve 1.5 keeps the middle ring sharpest; curve 0.5 allows the strongest squeeze (65%) and the best center. Linear is the balanced default.
+
+## Bitstream-level foveation: tiles and "server-side packet loss"
+
+`tiles_and_slices.py [frames] [kbps,...]`
+
+**Tiles (3×3 grid, every tile an independent stream, raw H.264, no container).** This is the independence HEVC/AV1 motion-constrained tiles need for per-viewer tile selection.
+
+| | clean | grain |
+|---|---|---|
+| Overhead at equal CRF (23 / 30) | +37% / +47% | +51% / +43% |
+| Plain CBR 250 kbps: fovea / outer | 35.0 / 36.0 dB | 30.3 / 29.4 dB |
+| Edges CRF 46 + center gets the rest (same 250 kbps) | **41.2** / 27.8 dB | 34.2 / 26.2 dB |
+| Edges CRF 51 + center gets the rest | 42.6 / 25.6 dB | 35.4 / 25.8 dB |
+| Squish 75% linear (for comparison) | 37.6 / 34.4 dB | 34.0 / 32.0 dB |
+
+- Tiles can starve the edges much harder than the squish, so the center can get far more bits (+6 dB on clean). But the edges become blocky, not soft (outer 26–28 dB vs 34 dB with the squish), and the tile borders show seams. Even at the worst quality, the 8 edge tiles still cost ~130 kbps, because every tile pays per-frame headers and loses prediction across borders. The overhead here (+40–50%) is inflated by small 320×180 tiles at a very low bitrate; real HEVC/AV1 tiles inside one stream are typically quoted at 5–15%.
+- Tiles are the only clean way to give each viewer a **personal fovea without re-encoding** (gaze-dependent tile selection). The cost: HEVC/AV1 with motion-constrained tiles, a server that rewrites the tile set per viewer, a player that can decode it, and a fovea that can only move on tile boundaries and only at keyframes.
+
+**Slice dropping (the "broken in-between frames" idea).** A normal CBR stream with 6 horizontal slices; in every non-key frame the top and bottom slice are deleted on the server, like provoked packet loss. The decoder conceals the holes.
+
+| | 250 kbps clean | 250 kbps grain | 1500 kbps clean | 1500 kbps grain |
+|---|---|---|---|---|
+| Bytes removed | 19% | 18% | 24% | 23% |
+| Center (fovea) quality change | 0.00 dB | 0.00 dB | 0.00 dB | 0.00 dB |
+| Kept bands, late in the GOP (drift) | −0.01 dB | −0.01 dB | −0.10 dB | −0.01 dB |
+| Dropped bands | −7.8 dB | −4.0 dB | −17.2 dB | −10.6 dB |
+
+- **It works as a per-viewer bandwidth cut:** about 20% fewer bytes, the decoder doesn't crash, and the center is untouched. With this horizontal pan almost nothing leaks into the kept area. Vertical camera motion would leak more, because H.264 motion vectors may point into the missing bands.
+- **It does not make the center sharper.** The encoder spent those bits before they were thrown away, so the viewer gets the same center at a lower bitrate. That differs from the squish and tiles, where the saved bits are re-spent on the center.
+- The dropped bands **freeze at the last keyframe** and smear with concealment until the next one (every 2 s here). They don't look blurred, they look broken, which is very visible in peripheral vision during motion.
+- H.264 slices are horizontal row bands only, so the **left/right edges can't be dropped this way**. That needs HEVC/AV1 tiles (above).
+
 ## Caveats
 
-Synthetic content, one squish profile, x264 only (no NVENC here). Re-measure on a lossless gameplay recording before deciding. The squish needs a viewer-side unwarp (custom player, MPV shader, or a browser extension that re-renders the page's `<video>` through WebGL); viewers without it see the squeezed picture.
+Synthetic content, x264 only (no NVENC here). Re-measure on a lossless gameplay recording before deciding. The squish needs a viewer-side unwarp (custom player, MPV shader, or a browser extension that re-renders the page's `<video>` through WebGL); viewers without it see the squeezed picture.
