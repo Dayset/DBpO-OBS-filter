@@ -68,7 +68,7 @@ void main() { v_uv = vec2(a_pos.x * 0.5 + 0.5, 0.5 - a_pos.y * 0.5); gl_Position
 		gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
 		gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
 		const loc = {};
-		for (const n of ["u_video", "u_ax_a", "u_ax_b", "u_ay_a", "u_ay_b"]) loc[n] = gl.getUniformLocation(prog, n);
+		for (const n of ["u_video", "u_ax_a", "u_ax_b", "u_ay_a", "u_ay_b", "u_box", "u_texel"]) loc[n] = gl.getUniformLocation(prog, n);
 		const parent = video.parentElement;
 		if (getComputedStyle(parent).position === "static") parent.style.position = "relative";
 		parent.appendChild(canvas);
@@ -136,6 +136,8 @@ void main() { v_uv = vec2(a_pos.x * 0.5 + 0.5, 0.5 - a_pos.y * 0.5); gl_Position
 				gl.uniform4fv(loc.u_ax_b, ux.B);
 				gl.uniform4fv(loc.u_ay_a, uy.A);
 				gl.uniform4fv(loc.u_ay_b, uy.B);
+				gl.uniform4fv(loc.u_box, cfg.box);
+				gl.uniform2f(loc.u_texel, 1 / Math.max(video.videoWidth, 1), 1 / Math.max(video.videoHeight, 1));
 				gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
 				document.documentElement.dataset.dbpoUnsquish = cfg.text || "custom";
 			}

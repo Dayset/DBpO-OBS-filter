@@ -16,13 +16,20 @@ int main(void)
 			printf("%zu %.6f %.12f %.12f %.12f\n", c, x, squish_forward(&cases[c], x),
 			       squish_density(&cases[c], x), squish_inverse(&cases[c], x));
 		}
-	struct squish_config cfg;
+	struct squish_config cfg = {0};
 	const char *s = "FSQ1:rx=0.75,ry=0.7,cx=0.15,cy=0.2,fx=0.5,fy=0.45,px=1,py=0.75,ar=1.7778";
 	char back[256];
 	int ok = squish_config_parse(s, &cfg);
 	squish_config_format(&cfg, back, sizeof(back));
-	fprintf(stderr, "config round trip: %s\n", ok && !strcmp(s, back) ? "PASS" : "FAIL");
+	ok = ok && !strcmp(s, back);
+	fprintf(stderr, "config round trip: %s\n", ok ? "PASS" : "FAIL");
 	fprintf(stderr, "rejects garbage: %s\n",
 		!squish_config_parse("hello", &cfg) && !squish_config_parse("FSQ1:rx=2", &cfg) ? "PASS" : "FAIL");
-	return !(ok && !strcmp(s, back));
+	const char *sb =
+		"FSQ1:rx=0.75,ry=0.75,cx=0.15,cy=0.15,fx=0.5,fy=0.5,px=1,py=1,ar=1.7778,ox=0.125,oy=0.118519,bw=0.75,bh=0.75";
+	int okb = squish_config_parse(sb, &cfg) && cfg.boxed;
+	squish_config_format(&cfg, back, sizeof(back));
+	okb = okb && !strcmp(sb, back) && !squish_config_parse("FSQ1:rx=0.75,ox=0.3,bw=0.75", &cfg);
+	fprintf(stderr, "boxed config round trip: %s\n", okb ? "PASS" : "FAIL");
+	return !(ok && okb);
 }

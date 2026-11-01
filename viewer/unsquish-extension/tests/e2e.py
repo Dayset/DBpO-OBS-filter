@@ -56,13 +56,22 @@ def test_picture():
     return img
 
 
-def main():
+def run(boxed):
+    print(f"--- {'boxed: picture on black bars in a full-size frame' if boxed else 'exact size'}")
     tmp = tempfile.mkdtemp()
     src = test_picture()
     mw, mh = int(round(W * CFG.x.r / 2)) * 2, int(round(H * CFG.y.r / 2)) * 2
     CFG.x.r, CFG.y.r = mw / W, mh / H
     sq = warp2(area_matrix(CFG.y, H, mh), src, area_matrix(CFG.x, W, mw))
-    frame = (np.clip(sq, 0, 1) * 255 + 0.5).astype(np.uint8)
+    pic = (np.clip(sq, 0, 1) * 255 + 0.5).astype(np.uint8)
+    x0 = y0 = 0
+    frame = pic
+    CFG.box = None
+    if boxed:  # same placement rule as the plugin (centered, whole 16-px blocks)
+        x0, y0 = (W - mw) // 2 // 16 * 16, (H - mh) // 2 // 16 * 16
+        frame = np.zeros((H, W, 3), np.uint8)
+        frame[y0:y0 + mh, x0:x0 + mw] = pic
+        CFG.box = (x0 / W, y0 / H, mw / W, mh / H)
     Image.fromarray(frame).save(os.path.join(tmp, "f.png"))
     subprocess.run(["ffmpeg", "-loglevel", "error", "-y", "-loop", "1", "-i", os.path.join(tmp, "f.png"), "-t", "3",
                     "-r", "30", "-c:v", "libvpx-vp9", "-crf", "4", "-b:v", "0", "-pix_fmt", "yuv444p",
@@ -130,7 +139,7 @@ window.chrome = {{ storage: {{
             out.append(((wgt * x).sum() / wgt.sum(), (wgt * y).sum() / wgt.sum()))
         return np.array(out)
     # The reference viewer (bilinear unsquish in numpy) on the same decoded frame.
-    dec = np.asarray(Image.open(os.path.join(tmp, "f.png")), np.float64) / 255
+    dec = np.asarray(Image.open(os.path.join(tmp, "f.png")), np.float64)[y0:y0 + mh, x0:x0 + mw] / 255
     ref = warp2(bilinear_matrix(CFG.y, H, mh), dec, bilinear_matrix(CFG.x, W, mw))
     err_ref = np.abs(out - ref).mean() * 255
     shift = np.abs(centroids(out) - centroids(ref))
@@ -141,7 +150,12 @@ window.chrome = {{ storage: {{
     ok = ok and err_c < 3 and err_all < 8 and err_ref < 2 and shift.max() < 0.25
     Image.fromarray((np.clip(out, 0, 1) * 255).astype(np.uint8)).save(os.path.join(tmp, "unsquished.png"))
     print("PASS" if ok else "FAIL", f"(images in {tmp})")
-    sys.exit(0 if ok else 1)
+    return ok
+
+
+def main():
+    results = [run(False), run(True)]
+    sys.exit(0 if all(results) else 1)
 
 
 if __name__ == "__main__":

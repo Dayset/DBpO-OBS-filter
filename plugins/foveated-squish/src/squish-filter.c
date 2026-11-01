@@ -43,9 +43,33 @@ with this program. If not, see <https://www.gnu.org/licenses/>
 #define S_LINK "same_for_y"
 #define S_PREFILTER "prefilter"
 #define S_VIEW "view"
+#define S_LAYOUT "layout"
 #define S_INFO "info"
 #define S_CONFIG "config"
 #define S_IMPORT "import"
+
+enum layout_mode {
+	LAYOUT_FILL = 0,  /* squeeze = canvas / source: the picture fills a standard canvas */
+	LAYOUT_BARS = 1,  /* manual squeeze, picture centered on black bars at the source size */
+	LAYOUT_EXACT = 2, /* manual squeeze, output = squished size (set the canvas to it) */
+};
+
+enum fit_result {
+	FIT_OK = 0,
+	FIT_REDUCED = 1, /* center/curve reduced so the squeeze fits */
+	FIT_LIMITED = 2, /* squeeze limited by the density floor */
+};
+
+/* Where the squished picture goes in the streamed frame. */
+struct layout {
+	struct squish_config c; /* exact ratios for the rounded sizes, with the box */
+	uint32_t w, h;          /* source */
+	uint32_t ow, oh;        /* squished picture */
+	uint32_t fw, fh;        /* streamed frame */
+	uint32_t x0, y0;        /* picture position in the frame */
+	uint32_t cw, ch;        /* canvas */
+	enum fit_result fit;
+};
 
 enum view_mode {
 	VIEW_SQUISHED = 0,   /* what gets streamed */
@@ -59,6 +83,7 @@ struct squish_filter {
 	gs_texrender_t *input;
 	gs_texrender_t *squished;
 	gs_texrender_t *output;
+	gs_texrender_t *framed;
 	gs_texrender_t *display;
 	bool needs_update;
 	bool output_valid;
@@ -67,6 +92,7 @@ struct squish_filter {
 	bool clamped;
 	bool prefilter;
 	enum view_mode view;
+	enum layout_mode layout;
 };
 
 /* English fallbacks used when the locale file can't be found. */
@@ -77,10 +103,21 @@ static const struct {
 	{"FoveatedSquish", "Foveated Squish"},
 	{"InfoDefault",
 	 "Squeezes the edges (X and Y) so a fixed stream bitrate is spent on the sharp center. Viewers unfold it with the DBpO Unsquish browser extension."},
-	{"InfoFormat",
-	 "Source %ux%u -> streamed %ux%u (%.0f%% of the pixels). Set OBS Settings > Video > Base (Canvas) and Output resolution to %ux%u, and put this filter on your full-size gameplay source or a group. %s"},
+	{"InfoFill",
+	 "Source %ux%u -> squeezed to fill your %ux%u canvas (%.0f%% x %.0f%%). Keep the canvas and output at %ux%u. %s"},
+	{"InfoFillSmall",
+	 "Source %ux%u is not larger than your %ux%u canvas, so there is nothing to squeeze. Capture the game at a higher resolution than the canvas (e.g. 2560x1440 for a 1920x1080 canvas: 75%%)."},
+	{"InfoBars",
+	 "Source %ux%u -> squished picture %ux%u (%.0f%% of the pixels) centered on black bars in a %ux%u frame. Black bars cost bits too: about half of the center gain is lost vs. Fill or Exact. %s"},
+	{"InfoExact",
+	 "Source %ux%u -> streamed %ux%u (%.0f%% of the pixels). Set OBS Settings > Video > Base (Canvas) and Output resolution to %ux%u (you can type a custom size into those fields). %s"},
 	{"Clamped",
 	 "(Squeeze limited: this curve can't squeeze that much; lower the curve value or the sharp center size.)"},
+	{"Reduced", "(To fit, the sharp center/curve was reduced to: center %.0f%% x %.0f%%, curve %.2f x %.2f.)"},
+	{"Layout", "Layout"},
+	{"Layout.Fill", "Fill the canvas (auto squeeze = canvas / source, best)"},
+	{"Layout.Bars", "Manual squeeze, black bars (any canvas, about half the gain)"},
+	{"Layout.Exact", "Manual squeeze, exact size (set the canvas to the squished size)"},
 	{"Link", "Same settings for height"},
 	{"SqueezeWidth", "Streamed width (% of source)"},
 	{"SqueezeHeight", "Streamed height (% of source)"},
@@ -155,26 +192,110 @@ static uint32_t even_size(double v)
 	return n < 2 ? 2 : n;
 }
 
-/* Squished size for a source size; exact ratios follow the rounded sizes. */
-static void squished_size(const struct squish_filter *f, uint32_t w, uint32_t h, uint32_t *ow, uint32_t *oh)
+/* Squeeze one axis to ratio r; if the density floor forbids it, shrink the
+ * sharp center first, then the curve, then give up and limit r. */
+static enum fit_result fit_axis(struct squish_axis *a, double r)
 {
-	*ow = even_size(w * f->cfg.x.r);
-	*oh = even_size(h * f->cfg.y.r);
-	if (*ow > w)
-		*ow = w;
-	if (*oh > h)
-		*oh = h;
+	a->r = r > 1.0 ? 1.0 : r;
+	if (a->r >= squish_axis_min_r(a))
+		return FIT_OK;
+	const double c0 = a->c, p0 = a->p;
+	a->c = 0.01;
+	if (a->r >= squish_axis_min_r(a)) {
+		double lo = 0.01, hi = c0;
+		for (int i = 0; i < 40; i++) {
+			a->c = 0.5 * (lo + hi);
+			if (a->r >= squish_axis_min_r(a))
+				lo = a->c;
+			else
+				hi = a->c;
+		}
+		a->c = lo;
+		return FIT_REDUCED;
+	}
+	a->c = 0.025; /* keep a small sharp center, flatten the curve instead */
+	a->p = 0.25;
+	if (a->r >= squish_axis_min_r(a)) {
+		double lo = 0.25, hi = p0;
+		for (int i = 0; i < 40; i++) {
+			a->p = 0.5 * (lo + hi);
+			if (a->r >= squish_axis_min_r(a))
+				lo = a->p;
+			else
+				hi = a->p;
+		}
+		a->p = lo;
+		return FIT_REDUCED;
+	}
+	a->r = squish_axis_min_r(a);
+	return FIT_LIMITED;
 }
 
-static struct squish_config exact_config(const struct squish_filter *f, uint32_t w, uint32_t h)
+static void canvas_size(uint32_t *cw, uint32_t *ch, uint32_t w, uint32_t h)
 {
+	struct obs_video_info ovi;
+	if (obs_get_video_info(&ovi) && ovi.base_width && ovi.base_height) {
+		*cw = ovi.base_width;
+		*ch = ovi.base_height;
+	} else {
+		*cw = w;
+		*ch = h;
+	}
+}
+
+/* Centered, rounded down to whole 16-pixel blocks (fewer partly-black blocks). */
+static uint32_t box_offset(uint32_t frame, uint32_t pic)
+{
+	const uint32_t o = frame > pic ? (frame - pic) / 2 : 0;
+	return o >= 16 ? o / 16 * 16 : o / 2 * 2;
+}
+
+static void compute_layout(const struct squish_filter *f, uint32_t w, uint32_t h, struct layout *L)
+{
+	memset(L, 0, sizeof(*L));
+	L->w = w;
+	L->h = h;
 	struct squish_config c = f->cfg;
-	uint32_t ow, oh;
-	squished_size(f, w, h, &ow, &oh);
-	c.x.r = (double)ow / (double)w;
-	c.y.r = (double)oh / (double)h;
-	c.ar = (double)w / (double)h;
-	return c;
+	canvas_size(&L->cw, &L->ch, w, h);
+	if (f->layout == LAYOUT_FILL) {
+		const enum fit_result fx = fit_axis(&c.x, (double)L->cw / w);
+		const enum fit_result fy = fit_axis(&c.y, (double)L->ch / h);
+		L->fit = fx > fy ? fx : fy;
+		L->ow = even_size(w * c.x.r);
+		L->oh = even_size(h * c.y.r);
+		/* Never larger than the canvas or the source (rounding). */
+		if (L->ow > L->cw && L->fit != FIT_LIMITED)
+			L->ow = L->cw;
+		if (L->oh > L->ch && L->fit != FIT_LIMITED)
+			L->oh = L->ch;
+		L->fw = L->cw;
+		L->fh = L->ch;
+	} else {
+		L->fit = f->clamped ? FIT_LIMITED : FIT_OK;
+		L->ow = even_size(w * c.x.r);
+		L->oh = even_size(h * c.y.r);
+		L->fw = f->layout == LAYOUT_BARS ? w : L->ow;
+		L->fh = f->layout == LAYOUT_BARS ? h : L->oh;
+	}
+	if (L->ow > w)
+		L->ow = w;
+	if (L->oh > h)
+		L->oh = h;
+	if (L->ow > L->fw)
+		L->fw = L->ow;
+	if (L->oh > L->fh)
+		L->fh = L->oh;
+	L->x0 = box_offset(L->fw, L->ow);
+	L->y0 = box_offset(L->fh, L->oh);
+	c.x.r = (double)L->ow / w;
+	c.y.r = (double)L->oh / h;
+	c.ar = (double)w / h;
+	c.boxed = L->ow != L->fw || L->oh != L->fh;
+	c.ox = (double)L->x0 / L->fw;
+	c.oy = (double)L->y0 / L->fh;
+	c.bw = (double)L->ow / L->fw;
+	c.bh = (double)L->oh / L->fh;
+	L->c = c;
 }
 
 static void fsq_update(void *data, obs_data_t *s)
@@ -184,6 +305,7 @@ static void fsq_update(void *data, obs_data_t *s)
 	f->clamped = clamp_axis(&f->cfg.x) | clamp_axis(&f->cfg.y);
 	f->prefilter = obs_data_get_bool(s, S_PREFILTER);
 	f->view = (enum view_mode)obs_data_get_int(s, S_VIEW);
+	f->layout = (enum layout_mode)obs_data_get_int(s, S_LAYOUT);
 }
 
 /* ------------------------------------------------------------------ lifecycle */
@@ -213,6 +335,7 @@ static void *fsq_create(obs_data_t *settings, obs_source_t *context)
 	f->input = gs_texrender_create(GS_RGBA, GS_ZS_NONE);
 	f->squished = gs_texrender_create(GS_RGBA, GS_ZS_NONE);
 	f->output = gs_texrender_create(GS_RGBA, GS_ZS_NONE);
+	f->framed = gs_texrender_create(GS_RGBA, GS_ZS_NONE);
 	obs_leave_graphics();
 	bfree(path);
 
@@ -221,6 +344,7 @@ static void *fsq_create(obs_data_t *settings, obs_source_t *context)
 		gs_texrender_destroy(f->input);
 		gs_texrender_destroy(f->squished);
 		gs_texrender_destroy(f->output);
+		gs_texrender_destroy(f->framed);
 		obs_leave_graphics();
 		bfree(f);
 		return NULL;
@@ -236,6 +360,7 @@ static void fsq_destroy(void *data)
 	gs_texrender_destroy(f->input);
 	gs_texrender_destroy(f->squished);
 	gs_texrender_destroy(f->output);
+	gs_texrender_destroy(f->framed);
 	gs_effect_destroy(f->effect);
 	obs_leave_graphics();
 	bfree(f);
@@ -256,28 +381,33 @@ static bool target_size(struct squish_filter *f, uint32_t *w, uint32_t *h)
 	return *w && *h;
 }
 
+/* Output size: the streamed frame; previews use the frame size too, except
+ * in Exact layout where they show the source size. */
+static void output_size(struct squish_filter *f, uint32_t *ow, uint32_t *oh)
+{
+	uint32_t w, h;
+	*ow = *oh = 0;
+	if (!target_size(f, &w, &h))
+		return;
+	struct layout L;
+	compute_layout(f, w, h, &L);
+	const bool source_sized = f->view != VIEW_SQUISHED && f->layout == LAYOUT_EXACT;
+	*ow = source_sized ? w : L.fw;
+	*oh = source_sized ? h : L.fh;
+}
+
 static uint32_t fsq_width(void *data)
 {
-	struct squish_filter *f = data;
-	uint32_t w, h, ow, oh;
-	if (!target_size(f, &w, &h))
-		return 0;
-	if (f->view != VIEW_SQUISHED)
-		return w;
-	squished_size(f, w, h, &ow, &oh);
-	return ow;
+	uint32_t w, h;
+	output_size(data, &w, &h);
+	return w;
 }
 
 static uint32_t fsq_height(void *data)
 {
-	struct squish_filter *f = data;
-	uint32_t w, h, ow, oh;
-	if (!target_size(f, &w, &h))
-		return 0;
-	if (f->view != VIEW_SQUISHED)
-		return h;
-	squished_size(f, w, h, &ow, &oh);
-	return oh;
+	uint32_t w, h;
+	output_size(data, &w, &h);
+	return h;
 }
 
 /* ------------------------------------------------------------------ render */
@@ -344,6 +474,27 @@ static bool capture_input(struct squish_filter *f, obs_source_t *target, obs_sou
 	return true;
 }
 
+/* Squished picture on opaque black bars, at the frame size. */
+static bool place_boxed(struct squish_filter *f, gs_texture_t *sq, const struct layout *L)
+{
+	gs_texrender_reset(f->framed);
+	if (!gs_texrender_begin(f->framed, L->fw, L->fh))
+		return false;
+	struct vec4 black;
+	vec4_set(&black, 0.0f, 0.0f, 0.0f, 1.0f);
+	gs_clear(GS_CLEAR_COLOR, &black, 0.0f, 0);
+	gs_ortho(0.0f, (float)L->fw, 0.0f, (float)L->fh, -100.0f, 100.0f);
+	gs_matrix_push();
+	gs_matrix_translate3f((float)L->x0, (float)L->y0, 0.0f);
+	gs_effect_t *def = obs_get_base_effect(OBS_EFFECT_DEFAULT);
+	gs_effect_set_texture(gs_effect_get_param_by_name(def, "image"), sq);
+	while (gs_effect_loop(def, "Draw"))
+		gs_draw_sprite(sq, 0, L->ow, L->oh);
+	gs_matrix_pop();
+	gs_texrender_end(f->framed);
+	return true;
+}
+
 static void fsq_render(void *data, gs_effect_t *unused)
 {
 	UNUSED_PARAMETER(unused);
@@ -355,9 +506,14 @@ static void fsq_render(void *data, gs_effect_t *unused)
 		obs_source_skip_video_filter(f->context);
 		return;
 	}
-	const struct squish_config c = exact_config(f, w, h);
-	uint32_t ow, oh;
-	squished_size(f, w, h, &ow, &oh);
+	struct layout L;
+	compute_layout(f, w, h, &L);
+	const struct squish_config *c = &L.c;
+	uint32_t pw = L.fw, ph = L.fh; /* preview size */
+	if (f->layout == LAYOUT_EXACT) {
+		pw = w;
+		ph = h;
+	}
 
 	if (f->needs_update) {
 		f->output_valid = false;
@@ -366,15 +522,18 @@ static void fsq_render(void *data, gs_effect_t *unused)
 		if (capture_input(f, target, parent, w, h)) {
 			gs_texture_t *in = gs_texrender_get_texture(f->input);
 			if (f->view == VIEW_ZONE) {
-				f->output_valid = run_pass(f, f->output, "Zone", in, &c, w, h, w, h);
+				f->output_valid = run_pass(f, f->output, "Zone", in, c, w, h, pw, ph);
 				f->display = f->output;
-			} else if (run_pass(f, f->squished, "Squish", in, &c, w, h, ow, oh)) {
+			} else if (run_pass(f, f->squished, "Squish", in, c, w, h, L.ow, L.oh)) {
+				gs_texture_t *sq = gs_texrender_get_texture(f->squished);
 				f->display = f->squished;
 				f->output_valid = true;
 				if (f->view == VIEW_UNSQUISHED) {
-					gs_texture_t *sq = gs_texrender_get_texture(f->squished);
-					f->output_valid = run_pass(f, f->output, "Unsquish", sq, &c, ow, oh, w, h);
+					f->output_valid = run_pass(f, f->output, "Unsquish", sq, c, L.ow, L.oh, pw, ph);
 					f->display = f->output;
+				} else if (c->boxed) {
+					f->output_valid = place_boxed(f, sq, &L);
+					f->display = f->framed;
 				}
 			}
 		}
@@ -401,22 +560,41 @@ static void fsq_render(void *data, gs_effect_t *unused)
 
 static void describe(struct squish_filter *f, obs_data_t *s, char *info, size_t info_size)
 {
-	struct squish_config req;
-	read_config(s, &req);
 	struct squish_filter tmp = *f;
-	tmp.cfg = req;
+	read_config(s, &tmp.cfg);
 	tmp.clamped = clamp_axis(&tmp.cfg.x) | clamp_axis(&tmp.cfg.y);
+	tmp.layout = (enum layout_mode)obs_data_get_int(s, S_LAYOUT);
+	tmp.view = VIEW_SQUISHED;
 
-	uint32_t w = 1920, h = 1080, ow, oh;
+	uint32_t w = 1920, h = 1080;
 	target_size(f, &w, &h);
-	squished_size(&tmp, w, h, &ow, &oh);
-	struct squish_config c = exact_config(&tmp, w, h);
+	struct layout L;
+	compute_layout(&tmp, w, h, &L);
 	char cfg[256];
-	squish_config_format(&c, cfg, sizeof(cfg));
+	squish_config_format(&L.c, cfg, sizeof(cfg));
 	obs_data_set_string(s, S_CONFIG, cfg);
 
-	const double pixels = 100.0 * (double)ow * oh / ((double)w * h);
-	snprintf(info, info_size, T("InfoFormat"), w, h, ow, oh, pixels, ow, oh, tmp.clamped ? T("Clamped") : "");
+	char note[160] = "";
+	if (L.fit == FIT_LIMITED)
+		snprintf(note, sizeof(note), "%s", T("Clamped"));
+	else if (L.fit == FIT_REDUCED)
+		snprintf(note, sizeof(note), T("Reduced"), L.c.x.c * 200.0, L.c.y.c * 200.0, L.c.x.p, L.c.y.p);
+	const double pixels = 100.0 * (double)L.ow * L.oh / ((double)w * h);
+	switch (tmp.layout) {
+	case LAYOUT_FILL:
+		if (w <= L.cw && h <= L.ch)
+			snprintf(info, info_size, T("InfoFillSmall"), w, h, L.cw, L.ch);
+		else
+			snprintf(info, info_size, T("InfoFill"), w, h, L.cw, L.ch, 100.0 * L.c.x.r, 100.0 * L.c.y.r,
+				 L.cw, L.ch, note);
+		break;
+	case LAYOUT_BARS:
+		snprintf(info, info_size, T("InfoBars"), w, h, L.ow, L.oh, pixels, L.fw, L.fh, note);
+		break;
+	default:
+		snprintf(info, info_size, T("InfoExact"), w, h, L.ow, L.oh, pixels, L.ow, L.oh, note);
+		break;
+	}
 }
 
 static bool cfg_modified(obs_properties_t *props, obs_property_t *p, obs_data_t *s)
@@ -426,7 +604,9 @@ static bool cfg_modified(obs_properties_t *props, obs_property_t *p, obs_data_t 
 	if (!f)
 		return false;
 	const bool link = obs_data_get_bool(s, S_LINK);
-	obs_property_set_visible(obs_properties_get(props, S_RY), !link);
+	const bool manual = obs_data_get_int(s, S_LAYOUT) != LAYOUT_FILL;
+	obs_property_set_visible(obs_properties_get(props, S_RX), manual);
+	obs_property_set_visible(obs_properties_get(props, S_RY), manual && !link);
 	obs_property_set_visible(obs_properties_get(props, S_CY), !link);
 	obs_property_set_visible(obs_properties_get(props, S_PY), !link);
 	char info[512];
@@ -500,6 +680,13 @@ static obs_properties_t *fsq_properties(void *data)
 
 	obs_properties_add_text(props, S_INFO, T("InfoDefault"), OBS_TEXT_INFO);
 
+	obs_property_t *lay =
+		obs_properties_add_list(props, S_LAYOUT, T("Layout"), OBS_COMBO_TYPE_LIST, OBS_COMBO_FORMAT_INT);
+	obs_property_list_add_int(lay, T("Layout.Fill"), LAYOUT_FILL);
+	obs_property_list_add_int(lay, T("Layout.Bars"), LAYOUT_BARS);
+	obs_property_list_add_int(lay, T("Layout.Exact"), LAYOUT_EXACT);
+	obs_property_set_modified_callback(lay, cfg_modified);
+
 	const char *sliders[][2] = {{S_RX, "SqueezeWidth"}, {S_RY, "SqueezeHeight"}, {S_CX, "CenterWidth"},
 				    {S_CY, "CenterHeight"}, {S_FX, "FocusX"},        {S_FY, "FocusY"}};
 	const double ranges[][3] = {{40, 100, 1}, {40, 100, 1}, {5, 90, 1}, {5, 90, 1}, {10, 90, 1}, {10, 90, 1}};
@@ -545,6 +732,7 @@ static void fsq_defaults(obs_data_t *s)
 	obs_data_set_default_double(s, S_PY, 1.0);
 	obs_data_set_default_bool(s, S_PREFILTER, true);
 	obs_data_set_default_int(s, S_VIEW, VIEW_SQUISHED);
+	obs_data_set_default_int(s, S_LAYOUT, LAYOUT_FILL);
 }
 
 struct obs_source_info foveated_squish_filter = {

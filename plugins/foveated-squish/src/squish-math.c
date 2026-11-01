@@ -106,6 +106,12 @@ void squish_config_format(const struct squish_config *cfg, char *buf, size_t siz
 {
 	snprintf(buf, size, "FSQ1:rx=%.4g,ry=%.4g,cx=%.4g,cy=%.4g,fx=%.4g,fy=%.4g,px=%.4g,py=%.4g,ar=%.5g", cfg->x.r,
 		 cfg->y.r, cfg->x.c, cfg->y.c, cfg->x.f, cfg->y.f, cfg->x.p, cfg->y.p, cfg->ar);
+	if (cfg->boxed) {
+		const size_t n = strlen(buf);
+		if (n < size)
+			snprintf(buf + n, size - n, ",ox=%.6g,oy=%.6g,bw=%.6g,bh=%.6g", cfg->ox, cfg->oy, cfg->bw,
+				 cfg->bh);
+	}
 }
 
 bool squish_config_parse(const char *s, struct squish_config *cfg)
@@ -114,7 +120,8 @@ bool squish_config_parse(const char *s, struct squish_config *cfg)
 		s++;
 	if (strncmp(s, "FSQ1:", 5) != 0)
 		return false;
-	struct squish_config c = {{0.75, 0.15, 0.5, 1.0}, {0.75, 0.15, 0.5, 1.0}, 16.0 / 9.0};
+	struct squish_config c = {
+		{0.75, 0.15, 0.5, 1.0}, {0.75, 0.15, 0.5, 1.0}, 16.0 / 9.0, false, 0.0, 0.0, 1.0, 1.0};
 	const char *p = s + 5;
 	while (*p) {
 		char key[8] = {0};
@@ -147,6 +154,14 @@ bool squish_config_parse(const char *s, struct squish_config *cfg)
 			c.y.p = v;
 		else if (!strcmp(key, "ar"))
 			c.ar = v;
+		else if (!strcmp(key, "ox"))
+			c.ox = v, c.boxed = true;
+		else if (!strcmp(key, "oy"))
+			c.oy = v, c.boxed = true;
+		else if (!strcmp(key, "bw"))
+			c.bw = v, c.boxed = true;
+		else if (!strcmp(key, "bh"))
+			c.bh = v, c.boxed = true;
 		if (*p == ',')
 			p++;
 		else if (*p && *p != ' ' && *p != '\n' && *p != '\r')
@@ -155,6 +170,9 @@ bool squish_config_parse(const char *s, struct squish_config *cfg)
 			break;
 	}
 	if (c.x.r <= 0 || c.x.r > 1 || c.y.r <= 0 || c.y.r > 1 || c.x.p <= 0 || c.y.p <= 0 || c.ar <= 0)
+		return false;
+	if (c.boxed &&
+	    (c.ox < 0 || c.oy < 0 || c.bw <= 0 || c.bh <= 0 || c.ox + c.bw > 1.0 + 1e-6 || c.oy + c.bh > 1.0 + 1e-6))
 		return false;
 	*cfg = c;
 	return true;

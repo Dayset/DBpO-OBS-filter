@@ -190,14 +190,19 @@ int main(int argc, char **argv)
 		fprintf(stderr, "obs_startup failed\n");
 		return 2;
 	}
+	/* OBS_HEADLESS_CANVAS=WxH: canvas size seen by filters (default: the frame size). */
+	uint32_t cw = W, ch = H;
+	const char *canvas = getenv("OBS_HEADLESS_CANVAS");
+	if (canvas && sscanf(canvas, "%ux%u", &cw, &ch) != 2)
+		cw = W, ch = H;
 	struct obs_video_info ovi = {
 		.graphics_module = "libobs-opengl",
 		.fps_num = 60,
 		.fps_den = 1,
-		.base_width = W,
-		.base_height = H,
-		.output_width = W,
-		.output_height = H,
+		.base_width = cw,
+		.base_height = ch,
+		.output_width = cw,
+		.output_height = ch,
 		.output_format = VIDEO_FORMAT_RGBA,
 		.adapter = 0,
 		.gpu_conversion = true,

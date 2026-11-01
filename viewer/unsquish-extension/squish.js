@@ -37,7 +37,7 @@
 		return 1 - (1 - o.dmin) * Math.pow(clamp01(t), o.p);
 	}
 
-	/** Parses "FSQ1:rx=..,ry=..,cx=..,cy=..,fx=..,fy=..,px=..,py=..,ar=..". Returns null if invalid. */
+	/** Parses "FSQ1:rx=..,...,ar=..[,ox=..,oy=..,bw=..,bh=..]". Returns null if invalid. */
 	function parse(text) {
 		const m = /FSQ1:([a-z]{2}=[-0-9.eE]+(?:,[a-z]{2}=[-0-9.eE]+)*)/.exec(text || "");
 		if (!m) return null;
@@ -53,8 +53,12 @@
 			x: { r: g("rx", 0.75), c: g("cx", 0.15), f: g("fx", 0.5), p: g("px", 1) },
 			y: { r: g("ry", 0.75), c: g("cy", 0.15), f: g("fy", 0.5), p: g("py", 1) },
 			ar: g("ar", 16 / 9),
+			// Where the squished picture sits in the video frame (black bars around it).
+			box: [g("ox", 0), g("oy", 0), g("bw", 1), g("bh", 1)],
 			text: m[0],
 		};
+		const [ox, oy, bw, bh] = cfg.box;
+		if (!(ox >= 0 && oy >= 0 && bw > 0 && bh > 0 && ox + bw <= 1 + 1e-6 && oy + bh <= 1 + 1e-6)) return null;
 		for (const a of [cfg.x, cfg.y]) {
 			if (!(a.r > 0 && a.r <= 1 && a.p > 0 && a.c >= 0 && a.f >= 0 && a.f <= 1)) return null;
 			if (derive(a).dmin < MIN_DENSITY - 1e-6) return null;
@@ -74,6 +78,8 @@ precision highp float;
 uniform sampler2D u_video;
 uniform vec4 u_ax_a; uniform vec4 u_ax_b;
 uniform vec4 u_ay_a; uniform vec4 u_ay_b;
+uniform vec4 u_box;   // squished picture rectangle in the video frame (x, y, w, h)
+uniform vec2 u_texel; // 1 / video size
 varying vec2 v_uv;
 float periph(float t, float len, float k, float p) { return len * (t - k * pow(t, p + 1.0)); }
 float sq_forward(float x, vec4 A, vec4 B) {
@@ -86,6 +92,9 @@ float sq_forward(float x, vec4 A, vec4 B) {
 }
 void main() {
 	vec2 u = vec2(sq_forward(v_uv.x, u_ax_a, u_ax_b), sq_forward(v_uv.y, u_ay_a, u_ay_b));
+	u = u_box.xy + u * u_box.zw;
+	// Stay half a pixel inside the picture so bilinear filtering never pulls in the bars.
+	u = clamp(u, u_box.xy + 0.5 * u_texel, u_box.xy + u_box.zw - 0.5 * u_texel);
 	gl_FragColor = texture2D(u_video, u);
 }`;
 

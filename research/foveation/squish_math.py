@@ -17,10 +17,11 @@ with Lleft/Lright the periphery lengths (fractions of the axis). U is strictly
 increasing (d >= dmin > 0), so the inverse is well-defined (Newton).
 
 Config string (what the streamer shares):
-  FSQ1:rx=0.75,ry=0.75,cx=0.15,cy=0.15,fx=0.5,fy=0.5,px=1,py=1,ar=1.7778
+  FSQ1:rx=0.75,ry=0.75,cx=0.15,cy=0.15,fx=0.5,fy=0.5,px=1,py=1,ar=1.7778[,ox=..,oy=..,bw=..,bh=..]
   r = squished/source size, c = half-size of the sharp center, f = focus
   position, p = curve (1 linear; <1 squeeze ramps up fast; >1 near-center stays
-  sharper, edges squeezed harder), ar = source aspect ratio.
+  sharper, edges squeezed harder), ar = source aspect ratio; optional box =
+  where the squished picture sits in the streamed frame (black bars around it).
 """
 
 from dataclasses import dataclass
@@ -97,10 +98,14 @@ class Squish:
     x: Axis
     y: Axis
     ar: float = 16 / 9
+    box: tuple = None  # (ox, oy, bw, bh): picture rectangle in the streamed frame, None = whole frame
 
     def to_string(self):
-        return (f"FSQ1:rx={self.x.r:.4g},ry={self.y.r:.4g},cx={self.x.c:.4g},cy={self.y.c:.4g},"
-                f"fx={self.x.f:.4g},fy={self.y.f:.4g},px={self.x.p:.4g},py={self.y.p:.4g},ar={self.ar:.5g}")
+        s = (f"FSQ1:rx={self.x.r:.4g},ry={self.y.r:.4g},cx={self.x.c:.4g},cy={self.y.c:.4g},"
+             f"fx={self.x.f:.4g},fy={self.y.f:.4g},px={self.x.p:.4g},py={self.y.p:.4g},ar={self.ar:.5g}")
+        if self.box:
+            s += ",ox={:.6g},oy={:.6g},bw={:.6g},bh={:.6g}".format(*self.box)
+        return s
 
     @staticmethod
     def parse(s):
@@ -109,5 +114,8 @@ class Squish:
             raise ValueError("not an FSQ1 string")
         kv = dict(item.split("=") for item in s[5:].split(","))
         g = lambda k, d: float(kv.get(k, d))  # noqa: E731
+        box = None
+        if any(k in kv for k in ("ox", "oy", "bw", "bh")):
+            box = (g("ox", 0), g("oy", 0), g("bw", 1), g("bh", 1))
         return Squish(Axis(g("rx", 0.75), g("cx", 0.15), g("fx", 0.5), g("px", 1)),
-                      Axis(g("ry", 0.75), g("cy", 0.15), g("fy", 0.5), g("py", 1)), g("ar", 16 / 9))
+                      Axis(g("ry", 0.75), g("cy", 0.15), g("fy", 0.5), g("py", 1)), g("ar", 16 / 9), box)

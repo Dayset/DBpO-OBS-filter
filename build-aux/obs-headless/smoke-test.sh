@@ -46,9 +46,11 @@ for dir in "$root"/plugins/*/; do
 	name="$(basename "$dir")"
 	so="$(find "$build/plugins/$name" -maxdepth 1 -name "$name.so" | head -1)"
 	data="$build/install/share/obs/obs-plugins/$name"
+	# Optional per-plugin environment, e.g. OBS_HEADLESS_CANVAS=240x136 for a filter that fills the canvas.
+	read -r -a extra_env <<<"$(cat "$dir/tests/smoke-env" 2>/dev/null || true)"
 	ids="$(grep -ho '\.id = "[a-z0-9_]*"' "$dir"src/*.c | sed 's/.*"\(.*\)"/\1/')"
 	for id in $ids; do
-		if DISPLAY="$display" timeout 300 "$work/obs-headless" "$so" "$data" "$id" "$W" "$H" \
+		if env "${extra_env[@]}" DISPLAY="$display" timeout 300 "$work/obs-headless" "$so" "$data" "$id" "$W" "$H" \
 			<"$work/in.rgba" >"$work/out.rgba" 2>"$work/log.txt"; then
 			size="$(grep -o 'output [0-9]*x[0-9]*' "$work/log.txt" | head -1 | cut -d' ' -f2)"
 			result="$(python3 - "$work/in.rgba" "$work/out.rgba" "$W" "$H" "$N" "$size" <<'EOF'

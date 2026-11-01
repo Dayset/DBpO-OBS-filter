@@ -44,8 +44,12 @@ double squish_axis_align(const struct squish_axis *a, unsigned n, unsigned m);
 struct squish_config {
 	struct squish_axis x, y;
 	double ar; /* source aspect ratio */
+	/* Boxed layout: the squished picture occupies the rectangle (ox, oy,
+	 * bw, bh) of the streamed frame (fractions); the rest is black bars. */
+	bool boxed;
+	double ox, oy, bw, bh;
 };
 
-/* "FSQ1:rx=..,ry=..,cx=..,cy=..,fx=..,fy=..,px=..,py=..,ar=.." */
+/* "FSQ1:rx=..,ry=..,cx=..,cy=..,fx=..,fy=..,px=..,py=..,ar=..[,ox=..,oy=..,bw=..,bh=..]" */
 void squish_config_format(const struct squish_config *cfg, char *buf, size_t size);
 bool squish_config_parse(const char *s, struct squish_config *cfg);
