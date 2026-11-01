@@ -31,7 +31,9 @@ struct squish_axis_params {
 
 void squish_axis_derive(const struct squish_axis *a, struct squish_axis_params *out);
 double squish_axis_dmin(const struct squish_axis *a);
-double squish_axis_min_r(const struct squish_axis *a); /* strongest squeeze allowed */
+double squish_axis_min_r(const struct squish_axis *a); /* strongest squeeze at SQUISH_MIN_DENSITY */
+/* Strongest squeeze (smallest r) whose edge density stays >= floor. */
+double squish_axis_min_r_floor(const struct squish_axis *a, double floor);
 double squish_forward(const struct squish_axis *a, double x);
 double squish_density(const struct squish_axis *a, double x);
 double squish_inverse(const struct squish_axis *a, double u);

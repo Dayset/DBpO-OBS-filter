@@ -44,6 +44,7 @@ with this program. If not, see <https://www.gnu.org/licenses/>
 #define S_PREFILTER "prefilter"
 #define S_VIEW "view"
 #define S_LAYOUT "layout"
+#define S_MAXCOMP "max_edge_compression"
 #define S_INFO "info"
 #define S_CONFIG "config"
 #define S_IMPORT "import"
@@ -92,6 +93,12 @@ struct squish_filter {
 	bool prefilter;
 	enum view_mode view;
 	enum layout_mode layout;
+	double floor; /* lowest density = 1 / max edge compression */
+
+	/* What the properties view shows, so it only rebuilds when this changes
+	 * (rebuilding while a slider is dragged makes the sliders jump). */
+	char shown_key[64];
+	int shown_vis;
 };
 
 /* English fallbacks used when the locale file can't be found. */
@@ -107,10 +114,12 @@ static const struct {
 	{"InfoFillSmall",
 	 "NOT SQUEEZING: the source (%ux%u) must be larger than the canvas (%ux%u). Run the game at a higher resolution than the canvas (2560x1440 for a 1920x1080 canvas, e.g. with NVIDIA DLDSR 1.78x on a 1080p monitor), or use the Exact size layout. See the setup guide."},
 	{"InfoExact",
-	 "Source %ux%u -> streamed %ux%u (%.0f%% of the pixels). Set OBS Settings > Video > Base (Canvas) and Output resolution to %ux%u (you can type a custom size into those fields). %s"},
+	 "Source %ux%u -> streamed %ux%u (%.0f%% of the pixels). Set OBS Settings > Video > Base (Canvas) and Output resolution to %ux%u (you can type a custom size into those fields). Press Copy to update these numbers after moving the sliders. %s"},
 	{"Clamped",
-	 "(Squeeze limited: this curve can't squeeze that much; lower the curve value or the sharp center size.)"},
-	{"Reduced", "(To fit, the sharp center/curve was reduced to: center %.0f%% x %.0f%%, curve %.2f x %.2f.)"},
+	 "(Squeeze limited by Max edge compression: raise it, or lower the curve or the sharp center size.)"},
+	{"Reduced", "(The sharp center/curve is reduced automatically so this squeeze fits.)"},
+	{"MaxCompression",
+	 "Max edge compression (x:1). Higher allows stronger squeeze with harder curves; above ~16 the outermost edge smears"},
 	{"Layout", "Layout"},
 	{"Layout.Fill", "Fill the canvas (auto squeeze = canvas / source, best)"},
 	{"Layout.Exact", "Manual squeeze, exact size (set the canvas to the squished size)"},
@@ -129,7 +138,7 @@ static const struct {
 	{"View.Unsquished", "Unsquished preview (what extension viewers see)"},
 	{"View.Zone", "Squeezed zone (red = squeezed harder)"},
 	{"Share", "Share with viewers"},
-	{"Config", "Config string (paste into the browser extension)"},
+	{"Config", "Config string (press Copy to update it)"},
 	{"Copy", "Copy config to clipboard"},
 	{"Import", "Paste a config string to load it"},
 	{"ApplyImport", "Load pasted config"},
@@ -168,13 +177,13 @@ static void read_config(obs_data_t *s, struct squish_config *cfg)
 }
 
 /* Keep each axis within what the curve can deliver (density >= 8%). */
-static bool clamp_axis(struct squish_axis *a)
+static bool clamp_axis(struct squish_axis *a, double floor)
 {
 	if (a->p < 0.1)
 		a->p = 0.1;
 	if (a->r > 1.0)
 		a->r = 1.0;
-	const double min_r = squish_axis_min_r(a);
+	const double min_r = squish_axis_min_r_floor(a, floor);
 	if (a->r < min_r) {
 		a->r = min_r;
 		return true;
@@ -190,18 +199,18 @@ static uint32_t even_size(double v)
 
 /* Squeeze one axis to ratio r; if the density floor forbids it, shrink the
  * sharp center first, then the curve, then give up and limit r. */
-static enum fit_result fit_axis(struct squish_axis *a, double r)
+static enum fit_result fit_axis(struct squish_axis *a, double r, double floor)
 {
 	a->r = r > 1.0 ? 1.0 : r;
-	if (a->r >= squish_axis_min_r(a))
+	if (a->r >= squish_axis_min_r_floor(a, floor))
 		return FIT_OK;
 	const double c0 = a->c, p0 = a->p;
 	a->c = 0.01;
-	if (a->r >= squish_axis_min_r(a)) {
+	if (a->r >= squish_axis_min_r_floor(a, floor)) {
 		double lo = 0.01, hi = c0;
 		for (int i = 0; i < 40; i++) {
 			a->c = 0.5 * (lo + hi);
-			if (a->r >= squish_axis_min_r(a))
+			if (a->r >= squish_axis_min_r_floor(a, floor))
 				lo = a->c;
 			else
 				hi = a->c;
@@ -210,12 +219,12 @@ static enum fit_result fit_axis(struct squish_axis *a, double r)
 		return FIT_REDUCED;
 	}
 	a->c = 0.025; /* keep a small sharp center, flatten the curve instead */
-	a->p = 0.25;
-	if (a->r >= squish_axis_min_r(a)) {
-		double lo = 0.25, hi = p0;
+	a->p = 0.1;
+	if (a->r >= squish_axis_min_r_floor(a, floor)) {
+		double lo = 0.1, hi = p0;
 		for (int i = 0; i < 40; i++) {
 			a->p = 0.5 * (lo + hi);
-			if (a->r >= squish_axis_min_r(a))
+			if (a->r >= squish_axis_min_r_floor(a, floor))
 				lo = a->p;
 			else
 				hi = a->p;
@@ -223,7 +232,7 @@ static enum fit_result fit_axis(struct squish_axis *a, double r)
 		a->p = lo;
 		return FIT_REDUCED;
 	}
-	a->r = squish_axis_min_r(a);
+	a->r = squish_axis_min_r_floor(a, floor);
 	return FIT_LIMITED;
 }
 
@@ -247,8 +256,8 @@ static void compute_layout(const struct squish_filter *f, uint32_t w, uint32_t h
 	struct squish_config c = f->cfg;
 	canvas_size(&L->cw, &L->ch, w, h);
 	if (f->layout == LAYOUT_FILL) {
-		const enum fit_result fx = fit_axis(&c.x, (double)L->cw / w);
-		const enum fit_result fy = fit_axis(&c.y, (double)L->ch / h);
+		const enum fit_result fx = fit_axis(&c.x, (double)L->cw / w, f->floor);
+		const enum fit_result fy = fit_axis(&c.y, (double)L->ch / h, f->floor);
 		L->fit = fx > fy ? fx : fy;
 		L->ow = even_size(w * c.x.r);
 		L->oh = even_size(h * c.y.r);
@@ -279,7 +288,8 @@ static void fsq_update(void *data, obs_data_t *s)
 {
 	struct squish_filter *f = data;
 	read_config(s, &f->cfg);
-	f->clamped = clamp_axis(&f->cfg.x) | clamp_axis(&f->cfg.y);
+	f->floor = 1.0 / obs_data_get_double(s, S_MAXCOMP);
+	f->clamped = clamp_axis(&f->cfg.x, f->floor) | clamp_axis(&f->cfg.y, f->floor);
 	f->prefilter = obs_data_get_bool(s, S_PREFILTER);
 	f->view = (enum view_mode)obs_data_get_int(s, S_VIEW);
 	f->layout = obs_data_get_int(s, S_LAYOUT) == LAYOUT_EXACT ? LAYOUT_EXACT : LAYOUT_FILL;
@@ -508,11 +518,16 @@ static void fsq_render(void *data, gs_effect_t *unused)
 
 /* ------------------------------------------------------------------ properties */
 
-static void describe(struct squish_filter *f, obs_data_t *s, char *info, size_t info_size)
+/* Info line and (optionally) the config string for the given settings. */
+/* key: what decides whether the view must be rebuilt (never changes while a
+ * slider is dragged, except when crossing into another state). */
+static void describe(struct squish_filter *f, obs_data_t *s, char *info, size_t info_size, char *cfg, size_t cfg_size,
+		     char *key, size_t key_size)
 {
 	struct squish_filter tmp = *f;
 	read_config(s, &tmp.cfg);
-	tmp.clamped = clamp_axis(&tmp.cfg.x) | clamp_axis(&tmp.cfg.y);
+	tmp.floor = 1.0 / obs_data_get_double(s, S_MAXCOMP);
+	tmp.clamped = clamp_axis(&tmp.cfg.x, tmp.floor) | clamp_axis(&tmp.cfg.y, tmp.floor);
 	tmp.layout = obs_data_get_int(s, S_LAYOUT) == LAYOUT_EXACT ? LAYOUT_EXACT : LAYOUT_FILL;
 	tmp.view = VIEW_SQUISHED;
 
@@ -520,16 +535,18 @@ static void describe(struct squish_filter *f, obs_data_t *s, char *info, size_t 
 	target_size(f, &w, &h);
 	struct layout L;
 	compute_layout(&tmp, w, h, &L);
-	char cfg[256];
-	squish_config_format(&L.c, cfg, sizeof(cfg));
-	obs_data_set_string(s, S_CONFIG, cfg);
+	if (cfg)
+		squish_config_format(&L.c, cfg, cfg_size);
 
 	char note[160] = "";
 	if (L.fit == FIT_LIMITED)
 		snprintf(note, sizeof(note), "%s", T("Clamped"));
 	else if (L.fit == FIT_REDUCED)
-		snprintf(note, sizeof(note), T("Reduced"), L.c.x.c * 200.0, L.c.y.c * 200.0, L.c.x.p, L.c.y.p);
+		snprintf(note, sizeof(note), "%s", T("Reduced"));
 	const double pixels = 100.0 * (double)L.ow * L.oh / ((double)w * h);
+	if (key)
+		snprintf(key, key_size, "%d %d %d %ux%u %ux%u", (int)tmp.layout, (int)L.fit, L.ow >= w && L.oh >= h, w,
+			 h, L.cw, L.ch);
 	switch (tmp.layout) {
 	case LAYOUT_FILL:
 		if (L.ow >= w && L.oh >= h)
@@ -551,24 +568,36 @@ static bool cfg_modified(obs_properties_t *props, obs_property_t *p, obs_data_t 
 	if (!f)
 		return false;
 	const bool link = obs_data_get_bool(s, S_LINK);
-	const bool manual = obs_data_get_int(s, S_LAYOUT) != LAYOUT_FILL;
+	const bool manual = obs_data_get_int(s, S_LAYOUT) == LAYOUT_EXACT;
 	obs_property_set_visible(obs_properties_get(props, S_RX), manual);
 	obs_property_set_visible(obs_properties_get(props, S_RY), manual && !link);
 	obs_property_set_visible(obs_properties_get(props, S_CY), !link);
 	obs_property_set_visible(obs_properties_get(props, S_PY), !link);
-	char info[512];
-	describe(f, s, info, sizeof(info));
+	char info[512], cfg[256], key[64];
+	describe(f, s, info, sizeof(info), cfg, sizeof(cfg), key, sizeof(key));
+	obs_data_set_string(s, S_CONFIG, cfg);
+	/* Rebuild the view only when its state changes: rebuilding on every
+	 * slider tick detaches the slider being dragged. Live numbers (Exact
+	 * size) refresh on the next state change or when Copy is pressed. */
+	const int vis = (link ? 1 : 0) | (manual ? 2 : 0);
+	if (vis == f->shown_vis && strcmp(key, f->shown_key) == 0)
+		return false;
+	f->shown_vis = vis;
+	snprintf(f->shown_key, sizeof(f->shown_key), "%s", key);
 	obs_property_set_description(obs_properties_get(props, S_INFO), info);
 	return true;
 }
 
 static bool copy_clicked(obs_properties_t *props, obs_property_t *p, void *data)
 {
-	UNUSED_PARAMETER(props);
 	UNUSED_PARAMETER(p);
 	struct squish_filter *f = data;
 	obs_data_t *s = obs_source_get_settings(f->context);
-	const char *cfg = obs_data_get_string(s, S_CONFIG);
+	char info[512], cfg[256];
+	describe(f, s, info, sizeof(info), cfg, sizeof(cfg), NULL, 0);
+	obs_data_set_string(s, S_CONFIG, cfg);
+	if (props) /* refresh the info line too (Exact size may have changed) */
+		obs_property_set_description(obs_properties_get(props, S_INFO), info);
 #ifdef _WIN32
 	const int n = MultiByteToWideChar(CP_UTF8, 0, cfg, -1, NULL, 0);
 	HGLOBAL mem = n > 0 ? GlobalAlloc(GMEM_MOVEABLE, (size_t)n * sizeof(wchar_t)) : NULL;
@@ -588,7 +617,7 @@ static bool copy_clicked(obs_properties_t *props, obs_property_t *p, void *data)
 	obs_log(LOG_INFO, "config (copy from the text field): %s", cfg);
 #endif
 	obs_data_release(s);
-	return false;
+	return true; /* show the fresh string in the field */
 }
 
 static bool import_clicked(obs_properties_t *props, obs_property_t *p, void *data)
@@ -612,6 +641,7 @@ static bool import_clicked(obs_properties_t *props, obs_property_t *p, void *dat
 		obs_data_set_double(s, S_PY, c.y.p);
 		obs_data_set_string(s, S_IMPORT, "");
 		obs_source_update(f->context, s);
+		f->shown_key[0] = 0; /* force one refresh */
 		cfg_modified(props, NULL, s);
 	} else {
 		obs_log(LOG_WARNING, "could not read config string");
@@ -624,6 +654,8 @@ static obs_properties_t *fsq_properties(void *data)
 {
 	struct squish_filter *f = data;
 	obs_properties_t *props = obs_properties_create_param(f, NULL);
+	f->shown_key[0] = 0;
+	f->shown_vis = -1;
 
 	obs_properties_add_text(props, S_INFO, T("InfoDefault"), OBS_TEXT_INFO);
 
@@ -635,7 +667,8 @@ static obs_properties_t *fsq_properties(void *data)
 
 	const char *sliders[][2] = {{S_RX, "SqueezeWidth"}, {S_RY, "SqueezeHeight"}, {S_CX, "CenterWidth"},
 				    {S_CY, "CenterHeight"}, {S_FX, "FocusX"},        {S_FY, "FocusY"}};
-	const double ranges[][3] = {{40, 100, 1}, {40, 100, 1}, {5, 90, 1}, {5, 90, 1}, {10, 90, 1}, {10, 90, 1}};
+	const double ranges[][3] = {{10, 100, 0.5}, {10, 100, 0.5}, {1, 99, 0.5},
+				    {1, 99, 0.5},   {1, 99, 0.5},   {1, 99, 0.5}};
 	obs_property_t *pr = obs_properties_add_bool(props, S_LINK, T("Link"));
 	obs_property_set_modified_callback(pr, cfg_modified);
 	for (int i = 0; i < 6; i++) {
@@ -643,9 +676,11 @@ static obs_properties_t *fsq_properties(void *data)
 						     ranges[i][2]);
 		obs_property_set_modified_callback(pr, cfg_modified);
 	}
-	pr = obs_properties_add_float_slider(props, S_PX, T("CurveX"), 0.25, 3.0, 0.05);
+	pr = obs_properties_add_float_slider(props, S_PX, T("CurveX"), 0.1, 10.0, 0.05);
 	obs_property_set_modified_callback(pr, cfg_modified);
-	pr = obs_properties_add_float_slider(props, S_PY, T("CurveY"), 0.25, 3.0, 0.05);
+	pr = obs_properties_add_float_slider(props, S_PY, T("CurveY"), 0.1, 10.0, 0.05);
+	obs_property_set_modified_callback(pr, cfg_modified);
+	pr = obs_properties_add_float_slider(props, S_MAXCOMP, T("MaxCompression"), 2.0, 50.0, 0.5);
 	obs_property_set_modified_callback(pr, cfg_modified);
 	obs_properties_add_bool(props, S_PREFILTER, T("Prefilter"));
 
@@ -679,6 +714,7 @@ static void fsq_defaults(obs_data_t *s)
 	obs_data_set_default_bool(s, S_PREFILTER, true);
 	obs_data_set_default_int(s, S_VIEW, VIEW_SQUISHED);
 	obs_data_set_default_int(s, S_LAYOUT, LAYOUT_FILL);
+	obs_data_set_default_double(s, S_MAXCOMP, 12.5);
 }
 
 struct obs_source_info foveated_squish_filter = {

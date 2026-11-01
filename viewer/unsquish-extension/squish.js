@@ -6,7 +6,7 @@
  * periphery (t: 0 at the center edge .. 1 at the frame edge); U(x) = integral(d) / r.
  */
 (function (root) {
-	const MIN_DENSITY = 0.08;
+	const MIN_DENSITY = 0.08; // plugin default edge density (12.5:1); the viewer accepts any > 0
 
 	function derive(a) {
 		const lo = Math.min(Math.max(a.f - a.c, 0), 1);
@@ -61,7 +61,8 @@
 		if (!(ox >= 0 && oy >= 0 && bw > 0 && bh > 0 && ox + bw <= 1 + 1e-6 && oy + bh <= 1 + 1e-6)) return null;
 		for (const a of [cfg.x, cfg.y]) {
 			if (!(a.r > 0 && a.r <= 1 && a.p > 0 && a.c >= 0 && a.f >= 0 && a.f <= 1)) return null;
-			if (derive(a).dmin < MIN_DENSITY - 1e-6) return null;
+			// Any positive edge density unfolds correctly; how hard to squeeze is the streamer's choice.
+			if (!(derive(a).dmin > 0.001)) return null;
 		}
 		if (!(cfg.ar > 0)) return null;
 		return cfg;

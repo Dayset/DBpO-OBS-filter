@@ -15,6 +15,8 @@ cases.forEach((a, c) => {
 	}
 });
 const ok = FSQ.parse("Stream title [FSQ1:rx=0.75,ry=0.7,cx=0.15,cy=0.2,fx=0.5,fy=0.45,px=1,py=0.75,ar=1.7778] gg");
-const bad = FSQ.parse("FSQ1:rx=0.5,ry=0.5,cx=0.45,cy=0.45,px=3,py=3");
+const bad = FSQ.parse("FSQ1:rx=0.5,ry=0.5,cx=0.45,cy=0.45,px=3,py=3"); // edge density would be negative
+const user = FSQ.parse("FSQ1:rx=0.6949,ry=0.695,cx=0.025,cy=0.025,fx=0.5,fy=0.5,px=1.865,py=1.865,ar=1.778");
 console.error(`parse from title: ${ok && ok.y.f === 0.45 ? "PASS" : "FAIL"}; rejects impossible squeeze: ${bad === null ? "PASS" : "FAIL"}`);
-process.exitCode = ok && bad === null ? 0 : 1;
+console.error(`accepts strong squeeze near the plugin limit: ${user ? "PASS" : "FAIL"}`);
+process.exitCode = ok && bad === null && user ? 0 : 1;

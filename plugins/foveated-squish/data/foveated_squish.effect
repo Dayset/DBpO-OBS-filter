@@ -9,7 +9,7 @@
 // Passes:
 //   Squish    source -> squished frame. Each output pixel finds its source
 //             position (Newton on the closed-form mapping) and averages the
-//             source area it covers (up to 4x4 taps): a proper downscale
+//             source area it covers (up to 8x8 taps): a proper downscale
 //             filter, so the squeezed edges don't shimmer.
 //   Unsquish  squished -> source size (what extension viewers see; preview).
 //   Zone      source with the squeezed area tinted by squeeze strength.
@@ -92,8 +92,8 @@ float4 PSSquish(VertData v_in) : TARGET
 
 	// One output pixel covers 1/d source pixels per axis: average that area.
 	float2 foot = float2(1.0 / sq_density(s.x, ax_a, ax_b), 1.0 / sq_density(s.y, ay_a, ay_b));
-	int kx = int(clamp(ceil(foot.x), 1.0, 4.0));
-	int ky = int(clamp(ceil(foot.y), 1.0, 4.0));
+	int kx = int(clamp(ceil(foot.x), 1.0, 8.0));
+	int ky = int(clamp(ceil(foot.y), 1.0, 8.0));
 	float4 acc = float4(0.0, 0.0, 0.0, 0.0);
 	for (int j = 0; j < ky; j++) {
 		for (int i = 0; i < kx; i++) {
@@ -114,7 +114,7 @@ float4 PSZone(VertData v_in) : TARGET
 {
 	float4 c = image.SampleLevel(linearClamp, v_in.uv, 0.0);
 	float d = min(sq_density(v_in.uv.x, ax_a, ax_b), sq_density(v_in.uv.y, ay_a, ay_b));
-	float squeeze = saturate((1.0 - d) / 0.92);
+	float squeeze = saturate((1.0 - d) / 0.98);
 	return float4(lerp(c.rgb, float3(1.0, 0.15, 0.1), squeeze * 0.6), c.a);
 }
 

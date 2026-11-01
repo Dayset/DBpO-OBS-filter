@@ -46,11 +46,16 @@ double squish_axis_dmin(const struct squish_axis *a)
 	return o.dmin;
 }
 
-double squish_axis_min_r(const struct squish_axis *a)
+double squish_axis_min_r_floor(const struct squish_axis *a, double floor)
 {
 	struct squish_axis_params o;
 	squish_axis_derive(a, &o);
-	return 1.0 - (1.0 - SQUISH_MIN_DENSITY) * (o.ll + o.lr) / (a->p + 1.0);
+	return 1.0 - (1.0 - floor) * (o.ll + o.lr) / (a->p + 1.0);
+}
+
+double squish_axis_min_r(const struct squish_axis *a)
+{
+	return squish_axis_min_r_floor(a, SQUISH_MIN_DENSITY);
 }
 
 static double periph(double t, double length, double k, double p)
