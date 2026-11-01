@@ -11,7 +11,7 @@
  * output are raw RGBA frames on stdin/stdout, so ffmpeg can be on either side.
  *
  *   obs-headless <plugin.so> <plugin-data-dir> <filter-id> <width> <height>
- *                [key=value ...]   (settings: ints/floats/bools as numbers)
+ *                [key=value ...]   (settings: 12, 0.5, true/false)
  *
  * Exit code is non-zero if the filter could not be created or rendering failed;
  * all OBS log output goes to stderr.
@@ -226,7 +226,9 @@ int main(int argc, char **argv)
 		memcpy(key, argv[i], (size_t)(eq - argv[i]));
 		key[eq - argv[i]] = 0;
 		const char *val = eq + 1;
-		if (strchr(val, '.'))
+		if (strcmp(val, "true") == 0 || strcmp(val, "false") == 0)
+			obs_data_set_bool(settings, key, strcmp(val, "true") == 0);
+		else if (strchr(val, '.'))
 			obs_data_set_double(settings, key, atof(val));
 		else
 			obs_data_set_int(settings, key, atoll(val));

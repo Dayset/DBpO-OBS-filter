@@ -1,4 +1,4 @@
-project(perceptual-color-reduction VERSION 0.1.0 LANGUAGES C)
+project(perceptual-color-reduction VERSION 0.2.0 LANGUAGES C)
 
 add_obs_plugin(${PROJECT_NAME} SOURCES src/plugin-main.c src/color-reduction-filter.c src/palette.c)
 

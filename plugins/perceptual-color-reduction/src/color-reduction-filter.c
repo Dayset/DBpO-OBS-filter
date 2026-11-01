@@ -41,6 +41,11 @@ with this program. If not, see <https://www.gnu.org/licenses/>
 #define S_PAL_SMOOTH "palette_smoothing"
 #define S_SCENE_CUT "scene_change"
 #define S_VIEW "view"
+#define S_SOFTEN "soften_edges"
+#define S_SOFTEN_STRENGTH "soften_strength"
+#define S_SOFTEN_CENTER "soften_center"
+#define S_SOFTEN_FEATHER "soften_feather"
+#define S_SOFTEN_VERTICAL "soften_vertical"
 #define S_INFO "info"
 
 #define SAMPLE_W 160
@@ -57,6 +62,7 @@ enum reduce_mode {
 enum view_mode {
 	VIEW_RESULT = 0,
 	VIEW_SPLIT = 1,
+	VIEW_ZONE = 2,
 };
 
 struct pcr_filter {
@@ -103,6 +109,11 @@ struct pcr_filter {
 	float pal_smoothing;
 	float scene_cut;
 	enum view_mode view;
+	bool soften;
+	float soften_sigma;
+	float soften_center;
+	float soften_feather;
+	bool soften_vertical;
 };
 
 /* English fallbacks used when the locale file can't be found. */
@@ -141,6 +152,14 @@ static const struct {
 	{"View", "View"},
 	{"View.Result", "Result"},
 	{"View.Split", "Split compare (left original, right result)"},
+	{"Soften", "Edge softening (foveated, viewers need nothing)"},
+	{"SoftenInfo",
+	 "Blurs the sides while the center stays sharp: detail where nobody looks costs bits. Measured with x264: about -1% at typical quality, up to -14% at high quality on grainy footage. Check the zone with View > Softened zone."},
+	{"SoftenStrength", "Blur radius at the edges (px)"},
+	{"SoftenCenter", "Sharp center width (% of frame)"},
+	{"SoftenFeather", "Transition width (% of frame)"},
+	{"SoftenVertical", "Also soften top and bottom"},
+	{"View.Zone", "Softened zone (red tint)"},
 };
 
 static const char *T(const char *key)
@@ -239,6 +258,11 @@ static void apply_params(struct pcr_filter *f, const struct pass_inputs *in)
 	set_float(e, "hold", f->hold);
 	set_float(e, "history_valid", f->history_valid ? 1.0f : 0.0f);
 	set_float(e, "split", 0.5f);
+	set_float(e, "soften_sigma", f->soften ? f->soften_sigma : 0.0f);
+	set_float(e, "soften_center", f->soften_center);
+	set_float(e, "soften_feather", f->soften_feather);
+	set_float(e, "soften_vertical", f->soften_vertical ? 1.0f : 0.0f);
+	set_float(e, "show_zone", f->view == VIEW_ZONE ? 1.0f : 0.0f);
 }
 
 static bool run_pass(struct pcr_filter *f, gs_texrender_t *target, const char *technique, uint32_t w, uint32_t h,
@@ -317,6 +341,11 @@ static void pcr_update(void *data, obs_data_t *s)
 	f->pal_smoothing = (float)obs_data_get_double(s, S_PAL_SMOOTH) / 100.0f;
 	f->scene_cut = (float)obs_data_get_double(s, S_SCENE_CUT) / 100.0f;
 	f->view = (enum view_mode)obs_data_get_int(s, S_VIEW);
+	f->soften = obs_data_get_bool(s, S_SOFTEN);
+	f->soften_sigma = (float)obs_data_get_double(s, S_SOFTEN_STRENGTH);
+	f->soften_center = 0.5f * (float)obs_data_get_double(s, S_SOFTEN_CENTER) / 100.0f;
+	f->soften_feather = 0.5f * (float)obs_data_get_double(s, S_SOFTEN_FEATHER) / 100.0f;
+	f->soften_vertical = obs_data_get_bool(s, S_SOFTEN_VERTICAL);
 
 	if (f->colors < 2)
 		f->colors = 2;
@@ -586,6 +615,14 @@ static obs_properties_t *pcr_properties(void *data)
 	obs_properties_add_float_slider(bw, S_HOLD, T("Hold"), 0.0, 100.0, 1.0);
 	obs_properties_add_group(props, "bandwidth", T("Bandwidth"), OBS_GROUP_NORMAL, bw);
 
+	obs_properties_t *sg = obs_properties_create();
+	obs_properties_add_text(sg, "soften_info", T("SoftenInfo"), OBS_TEXT_INFO);
+	obs_properties_add_float_slider(sg, S_SOFTEN_STRENGTH, T("SoftenStrength"), 0.5, 6.0, 0.1);
+	obs_properties_add_float_slider(sg, S_SOFTEN_CENTER, T("SoftenCenter"), 10.0, 90.0, 1.0);
+	obs_properties_add_float_slider(sg, S_SOFTEN_FEATHER, T("SoftenFeather"), 5.0, 90.0, 1.0);
+	obs_properties_add_bool(sg, S_SOFTEN_VERTICAL, T("SoftenVertical"));
+	obs_properties_add_group(props, S_SOFTEN, T("Soften"), OBS_GROUP_CHECKABLE, sg);
+
 	obs_properties_t *cr = obs_properties_create();
 	obs_properties_add_text(cr, "reduce_info", T("ReduceInfo"), OBS_TEXT_INFO);
 	obs_property_t *m = obs_properties_add_list(cr, S_MODE, T("Mode"), OBS_COMBO_TYPE_LIST, OBS_COMBO_FORMAT_INT);
@@ -612,6 +649,7 @@ static obs_properties_t *pcr_properties(void *data)
 		obs_properties_add_list(props, S_VIEW, T("View"), OBS_COMBO_TYPE_LIST, OBS_COMBO_FORMAT_INT);
 	obs_property_list_add_int(v, T("View.Result"), VIEW_RESULT);
 	obs_property_list_add_int(v, T("View.Split"), VIEW_SPLIT);
+	obs_property_list_add_int(v, T("View.Zone"), VIEW_ZONE);
 	return props;
 }
 
@@ -635,6 +673,11 @@ static void pcr_defaults(obs_data_t *s)
 	obs_data_set_default_double(s, S_PAL_SMOOTH, 80.0);
 	obs_data_set_default_double(s, S_SCENE_CUT, 15.0);
 	obs_data_set_default_int(s, S_VIEW, VIEW_RESULT);
+	obs_data_set_default_bool(s, S_SOFTEN, false);
+	obs_data_set_default_double(s, S_SOFTEN_STRENGTH, 2.0);
+	obs_data_set_default_double(s, S_SOFTEN_CENTER, 30.0);
+	obs_data_set_default_double(s, S_SOFTEN_FEATHER, 40.0);
+	obs_data_set_default_bool(s, S_SOFTEN_VERTICAL, false);
 }
 
 struct obs_source_info perceptual_color_reduction_filter = {

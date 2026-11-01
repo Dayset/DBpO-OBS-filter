@@ -45,6 +45,7 @@ plugins/<name>/          one folder per plugin
   tests/run-tests.sh     run by CI for every plugin
   README.md
 common/                  shared sources (logging with per-plugin prefix)
+research/                measurements that aren't plugins (yet), e.g. research/foveation
 cmake/common/obs_plugin.cmake   add_obs_plugin(), target_embed_text()
 build-aux/effect-to-hlsl.py     lets CI compile every .effect with Microsoft's FXC
 ```

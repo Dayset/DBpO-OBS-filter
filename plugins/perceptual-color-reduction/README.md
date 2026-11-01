@@ -61,6 +61,7 @@ Palette timings on the 2-core test VM: octree 0.5 ms, warm k-means update 3.7 ms
   - **Chroma smoothing** — helps smooth gradients, costs bits on grainy footage (it leaves the grain in lightness, which is what the encoder's luma channel sees).
   - **Temporal denoise** — motion-adaptive recursive filter; only helps static grainy scenes.
   - **Hold unchanged pixels** — keeps last frame's pixel while the source stays close; costs bits on slow pans.
+- **Edge softening** (off by default) — foveated low-pass: the center stays sharp, blur ramps up toward the sides (and optionally top/bottom). Viewers need nothing special. Measured: +0.1% to −2.0% bitrate at CRF 23, −1.1% to −13.8% at CRF 18; at a fixed stream bitrate it does *not* make the center sharper (see `research/foveation`). *View → Softened zone* tints the affected area.
 - **Color reduction** (off by default) — *Posterize* (OKLab grid: lightness and chroma levels), *Adaptive palette: octree* or *k-means* (colors, update every N frames, palette smoothing, scene-change threshold), *Luminance protection* (weights lightness in palette distances), *Dither* (none / Bayer 4×4 / 8×8 and strength).
 - **View** — result, or split compare.
 
