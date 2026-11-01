@@ -113,7 +113,7 @@ static uint8_t *in_buf, *out_buf;
 static obs_source_t *feed_src;
 static gs_texrender_t *render_tr;
 static gs_stagesurf_t *render_stage;
-static bool pending;              /* an uploaded frame awaits rendering */
+static bool pending; /* an uploaded frame awaits rendering */
 static volatile bool finished;
 
 static void render_pending(void)

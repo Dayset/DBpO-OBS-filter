@@ -55,11 +55,10 @@ function(set_target_properties_plugin target)
   source_group(TREE "${CMAKE_CURRENT_SOURCE_DIR}" PREFIX "UI Files" FILES ${target_ui_files})
 
   # One version resource per plugin (PROJECT_* come from the plugin's own project()).
-  configure_file(
-    "${CMAKE_SOURCE_DIR}/cmake/windows/resources/resource.rc.in"
-    "${CMAKE_CURRENT_BINARY_DIR}/${target}.rc"
-  )
-  target_sources(${target} PRIVATE "${CMAKE_CURRENT_BINARY_DIR}/${target}.rc")
+  set(_rc_in "${CMAKE_SOURCE_DIR}/cmake/windows/resources/resource.rc.in")
+  set(_rc_out "${CMAKE_CURRENT_BINARY_DIR}/${target}.rc")
+  configure_file("${_rc_in}" "${_rc_out}")
+  target_sources(${target} PRIVATE "${_rc_out}")
 endfunction()
 
 # Helper function to add resources into bundle
