@@ -33,12 +33,12 @@
     },
     "platformConfig": {
         "macos": {
-            "bundleId": "com.dayset.directional-object-blur"
+            "bundleId": "com.dayset.dbpo-obs-plugins"
         }
     },
-    "name": "directional-object-blur",
-    "displayName": "Directional Object Blur",
-    "version": "0.1.0",
+    "name": "dbpo-obs-plugins",
+    "displayName": "DBpO OBS Plugins",
+    "version": "0.7.0",
     "author": "dayset",
     "website": "https://github.com/",
     "email": "dayset@gmail.com"

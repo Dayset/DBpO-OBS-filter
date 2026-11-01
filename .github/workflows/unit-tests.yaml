@@ -2,10 +2,7 @@ name: Unit Tests
 on:
   push:
     paths:
-      - 'src/camera-model.*'
-      - 'src/mouse-sync.*'
-      - 'tests/**'
-      - 'data/**.effect'
+      - 'plugins/**'
       - '.github/workflows/unit-tests.yaml'
   pull_request:
   workflow_dispatch:
@@ -13,18 +10,20 @@ permissions:
   contents: read
 jobs:
   tests:
-    name: Camera model + mouse calibration 🧪
+    name: Plugin tests 🧪
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
-      - name: Build and run
+      - name: Install test dependencies
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq ffmpeg > /dev/null
+          pip install --quiet numpy scipy scikit-image
+      - name: Run every plugin's tests/run-tests.sh
         run: |
           set -e
-          gcc -O2 -Wall -Wextra -std=c17 -Isrc src/camera-model.c tests/test_camera_model.c -lm -o test_camera_model
-          gcc -O2 -Wall -Wextra -std=c17 -Isrc src/mouse-sync.c tests/test_mouse_sync.c -lm -o test_mouse_sync
-          ./test_camera_model
-          ./test_mouse_sync
-      - name: Blur reconstruction vs. simulated real exposure
-        run: |
-          pip install --quiet numpy scipy
-          python3 tests/reference_blur.py
+          for script in plugins/*/tests/run-tests.sh; do
+            echo "::group::${script}"
+            bash "${script}"
+            echo "::endgroup::"
+          done

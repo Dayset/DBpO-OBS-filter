@@ -4,54 +4,18 @@ include("${CMAKE_CURRENT_SOURCE_DIR}/cmake/common/bootstrap.cmake" NO_POLICY_SCO
 
 project(${_name} VERSION ${_version})
 
-option(ENABLE_FRONTEND_API "Use obs-frontend-api for UI functionality" OFF)
-option(ENABLE_QT "Use Qt functionality" OFF)
-
 include(compilerconfig)
 include(defaults)
 include(helpers)
-
-add_library(${CMAKE_PROJECT_NAME} MODULE)
+include(obs_plugin)
 
 find_package(libobs REQUIRED)
-target_link_libraries(${CMAKE_PROJECT_NAME} PRIVATE OBS::libobs)
 
-if(ENABLE_FRONTEND_API)
-  find_package(obs-frontend-api REQUIRED)
-  target_link_libraries(${CMAKE_PROJECT_NAME} PRIVATE OBS::obs-frontend-api)
-endif()
-
-if(ENABLE_QT)
-  find_package(Qt6 COMPONENTS Widgets Core)
-  target_link_libraries(${CMAKE_PROJECT_NAME} PRIVATE Qt6::Core Qt6::Widgets)
-  target_compile_options(
-    ${CMAKE_PROJECT_NAME}
-    PRIVATE $<$<C_COMPILER_ID:Clang,AppleClang>:-Wno-quoted-include-in-framework-header -Wno-comma>
-  )
-  set_target_properties(
-    ${CMAKE_PROJECT_NAME}
-    PROPERTIES AUTOMOC ON AUTOUIC ON AUTORCC ON
-  )
-endif()
-
-target_sources(
-  ${CMAKE_PROJECT_NAME}
-  PRIVATE src/plugin-main.c src/directional-blur-filter.c src/camera-model.c src/mouse-sync.c src/raw-mouse.c
-)
-
-# Bake the shader into the DLL so the filter still works if the data folder is missing.
-set(_effect_src "${CMAKE_CURRENT_SOURCE_DIR}/data/directional_object_blur.effect")
-set(_effect_hdr "${CMAKE_CURRENT_BINARY_DIR}/generated/embedded-effect.h")
-add_custom_command(
-  OUTPUT "${_effect_hdr}"
-  COMMAND
-    "${CMAKE_COMMAND}" -DINPUT=${_effect_src} -DOUTPUT=${_effect_hdr} -DSYMBOL=dob_embedded_effect -P
-    "${CMAKE_CURRENT_SOURCE_DIR}/cmake/embed-effect.cmake"
-  DEPENDS "${_effect_src}" "${CMAKE_CURRENT_SOURCE_DIR}/cmake/embed-effect.cmake"
-  COMMENT "Embedding shader"
-  VERBATIM
-)
-target_sources(${CMAKE_PROJECT_NAME} PRIVATE "${_effect_hdr}")
-target_include_directories(${CMAKE_PROJECT_NAME} PRIVATE "${CMAKE_CURRENT_BINARY_DIR}/generated")
-
-set_target_properties_plugin(${CMAKE_PROJECT_NAME} PROPERTIES OUTPUT_NAME ${_name})
+# Every folder in plugins/ that has a CMakeLists.txt is one plugin.
+file(GLOB _plugin_dirs LIST_DIRECTORIES true "${CMAKE_CURRENT_SOURCE_DIR}/plugins/*")
+list(SORT _plugin_dirs)
+foreach(_dir IN LISTS _plugin_dirs)
+  if(EXISTS "${_dir}/CMakeLists.txt")
+    add_subdirectory("${_dir}")
+  endif()
+endforeach()

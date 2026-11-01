@@ -1,0 +1,313 @@
+// Perceptual Color Reduction
+// Works in OKLab (perceptually uniform lightness/chroma). Mirrors the numpy
+// model in tests/bitrate_harness.py, which is what the defaults were measured
+// with.
+//
+// Passes:
+//   Sample    full-res color  -> 160x90 float copy, read back by the CPU to build
+//                                an adaptive palette (octree or k-means, src/palette.c)
+//   BuildLUT  palette         -> 64^3 RGB -> nearest palette color (OKLab), packed
+//                                into a 512x512 texture (8x8 tiles of 64x64)
+//   ToLab     full-res color  -> OKLab (16-bit float), so the 5x5 smoothing reads
+//                                ready-made OKLab instead of converting 25x per pixel
+//   Process   OKLab + history -> flatten noise, smooth chroma, quantize (posterize
+//                                grid or palette LUT), dither, temporal stability
+//   Compare   original/result -> split-screen debug view
+
+uniform float4x4 ViewProj;
+
+uniform texture2d image;     // current frame (Sample, Process) or result (Compare)
+uniform texture2d history;   // previous output (Process)
+uniform texture2d lut;       // packed palette LUT (Process)
+uniform texture2d palette;   // 256x1, OKLab in RGB (BuildLUT)
+uniform texture2d original;  // unprocessed frame (Compare)
+uniform texture2d lab_image; // frame in OKLab, alpha preserved (Process)
+
+uniform float2 texel;        // 1 / input size
+uniform int    mode;         // 0 off, 1 posterize grid, 2 palette LUT
+uniform float  step_l;       // posterize step, OKLab L
+uniform float  step_c;       // posterize step, OKLab a/b
+uniform float  luma_weight;  // >1 protects lightness detail in distances
+uniform int    palette_size;
+uniform int    dither_kind;  // 0 none, 1 Bayer 4x4, 2 Bayer 8x8
+uniform float  dither_strength;
+uniform float  flatten;      // edge-preserving smoothing range (OKLab), 0 = off
+uniform float  chroma_sigma; // chroma smoothing radius (px), 0 = off
+uniform float  temporal;     // soft temporal threshold (OKLab), 0 = off
+uniform float  temporal_min; // smallest update fraction for sub-threshold change
+uniform float  hold;         // hold previous output below this change (OKLab), 0 = off
+uniform float  history_valid;
+uniform float  split;        // Compare: x position of the split (0..1)
+
+sampler_state pointClamp {
+	Filter   = Point;
+	AddressU = Clamp;
+	AddressV = Clamp;
+};
+
+sampler_state linearClamp {
+	Filter   = Linear;
+	AddressU = Clamp;
+	AddressV = Clamp;
+};
+
+struct VertData {
+	float4 pos : POSITION;
+	float2 uv  : TEXCOORD0;
+};
+
+VertData VSDefault(VertData v_in)
+{
+	VertData vert_out;
+	vert_out.pos = mul(float4(v_in.pos.xyz, 1.0), ViewProj);
+	vert_out.uv  = v_in.uv;
+	return vert_out;
+}
+
+// ---------------------------------------------------------------- OKLab
+
+float3 srgb_to_linear(float3 c)
+{
+	float3 lo = c / 12.92;
+	float3 hi = pow((c + 0.055) / 1.055, float3(2.4, 2.4, 2.4));
+	return float3(c.r <= 0.04045 ? lo.r : hi.r, c.g <= 0.04045 ? lo.g : hi.g, c.b <= 0.04045 ? lo.b : hi.b);
+}
+
+float3 linear_to_srgb(float3 c)
+{
+	c = saturate(c);
+	float3 lo = c * 12.92;
+	float3 hi = 1.055 * pow(c, float3(1.0 / 2.4, 1.0 / 2.4, 1.0 / 2.4)) - 0.055;
+	return float3(c.r <= 0.0031308 ? lo.r : hi.r, c.g <= 0.0031308 ? lo.g : hi.g, c.b <= 0.0031308 ? lo.b : hi.b);
+}
+
+float cbrt_s(float x)
+{
+	return sign(x) * pow(abs(x), 1.0 / 3.0);
+}
+
+float3 to_oklab(float3 rgb)
+{
+	float3 c = srgb_to_linear(saturate(rgb));
+	float l = cbrt_s(0.4122214708 * c.r + 0.5363325363 * c.g + 0.0514459929 * c.b);
+	float m = cbrt_s(0.2119034982 * c.r + 0.6806995451 * c.g + 0.1073969566 * c.b);
+	float s = cbrt_s(0.0883024619 * c.r + 0.2817188376 * c.g + 0.6299787005 * c.b);
+	return float3(0.2104542553 * l + 0.7936177850 * m - 0.0040720468 * s,
+	              1.9779984951 * l - 2.4285922050 * m + 0.4505937099 * s,
+	              0.0259040371 * l + 0.7827717662 * m - 0.8086757660 * s);
+}
+
+float3 from_oklab(float3 lab)
+{
+	float l = lab.x + 0.3963377774 * lab.y + 0.2158037573 * lab.z;
+	float m = lab.x - 0.1055613458 * lab.y - 0.0638541728 * lab.z;
+	float s = lab.x - 0.0894841775 * lab.y - 1.2914855480 * lab.z;
+	l = l * l * l;
+	m = m * m * m;
+	s = s * s * s;
+	return linear_to_srgb(float3(4.0767416621 * l - 3.3077115913 * m + 0.2309699292 * s,
+	                             -1.2684380046 * l + 2.6097574011 * m - 0.3413193965 * s,
+	                             -0.0041960863 * l - 0.7034186147 * m + 1.7076147010 * s));
+}
+
+float lab_dist(float3 x, float3 y)
+{
+	float3 d = (x - y) * float3(luma_weight, 1.0, 1.0);
+	return sqrt(dot(d, d));
+}
+
+// ---------------------------------------------------------------- Dither
+
+// Ordered dither offset in [-0.5, 0.5), fixed in screen space (temporally
+// stable, unlike random noise).
+float bayer(float2 px)
+{
+	if (dither_kind == 0)
+		return 0.0;
+	// Recursive Bayer: M(2n) = 4 * M(n) + B2(quadrant), B2 = [[0, 2], [3, 1]].
+	// The finest bit is the most significant, so build from bit 0 upward.
+	int levels = dither_kind == 1 ? 2 : 3;
+	float v = 0.0;
+	float scale = 1.0;
+	for (int i = 0; i < levels; i++) {
+		float bx = fmod(floor(px.x / scale), 2.0);
+		float by = fmod(floor(px.y / scale), 2.0);
+		v = v * 4.0 + 2.0 * abs(bx - by) + by;
+		scale *= 2.0;
+	}
+	float n = dither_kind == 1 ? 16.0 : 64.0;
+	return (v + 0.5) / n - 0.5;
+}
+
+// ---------------------------------------------------------------- Sample
+
+float4 PSSample(VertData v_in) : TARGET
+{
+	// image is full-res; this target is tiny, so average a 4x4 grid.
+	float4 acc = float4(0.0, 0.0, 0.0, 0.0);
+	for (int y = 0; y < 4; y++)
+		for (int x = 0; x < 4; x++)
+			acc += image.SampleLevel(linearClamp, v_in.uv + (float2(x, y) - 1.5) * texel * 3.0, 0.0);
+	return acc / 16.0;
+}
+
+// ---------------------------------------------------------------- BuildLUT
+
+float4 PSBuildLUT(VertData v_in) : TARGET
+{
+	// 512x512: tile (tx, ty) holds blue slice b = ty * 8 + tx; inside a tile,
+	// x = red, y = green (64 levels each).
+	float2 p = floor(v_in.uv * 512.0);
+	float2 tile = floor(p / 64.0);
+	float2 cell = p - tile * 64.0;
+	float3 rgb = (float3(cell.x, cell.y, tile.y * 8.0 + tile.x) + 0.5) / 64.0;
+	float3 lab = to_oklab(rgb);
+
+	float best = 1e9;
+	float3 best_c = lab;
+	for (int i = 0; i < palette_size; i++) {
+		float3 c = palette.SampleLevel(pointClamp, float2((float(i) + 0.5) / 256.0, 0.5), 0.0).rgb;
+		float d = lab_dist(lab, c);
+		if (d < best) {
+			best = d;
+			best_c = c;
+		}
+	}
+	return float4(best_c, 1.0); // OKLab of the nearest palette color
+}
+
+float3 lut_lookup(float3 rgb)
+{
+	float3 q = min(floor(saturate(rgb) * 64.0), 63.0);
+	float2 tile = float2(fmod(q.b, 8.0), floor(q.b / 8.0));
+	float2 uv = (tile * 64.0 + q.rg + 0.5) / 512.0;
+	return lut.SampleLevel(pointClamp, uv, 0.0).rgb;
+}
+
+// ---------------------------------------------------------------- ToLab
+
+float4 PSToLab(VertData v_in) : TARGET
+{
+	float4 c = image.SampleLevel(pointClamp, v_in.uv, 0.0);
+	return float4(to_oklab(c.rgb), c.a);
+}
+
+// ---------------------------------------------------------------- Process
+
+float4 PSProcess(VertData v_in) : TARGET
+{
+	float4 src = lab_image.SampleLevel(pointClamp, v_in.uv, 0.0); // OKLab + alpha
+	float3 lab = src.rgb;
+
+	// Edge-preserving smoothing (lightness + chroma) and/or chroma-only
+	// smoothing over a 5x5 window. Edges survive: weights fall off with
+	// OKLab distance from the center pixel.
+	if (flatten > 0.0 || chroma_sigma > 0.0) {
+		float3 acc_f = float3(0.0, 0.0, 0.0);
+		float w_f = 0.0;
+		float2 acc_c = float2(0.0, 0.0);
+		float w_c = 0.0;
+		float inv_f = flatten > 0.0 ? 1.0 / (2.0 * flatten * flatten) : 0.0;
+		float inv_c = chroma_sigma > 0.0 ? 1.0 / (2.0 * chroma_sigma * chroma_sigma) : 0.0;
+		for (int y = -2; y <= 2; y++) {
+			for (int x = -2; x <= 2; x++) {
+				float3 s = lab_image.SampleLevel(pointClamp, v_in.uv + float2(x, y) * texel, 0.0).rgb;
+				float r2 = float(x * x + y * y);
+				float3 d = s - lab;
+				float wf = exp(-dot(d, d) * inv_f - r2 / 4.5);
+				acc_f += s * wf;
+				w_f += wf;
+				float wc = exp(-r2 * inv_c);
+				acc_c += s.yz * wc;
+				w_c += wc;
+			}
+		}
+		if (flatten > 0.0)
+			lab = acc_f / w_f;
+		if (chroma_sigma > 0.0)
+			lab.yz = acc_c / w_c;
+	}
+
+	float3 q = lab;
+	float d = bayer(v_in.uv / texel) * dither_strength;
+	if (mode == 1) {
+		float3 steps = float3(step_l, step_c, step_c);
+		q = floor(lab / steps + 0.5 + d) * steps;
+	} else if (mode == 2) {
+		q = lut_lookup(from_oklab(lab) + d / 32.0);
+	}
+
+	if (history_valid > 0.5) {
+		float3 prev = to_oklab(history.SampleLevel(pointClamp, v_in.uv, 0.0).rgb);
+		// Motion-adaptive recursive filter: changes below `temporal` are
+		// only partly applied (noise averages out), larger ones pass.
+		if (temporal > 0.0) {
+			float k = clamp(lab_dist(q, prev) / temporal, temporal_min, 1.0);
+			q = prev + (q - prev) * k;
+		}
+		// Hold: keep last frame's pixel while the source stays close to it.
+		if (hold > 0.0 && lab_dist(lab, prev) < hold)
+			q = prev;
+	}
+
+	return float4(from_oklab(q), src.a);
+}
+
+// ---------------------------------------------------------------- Compare
+
+float4 PSCompare(VertData v_in) : TARGET
+{
+	float4 o = original.SampleLevel(pointClamp, v_in.uv, 0.0);
+	float4 r = image.SampleLevel(pointClamp, v_in.uv, 0.0);
+	float line_px = abs(v_in.uv.x - split) / texel.x;
+	if (line_px < 1.0)
+		return float4(1.0, 1.0, 1.0, 1.0);
+	return v_in.uv.x < split ? o : r;
+}
+
+// ---------------------------------------------------------------- Techniques
+
+technique Sample
+{
+	pass
+	{
+		vertex_shader = VSDefault(v_in);
+		pixel_shader  = PSSample(v_in);
+	}
+}
+
+technique BuildLUT
+{
+	pass
+	{
+		vertex_shader = VSDefault(v_in);
+		pixel_shader  = PSBuildLUT(v_in);
+	}
+}
+
+technique ToLab
+{
+	pass
+	{
+		vertex_shader = VSDefault(v_in);
+		pixel_shader  = PSToLab(v_in);
+	}
+}
+
+technique Process
+{
+	pass
+	{
+		vertex_shader = VSDefault(v_in);
+		pixel_shader  = PSProcess(v_in);
+	}
+}
+
+technique Compare
+{
+	pass
+	{
+		vertex_shader = VSDefault(v_in);
+		pixel_shader  = PSCompare(v_in);
+	}
+}

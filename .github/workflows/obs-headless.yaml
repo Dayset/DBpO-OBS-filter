@@ -1,0 +1,26 @@
+name: OBS Headless Smoke Test
+on:
+  push:
+    paths:
+      - 'plugins/**'
+      - 'common/**'
+      - 'cmake/**'
+      - 'CMakeLists.txt'
+      - 'build-aux/obs-headless/**'
+      - '.github/workflows/obs-headless.yaml'
+  pull_request:
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  smoke:
+    name: Run every filter inside libobs 🎬
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install libobs, Xvfb and build tools
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq libobs-dev libx11-dev xvfb ninja-build python3-numpy mesa-utils > /dev/null
+      - name: Smoke test (OpenGL backend, software GPU)
+        run: build-aux/obs-headless/smoke-test.sh

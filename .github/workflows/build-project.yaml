@@ -73,6 +73,9 @@ jobs:
 
   macos-build:
     name: Build for macOS 🍏
+    # Disabled: the suite targets Windows (raw mouse input is Windows-only) and the
+    # template's macOS installer packaging assumes a single plugin per repository.
+    if: false
     runs-on: macos-15
     needs: check-event
     defaults:

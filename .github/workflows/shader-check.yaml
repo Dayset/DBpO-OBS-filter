@@ -2,12 +2,12 @@ name: Shader Check
 on:
   push:
     paths:
-      - 'data/**.effect'
+      - 'plugins/*/data/**.effect'
       - 'build-aux/effect-to-hlsl.py'
       - '.github/workflows/shader-check.yaml'
   pull_request:
     paths:
-      - 'data/**.effect'
+      - 'plugins/*/data/**.effect'
   workflow_dispatch:
 permissions:
   contents: read
@@ -25,7 +25,7 @@ jobs:
           if (-not $fxc) { throw "fxc.exe not found" }
           Write-Host "Using $($fxc.FullName)"
           $failed = 0
-          foreach ($effect in Get-ChildItem data -Filter *.effect) {
+          foreach ($effect in Get-ChildItem plugins -Recurse -Filter *.effect) {
             $hlsl = Join-Path $env:RUNNER_TEMP "$($effect.BaseName).hlsl"
             $entries = (python build-aux/effect-to-hlsl.py $effect.FullName $hlsl).Split(' ')
             foreach ($e in $entries) {
