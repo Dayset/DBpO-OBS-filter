@@ -59,7 +59,7 @@ Held edges are not static during camera pans: they jump 2–3 frames of motion a
 | 1500 kbps grain | 36.9 / 37.1 / 37.1 | 37.5 / 36.0 / 34.6 | 37.5 / 36.7 / 34.6 | 37.5 / 37.2 / 34.1 | 37.6 / 37.0 / 33.7 |
 
 - **The squish only pays when the stream is starved.** At 250–300 kbps (this clip needs ~340 kbps for CRF 23) the center gains +2.5 dB and even the middle ring improves. At 1500 kbps the encoder already has more bits than this simple clip can use (center 43.6 dB, near transparent), so there is nothing to win and the edges just lose detail. Real game streams at 6 Mbps 1080p60 are much closer to the starved case (visible blocking in motion), but this has to be confirmed on real footage.
-- **Black bars instead of a smaller frame** (squished 720×404 centered in 960×540 black, 250 kbps): fovea 36.3 dB with the picture placed on 16-px blocks, 35.8 dB unaligned, vs 37.6 dB at the exact size and 35.0 dB without squish. Grain: 33.3 vs 34.0 vs 31.4. Bars keep roughly half the gain, so the plugin's default is to fill a standard canvas by squeezing canvas ÷ source.
+- **Black bars instead of a smaller frame** (squished 720×404 centered in 960×540 black, 250 kbps): fovea 36.3 dB with the picture placed on 16-px blocks, 35.8 dB unaligned, vs 37.6 dB at the exact size and 35.0 dB without squish. Grain: 33.3 vs 34.0 vs 31.4. Bars keep roughly half the gain, so the plugin doesn't offer them: it fills a standard canvas by squeezing canvas ÷ source (game rendered above the canvas size, e.g. with DLDSR).
 - Curve 1.5 keeps the middle ring sharpest; curve 0.5 allows the strongest squeeze (65%) and the best center. Linear is the balanced default.
 
 ## Bitstream-level foveation: tiles and "server-side packet loss"
