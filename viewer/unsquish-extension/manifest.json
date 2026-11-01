@@ -1,0 +1,19 @@
+{
+  "manifest_version": 3,
+  "name": "DBpO Unsquish",
+  "version": "0.1.0",
+  "description": "Unfolds Foveated Squish streams (sharp center, squeezed edges) back to full size with a GPU shader.",
+  "permissions": ["storage"],
+  "action": {
+    "default_popup": "popup.html",
+    "default_icon": { "16": "icons/16.png", "48": "icons/48.png", "128": "icons/128.png" }
+  },
+  "icons": { "16": "icons/16.png", "48": "icons/48.png", "128": "icons/128.png" },
+  "content_scripts": [
+    {
+      "matches": ["<all_urls>"],
+      "js": ["squish.js", "content.js"],
+      "run_at": "document_idle"
+    }
+  ]
+}

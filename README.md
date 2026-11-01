@@ -8,6 +8,8 @@ Target: **Windows 11, OBS Studio 31+ (Direct3D 11)**. Linux builds are produced 
 |---|---|---|
 | **Directional Object Blur** | Per-object and camera motion blur from optical flow, jump-flood velocity dilation, trailing shutter, raw mouse input for fast turns, UI protection | [plugins/directional-object-blur](plugins/directional-object-blur/README.md) |
 | **Perceptual Color Reduction** | Perceptual color/noise reduction in OKLab, measured against encoder bitrate | [plugins/perceptual-color-reduction](plugins/perceptual-color-reduction/README.md) |
+| **Foveated Squish** | Squeezes the frame edges (X and Y) so a fixed bitrate goes to the sharp 1:1 center (+2.5 dB center PSNR at the same CBR); shareable config string | [plugins/foveated-squish](plugins/foveated-squish/README.md) |
+| **DBpO Unsquish** (Chrome/Edge extension) | Viewer side of Foveated Squish: unfolds the stream back to full shape with WebGL | [viewer/unsquish-extension](viewer/unsquish-extension/README.md) |
 
 ## Installing (Windows)
 
@@ -46,6 +48,7 @@ plugins/<name>/          one folder per plugin
   README.md
 common/                  shared sources (logging with per-plugin prefix)
 research/                measurements that aren't plugins (yet), e.g. research/foveation
+viewer/                  viewer-side tools (browser extension for Foveated Squish)
 cmake/common/obs_plugin.cmake   add_obs_plugin(), target_embed_text()
 build-aux/effect-to-hlsl.py     lets CI compile every .effect with Microsoft's FXC
 ```

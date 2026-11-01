@@ -1,0 +1,27 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<style>
+  body { font: 13px system-ui, sans-serif; width: 320px; margin: 12px; color: #1d1d1f; background: #fff; }
+  h1 { font-size: 15px; margin: 0 0 8px; }
+  textarea { width: 100%; box-sizing: border-box; height: 64px; font: 12px ui-monospace, monospace; }
+  label { display: flex; gap: 6px; align-items: center; margin: 6px 0; }
+  .status { margin-top: 8px; padding: 6px 8px; border-radius: 6px; background: #f2f2f4; word-break: break-all; }
+  .bad { background: #fde8e8; }
+  button { margin-top: 6px; }
+  @media (prefers-color-scheme: dark) { body { background: #1e1e20; color: #eee; } .status { background: #2c2c30; } .bad { background: #4a2020; } textarea { background: #2c2c30; color: #eee; } }
+</style>
+</head>
+<body>
+  <h1>DBpO Unsquish</h1>
+  <label><input type="checkbox" id="enabled"> Unsquish videos</label>
+  <label><input type="checkbox" id="autoDetect"> Auto-detect config in stream title</label>
+  <div>Config from the streamer (FSQ1:…):</div>
+  <textarea id="config" placeholder="FSQ1:rx=0.75,ry=0.75,cx=0.15,cy=0.15,fx=0.5,fy=0.5,px=1,py=1,ar=1.7778"></textarea>
+  <button id="save">Save</button> <button id="clear">Clear</button>
+  <div id="status" class="status"></div>
+  <script src="squish.js"></script>
+  <script src="popup.js"></script>
+</body>
+</html>

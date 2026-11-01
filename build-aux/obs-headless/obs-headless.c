@@ -108,7 +108,8 @@ static void count_errors(int lvl, const char *fmt, va_list args, void *p)
 
 /* ------------------------------------------------------------------ frame pump */
 
-static size_t frame_bytes;
+static size_t frame_bytes, out_bytes;
+static uint32_t OW, OH; /* filtered size (filters may resize) */
 static uint8_t *in_buf, *out_buf;
 static obs_source_t *feed_src;
 static gs_texrender_t *render_tr;
@@ -119,11 +120,11 @@ static volatile bool finished;
 static void render_pending(void)
 {
 	gs_texrender_reset(render_tr);
-	if (gs_texrender_begin(render_tr, W, H)) {
+	if (gs_texrender_begin(render_tr, OW, OH)) {
 		struct vec4 clear;
 		vec4_zero(&clear);
 		gs_clear(GS_CLEAR_COLOR, &clear, 0.0f, 0);
-		gs_ortho(0.0f, (float)W, 0.0f, (float)H, -100.0f, 100.0f);
+		gs_ortho(0.0f, (float)OW, 0.0f, (float)OH, -100.0f, 100.0f);
 		gs_blend_state_push();
 		gs_blend_function(GS_BLEND_ONE, GS_BLEND_ZERO);
 		obs_source_video_render(feed_src);
@@ -133,13 +134,13 @@ static void render_pending(void)
 	gs_stage_texture(render_stage, gs_texrender_get_texture(render_tr));
 	uint8_t *data;
 	uint32_t linesize;
-	memset(out_buf, 0, frame_bytes);
+	memset(out_buf, 0, out_bytes);
 	if (gs_stagesurface_map(render_stage, &data, &linesize)) {
-		for (uint32_t y = 0; y < H; y++)
-			memcpy(out_buf + (size_t)y * W * 4, data + (size_t)y * linesize, (size_t)W * 4);
+		for (uint32_t y = 0; y < OH; y++)
+			memcpy(out_buf + (size_t)y * OW * 4, data + (size_t)y * linesize, (size_t)OW * 4);
 		gs_stagesurface_unmap(render_stage);
 	}
-	fwrite(out_buf, 1, frame_bytes, stdout);
+	fwrite(out_buf, 1, out_bytes, stdout);
 }
 
 static long frames_done;
@@ -248,12 +249,20 @@ int main(int argc, char **argv)
 	obs_leave_graphics();
 
 	frame_bytes = (size_t)W * H * 4;
+	OW = obs_source_get_width(src);
+	OH = obs_source_get_height(src);
+	if (!OW || !OH) {
+		OW = W;
+		OH = H;
+	}
+	out_bytes = (size_t)OW * OH * 4;
+	fprintf(stderr, "obs-headless: output %ux%u\n", OW, OH);
 	in_buf = malloc(frame_bytes);
-	out_buf = malloc(frame_bytes);
+	out_buf = malloc(out_bytes);
 	feed_src = src;
 	obs_enter_graphics();
 	render_tr = gs_texrender_create(GS_RGBA, GS_ZS_NONE);
-	render_stage = gs_stagesurface_create(W, H, GS_RGBA);
+	render_stage = gs_stagesurface_create(OW, OH, GS_RGBA);
 	obs_leave_graphics();
 	render_errors = 0;
 	obs_add_tick_callback(tick_cb, NULL);

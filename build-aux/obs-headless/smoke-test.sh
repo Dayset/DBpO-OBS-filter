@@ -50,12 +50,17 @@ for dir in "$root"/plugins/*/; do
 	for id in $ids; do
 		if DISPLAY="$display" timeout 300 "$work/obs-headless" "$so" "$data" "$id" "$W" "$H" \
 			<"$work/in.rgba" >"$work/out.rgba" 2>"$work/log.txt"; then
-			result="$(python3 - "$work/in.rgba" "$work/out.rgba" "$W" "$H" "$N" <<'EOF'
+			size="$(grep -o 'output [0-9]*x[0-9]*' "$work/log.txt" | head -1 | cut -d' ' -f2)"
+			result="$(python3 - "$work/in.rgba" "$work/out.rgba" "$W" "$H" "$N" "$size" <<'EOF'
 import sys, numpy as np
 a = np.fromfile(sys.argv[1], np.uint8); b = np.fromfile(sys.argv[2], np.uint8)
 w, h, n = int(sys.argv[3]), int(sys.argv[4]), int(sys.argv[5])
-if b.size != a.size:
-    print(f"FAIL frames: got {b.size // (w*h*4)} of {n}"); sys.exit()
+ow, oh = (int(v) for v in sys.argv[6].split("x"))
+if b.size != ow * oh * 4 * n:
+    print(f"FAIL frames: got {b.size // (ow*oh*4)} of {n}"); sys.exit()
+if (ow, oh) != (w, h):  # resizing filter: check it produced a real picture
+    b = b.reshape(n, oh, ow, 4)
+    print(("FAIL output is black" if b[..., :3].max() == 0 else "ok") + f" resized to {ow}x{oh}"); sys.exit()
 a = a.reshape(n, h, w, 4).astype(int); b = b.reshape(n, h, w, 4).astype(int)
 if b[..., :3].max() == 0:
     print("FAIL output is black"); sys.exit()

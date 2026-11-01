@@ -1,0 +1,146 @@
+// Foveated Squish
+// Squeezes the periphery (X and Y) while the center keeps 1:1 pixels, so a
+// fixed stream bitrate is spent on the center. Viewers unfold it with the
+// browser extension (extension/), which implements the same mapping.
+//
+// Per axis: A = (lo, hi, ll, lr): sharp center bounds and periphery lengths,
+//           B = (k, p, r, dmin): see src/squish-math.h.
+//
+// Passes:
+//   Squish    source -> squished frame. Each output pixel finds its source
+//             position (Newton on the closed-form mapping) and averages the
+//             source area it covers (up to 4x4 taps): a proper downscale
+//             filter, so the squeezed edges don't shimmer.
+//   Unsquish  squished -> source size (what extension viewers see; preview).
+//   Zone      source with the squeezed area tinted by squeeze strength.
+
+uniform float4x4 ViewProj;
+uniform texture2d image;
+uniform float2 src_size;
+uniform float2 out_size;
+uniform float4 ax_a;
+uniform float4 ax_b;
+uniform float4 ay_a;
+uniform float4 ay_b;
+uniform float  prefilter; // 1 = area filter when squeezing, 0 = single bilinear tap
+uniform float2 align;     // sub-pixel shift so sharp-center pixels land exactly on source pixels
+
+sampler_state linearClamp {
+	Filter   = Linear;
+	AddressU = Clamp;
+	AddressV = Clamp;
+};
+
+struct VertData {
+	float4 pos : POSITION;
+	float2 uv  : TEXCOORD0;
+};
+
+VertData VSDefault(VertData v_in)
+{
+	VertData vert_out;
+	vert_out.pos = mul(float4(v_in.pos.xyz, 1.0), ViewProj);
+	vert_out.uv  = v_in.uv;
+	return vert_out;
+}
+
+float periph(float t, float len, float k, float p)
+{
+	return len * (t - k * pow(t, p + 1.0));
+}
+
+// Source position (0..1) -> squished position (0..1).
+float sq_forward(float x, float4 A, float4 B)
+{
+	float left_full = periph(1.0, A.z, B.x, B.y);
+	float u;
+	if (x < A.x)
+		u = left_full - periph(saturate((A.x - x) / max(A.z, 1e-6)), A.z, B.x, B.y);
+	else if (x <= A.y)
+		u = left_full + (x - A.x);
+	else
+		u = left_full + (A.y - A.x) + periph(saturate((x - A.y) / max(A.w, 1e-6)), A.w, B.x, B.y);
+	return u / B.z;
+}
+
+// Squished pixels per source pixel.
+float sq_density(float x, float4 A, float4 B)
+{
+	float t = 0.0;
+	if (x < A.x)
+		t = (A.x - x) / max(A.z, 1e-6);
+	else if (x > A.y)
+		t = (x - A.y) / max(A.w, 1e-6);
+	return 1.0 - (1.0 - B.w) * pow(saturate(t), B.y);
+}
+
+// Squished position -> source position (Newton; d >= dmin > 0 so it converges).
+float sq_inverse(float u, float4 A, float4 B)
+{
+	float x = u;
+	for (int i = 0; i < 8; i++)
+		x = saturate(x - (sq_forward(x, A, B) - u) / (sq_density(x, A, B) / B.z));
+	return x;
+}
+
+float4 PSSquish(VertData v_in) : TARGET
+{
+	float2 u = v_in.uv + align;
+	float2 s = float2(sq_inverse(u.x, ax_a, ax_b), sq_inverse(u.y, ay_a, ay_b));
+	if (prefilter < 0.5)
+		return image.SampleLevel(linearClamp, s, 0.0);
+
+	// One output pixel covers 1/d source pixels per axis: average that area.
+	float2 foot = float2(1.0 / sq_density(s.x, ax_a, ax_b), 1.0 / sq_density(s.y, ay_a, ay_b));
+	int kx = int(clamp(ceil(foot.x), 1.0, 4.0));
+	int ky = int(clamp(ceil(foot.y), 1.0, 4.0));
+	float4 acc = float4(0.0, 0.0, 0.0, 0.0);
+	for (int j = 0; j < ky; j++) {
+		for (int i = 0; i < kx; i++) {
+			float2 o = (float2((float(i) + 0.5) / float(kx), (float(j) + 0.5) / float(ky)) - 0.5) * foot;
+			acc += image.SampleLevel(linearClamp, s + o / src_size, 0.0);
+		}
+	}
+	return acc / float(kx * ky);
+}
+
+float4 PSUnsquish(VertData v_in) : TARGET
+{
+	float2 u = float2(sq_forward(v_in.uv.x, ax_a, ax_b), sq_forward(v_in.uv.y, ay_a, ay_b)) - align;
+	return image.SampleLevel(linearClamp, u, 0.0);
+}
+
+float4 PSZone(VertData v_in) : TARGET
+{
+	float4 c = image.SampleLevel(linearClamp, v_in.uv, 0.0);
+	float d = min(sq_density(v_in.uv.x, ax_a, ax_b), sq_density(v_in.uv.y, ay_a, ay_b));
+	float squeeze = saturate((1.0 - d) / 0.92);
+	return float4(lerp(c.rgb, float3(1.0, 0.15, 0.1), squeeze * 0.6), c.a);
+}
+
+technique Squish
+{
+	pass
+	{
+		vertex_shader = VSDefault(v_in);
+		pixel_shader  = PSSquish(v_in);
+	}
+}
+
+technique Unsquish
+{
+	pass
+	{
+		vertex_shader = VSDefault(v_in);
+		pixel_shader  = PSUnsquish(v_in);
+	}
+}
+
+technique Zone
+{
+	pass
+	{
+		vertex_shader = VSDefault(v_in);
+		pixel_shader  = PSZone(v_in);
+	}
+}

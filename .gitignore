@@ -8,6 +8,7 @@
 !/common
 !/plugins
 !/research
+!/viewer
 !.clang-format
 !.gersemirc
 !.gitignore
@@ -16,6 +17,9 @@
 !CMakePresets.json
 !LICENSE
 !README.md
+
+# Python caches
+__pycache__/
 
 # Exclude lock files
 *.lock.json

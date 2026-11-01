@@ -3,6 +3,8 @@ on:
   push:
     paths:
       - 'plugins/**'
+      - 'viewer/**'
+      - 'research/foveation/squish_math.py'
       - '.github/workflows/unit-tests.yaml'
   pull_request:
   workflow_dispatch:
@@ -14,6 +16,9 @@ jobs:
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
       - name: Install test dependencies
         run: |
           sudo apt-get update -qq
@@ -27,3 +32,10 @@ jobs:
             bash "${script}"
             echo "::endgroup::"
           done
+      - name: Package the viewer extension
+        uses: actions/upload-artifact@v4
+        with:
+          name: dbpo-unsquish-extension
+          path: |
+            viewer/unsquish-extension
+            !viewer/unsquish-extension/tests
