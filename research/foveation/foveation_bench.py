@@ -145,6 +145,9 @@ def variants_cbr(src, d, x_of_u, u_centers, d_y, y_of_v, v_centers):
         "squish X 75% + unwarp (needs player)": (lambda f: resample_cols(preblur(f, d), x_of_u), "x"),
         "squish X+Y 75%/75% + unwarp (needs player)": (
             lambda f: resample_cols(preblur(f, d), x_of_u).transpose(1, 0, 2), "xy"),
+        "discard X+Y (drop rows/cols, no filter)": (
+            lambda f: np.ascontiguousarray(f[np.clip(np.round(y_of_v - 0.5).astype(int), 0, H - 1)][
+                :, np.clip(np.round(x_of_u - 0.5).astype(int), 0, W - 1)]), "drop"),
         "uniform 75% downscale + upscale": (
             lambda f: resample_cols(gaussian_filter1d(f, 0.6, axis=1), (np.arange(720) + 0.5) * W / 720), "u"),
     }
@@ -166,7 +169,9 @@ def main_cbr(n):
             enc = []
             for f in src:
                 g = fn(f)
-                if kind == "xy":  # rows squeezed too: g is transposed (W', H, 3) -> squeeze rows then back
+                if kind == "drop":
+                    pass
+                elif kind == "xy":  # rows squeezed too: g is transposed (W', H, 3) -> squeeze rows then back
                     g = resample_cols(preblur_rows(g, d_y), y_of_v).transpose(1, 0, 2)
                 enc.append(np.ascontiguousarray(g))
             path = os.path.join(TMP, "cbr.mp4")
@@ -179,6 +184,9 @@ def main_cbr(n):
                        for f in dec]
             elif kind == "u":
                 dec = [resample_cols(f, (np.arange(W) + 0.5) * 720 / W) for f in dec]
+            elif kind == "drop":  # same unwarp as the squish
+                dec = [resample_cols(resample_cols(f, u_centers).transpose(1, 0, 2), v_centers).transpose(1, 0, 2)
+                       for f in dec]
             pc, pe = psnr_regions(src, dec)
             print(f"   {name:<46}{pc:12.2f}{pe:10.2f}{rate:12.0f}", flush=True)
 

@@ -16,12 +16,14 @@ Luma PSNR of the decoded (and, where needed, unwarped) result vs. the original.
 | Baseline (250 / 300 kbps) | 36.30 / 31.71 | 35.71 / 30.81 | nothing |
 | **Squish X+Y 75%/75% + unwarp** | **38.07 / 34.37** (+1.8 / +2.7 dB) | 34.38 / 31.96 | unwarp player |
 | Squish X 75% + unwarp | 37.53 / 33.20 (+1.2 / +1.5 dB) | 35.17 / 31.63 | unwarp player |
+| Discard X+Y: drop rows/cols, no filter, same unwarp | 38.08 / 34.15 (+1.8 / +2.4 dB) | 34.19 / 31.58 | unwarp player |
 | Uniform 75% downscale + upscale | 36.32 / 33.63 (+0 / +1.9 dB) | 35.09 / 32.44 | nothing (lower resolution) |
 | Edge softening (blur) | 36.30 / 31.55 | 35.42 / 30.90 | nothing |
 | Line doubling in place, X | 36.30 / 31.28 | 34.55 / 30.32 | nothing |
 | Line doubling in place, X+Y | 36.07 / 30.95 | 33.66 / 29.94 | nothing |
 
 - **The squish works as intended at a fixed bitrate:** removing pixels from the sides forces the encoder to spend the budget on the center, +1.2 to +2.7 dB there (roughly what 30–50% more bitrate would buy). X+Y beat X-only for the center.
+- Dropping whole rows/columns (nearest sampling, no pre-filter) gives the same center gain as the smooth squish; edges are slightly worse (aliasing/shimmer). It's an implementation choice, not a quality one.
 - **In-place line doubling ("empty rows/columns") gives no center gain:** duplicated pixels are not cheap enough for the encoder to move bits. The pixels must actually leave the frame.
 - Edge softening doesn't move bits to the center either; its benefit is bits saved at fixed quality (below).
 
