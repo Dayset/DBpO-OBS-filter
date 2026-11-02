@@ -25,6 +25,12 @@ function load() {
 }
 
 $("save").onclick = () => chrome.storage.sync.set({ config: $("config").value.trim() }, load);
+// Apply as soon as a valid string is pasted or typed (no Save click needed).
+$("config").addEventListener("input", () => {
+	const text = $("config").value.trim();
+	const cfg = FSQ.parse(text);
+	if (cfg) chrome.storage.sync.set({ config: cfg.text }, load);
+});
 $("clear").onclick = () => chrome.storage.sync.set({ config: "" }, load);
 $("enabled").onchange = (e) => chrome.storage.sync.set({ enabled: e.target.checked }, load);
 $("autoDetect").onchange = (e) => chrome.storage.sync.set({ autoDetect: e.target.checked }, load);

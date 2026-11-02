@@ -31,6 +31,27 @@ Not recommended:
 
 Optional check: set the filter's **View** to *Unsquished preview* to see what extension viewers will see, then set it back to *Squished* before going live.
 
+## Center size vs. how much is sacrificed
+
+Two different knobs:
+
+- **How much is thrown away in total** = streamed pixels ÷ game pixels. In *Fill the canvas* that's **canvas ÷ game resolution**, so it is set by your canvas, not by a slider. 2560×1440 game on a 1920×1080 canvas = 75% per side.
+- **Full-quality center** (slider) = how much of the frame is kept untouched. The rest absorbs the whole squeeze.
+
+The center can never be better than full quality (1:1 pixels). A smaller center doesn't make the center sharper; it only spreads the same total squeeze over more of the frame. To sacrifice the edges harder, stream fewer pixels: keep the game at 2560×1440 and lower the canvas.
+
+| Game | Canvas (= stream) | Kept per side | Full-quality center can be up to | Edges squeezed |
+|---|---|---|---|---|
+| 2560×1440 | 1920×1080 | 75% | ~70% of the frame | lightly |
+| 2560×1440 | 1600×900 | 62.5% | ~55% | medium |
+| 2560×1440 | 1280×720 | 50% | ~40% | hard |
+
+(The "up to" values are with *Max edge compression* at its default 12.5×. The info line shows the exact value for your setup.)
+
+Example: you want a 30% center at full quality and everything else heavily squeezed. Use a 1280×720 canvas, a full-quality center of 30%, and a low curve. Viewers with the extension see a 2560×1440-shaped picture whose center is exactly the game's pixels.
+
+**Curve:** low values (0.1–0.5) squeeze everything outside the center evenly, so there's a hard step at the center's edge. 1 is a linear ramp. High values keep a ring around the center almost sharp and push the squeeze to the far edges. A high curve can only throw away a little in total, so at 75% the curve tops out around 1.5–1.7, and higher slider values have no further effect (the filter lowers the curve automatically). Set **View → Squeezed zone** while you adjust: the preview shows the full-quality center as a green outline and tints the edges red by how hard they are squeezed, live, without reopening the filter.
+
 ## A. 1440p monitor → 1080p stream
 
 ![1440p monitor to 1080p stream](docs/1440p-monitor-1080p-stream.png)
@@ -75,5 +96,6 @@ DLDSR makes the game render above your monitor's resolution. The GPU does more w
 | Info line says NOT SQUEEZING | Game resolution ≤ canvas | Raise the game resolution (DLDSR) or lower the canvas |
 | Picture is smaller than the canvas, black around it | Source is still scaled from before | Right-click the source → Transform → **Reset Transform** |
 | Picture is bigger than the canvas / cut off | Canvas changed after adding the filter, or the transform was scaled up | Reset Transform; reopen the filter to recheck the info line |
-| Info line mentions the center was reduced | Squeeze stronger than the curve allows | Fine; or pick a row with 75% |
+| Info line says the curve/center was lowered | The center + curve can't absorb this much squeeze | Lower the curve, make the center smaller, or raise Max edge compression |
+| Filter reports a size that isn't your game's (e.g. 2763×1554) | Filter is on a group/nested scene (its size is the box around everything inside), or another filter above it resizes | Put the filter on the Game Capture source itself, at the bottom of its filter list |
 | Viewers see a squeezed picture | Extension missing, or config not pasted | Share the `FSQ1:…` string again; copy it after any settings change |

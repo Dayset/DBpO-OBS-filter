@@ -115,7 +115,15 @@ float4 PSZone(VertData v_in) : TARGET
 	float4 c = image.SampleLevel(linearClamp, v_in.uv, 0.0);
 	float d = min(sq_density(v_in.uv.x, ax_a, ax_b), sq_density(v_in.uv.y, ay_a, ay_b));
 	float squeeze = saturate((1.0 - d) / 0.98);
-	return float4(lerp(c.rgb, float3(1.0, 0.15, 0.1), squeeze * 0.6), c.a);
+	float3 rgb = lerp(c.rgb, float3(1.0, 0.15, 0.1), squeeze * 0.6);
+	// Green outline around the full-quality center (2 output pixels wide).
+	float2 px = 2.0 / out_size;
+	float2 uv = v_in.uv;
+	bool inside = uv.x >= ax_a.x && uv.x <= ax_a.y && uv.y >= ay_a.x && uv.y <= ay_a.y;
+	bool edge = inside && (uv.x - ax_a.x < px.x || ax_a.y - uv.x < px.x || uv.y - ay_a.x < px.y || ay_a.y - uv.y < px.y);
+	if (edge)
+		rgb = float3(0.15, 0.85, 0.35);
+	return float4(rgb, c.a);
 }
 
 technique Squish

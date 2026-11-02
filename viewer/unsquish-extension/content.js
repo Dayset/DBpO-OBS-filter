@@ -13,6 +13,13 @@ attribute vec2 a_pos;
 varying vec2 v_uv;
 void main() { v_uv = vec2(a_pos.x * 0.5 + 0.5, 0.5 - a_pos.y * 0.5); gl_Position = vec4(a_pos, 0.0, 1.0); }`;
 
+	// One live copy per page: after an extension update a fresh copy is injected
+	// and the old one (cut off from settings) must step aside.
+	const GEN = String(Date.now()) + Math.random();
+	document.documentElement.dataset.dbpoUnsquishGen = GEN;
+	const superseded = () => document.documentElement.dataset.dbpoUnsquishGen !== GEN;
+	for (const old of document.querySelectorAll("canvas[data-dbpo-unsquish]")) old.remove();
+
 	let settings = { enabled: true, autoDetect: true, config: "" };
 	let detected = null; // config found in the page
 	let state = null; // { video, canvas, gl, prog, loc, tex, cfg }
@@ -46,7 +53,9 @@ void main() { v_uv = vec2(a_pos.x * 0.5 + 0.5, 0.5 - a_pos.y * 0.5); gl_Position
 	function attach(video) {
 		const canvas = document.createElement("canvas");
 		canvas.dataset.dbpoUnsquish = "1";
-		Object.assign(canvas.style, { position: "absolute", pointerEvents: "none", zIndex: "1" });
+		// Directly above the video and below everything the player draws after it
+		// (controls, overlays); clicks go through to the player.
+		Object.assign(canvas.style, { position: "absolute", pointerEvents: "none" });
 		const gl = canvas.getContext("webgl", { premultipliedAlpha: false, preserveDrawingBuffer: true });
 		if (!gl) return null;
 		const prog = gl.createProgram();
@@ -71,7 +80,7 @@ void main() { v_uv = vec2(a_pos.x * 0.5 + 0.5, 0.5 - a_pos.y * 0.5); gl_Position
 		for (const n of ["u_video", "u_ax_a", "u_ax_b", "u_ay_a", "u_ay_b", "u_box", "u_texel"]) loc[n] = gl.getUniformLocation(prog, n);
 		const parent = video.parentElement;
 		if (getComputedStyle(parent).position === "static") parent.style.position = "relative";
-		parent.appendChild(canvas);
+		video.insertAdjacentElement("afterend", canvas);
 		video.dataset.dbpoOpacity = video.style.opacity;
 		video.style.opacity = "0";
 		return { video, canvas, gl, prog, loc, tex };
@@ -93,7 +102,9 @@ void main() { v_uv = vec2(a_pos.x * 0.5 + 0.5, 0.5 - a_pos.y * 0.5); gl_Position
 			h = vr.height;
 			w = h * cfg.ar;
 		}
-		const left = vr.left - pr.left + (vr.width - w) / 2, top = vr.top - pr.top + (vr.height - h) / 2;
+		// Absolute positions are relative to the parent's padding box (inside its border).
+		const left = vr.left - pr.left - parent.clientLeft + (vr.width - w) / 2;
+		const top = vr.top - pr.top - parent.clientTop + (vr.height - h) / 2;
 		Object.assign(s.canvas.style, { left: `${left}px`, top: `${top}px`, width: `${w}px`, height: `${h}px` });
 		const dpr = window.devicePixelRatio || 1;
 		const cw = Math.max(1, Math.round(w * dpr)), ch = Math.max(1, Math.round(h * dpr));
@@ -104,6 +115,10 @@ void main() { v_uv = vec2(a_pos.x * 0.5 + 0.5, 0.5 - a_pos.y * 0.5); gl_Position
 	}
 
 	function draw() {
+		if (superseded()) {
+			detach();
+			return; // a newer copy of the extension took over
+		}
 		const cfg = activeConfig();
 		const video = cfg ? findVideo() : null;
 		if (!cfg || !video) {
@@ -158,7 +173,11 @@ void main() { v_uv = vec2(a_pos.x * 0.5 + 0.5, 0.5 - a_pos.y * 0.5); gl_Position
 				break;
 			}
 		}
-		chrome.storage.local.set({ detected: detected ? detected.text : "" });
+		try {
+			chrome.storage.local.set({ detected: detected ? detected.text : "" });
+		} catch (e) {
+			// extension was updated/removed; the new copy handles this page
+		}
 	}
 
 	chrome.storage.sync.get(settings, (s) => {

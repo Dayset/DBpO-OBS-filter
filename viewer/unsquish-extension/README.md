@@ -12,14 +12,16 @@ Unfolds streams made with the [Foveated Squish](../../plugins/foveated-squish/RE
 
 Click the extension icon:
 
-- **Paste the streamer's config** (`FSQ1:rx=…`) and press **Save**. A pasted config always wins.
+- **Paste the streamer's config** (`FSQ1:rx=…`). It applies immediately to the playing video, no Save click or page refresh needed. A pasted config always wins.
 - Or leave **Auto-detect** on: if the streamer puts the `FSQ1:…` string in the stream or page title, it is picked up automatically.
 - **Unsquish videos** turns the whole thing off and on.
 
 The status line in the popup says which config is in use, or why a pasted string was rejected.
 
+After installing or updating the extension, open tabs are switched to the new version automatically.
+
 ## How it works
 
-`content.js` finds the largest playing `<video>`, sets it to `opacity: 0` (it keeps playing, with sound and player controls intact) and puts a canvas over its picture area, sized to the source aspect ratio. Every animation frame the video is uploaded as a texture and drawn with `squish.js`'s fragment shader, which maps each screen pixel to its position in the squished frame. The math is identical to the OBS shader; `tests/compare.js` checks it against the Python reference (worst difference 5e-13), and `tests/e2e.py` plays a squished VP9 video in headless Chromium and checks the canvas against the reference viewer (0.5/255 mean difference, landmarks within 0.02 px).
+`content.js` finds the largest playing `<video>`, sets it to `opacity: 0` (it keeps playing, with sound intact) and puts a canvas directly above it, below the player's own controls (they stay visible and clickable), sized to the source aspect ratio. Every animation frame the video is uploaded as a texture and drawn with `squish.js`'s fragment shader, which maps each screen pixel to its position in the squished frame. The math is identical to the OBS shader; `tests/compare.js` checks it against the Python reference (worst difference 5e-13), and `tests/e2e.py` plays a squished VP9 video in headless Chromium and checks the canvas against the reference viewer (0.5/255 mean difference, landmarks within 0.02 px).
 
 Limits: videos served cross-origin without CORS can't be read by WebGL; the extension then turns itself off for that page and logs a warning. DRM-protected video (not used by live streams) can't be read either.

@@ -110,14 +110,14 @@ static const struct {
 	{"InfoDefault",
 	 "Squeezes the edges (X and Y) so a fixed stream bitrate is spent on the sharp center. Viewers unfold it with the DBpO Unsquish browser extension."},
 	{"InfoFill",
-	 "Source %ux%u -> squeezed to fill your %ux%u canvas (%.0f%% x %.0f%%). Keep the canvas and output at %ux%u. %s"},
+	 "Source %ux%u -> squeezed to fill your %ux%u canvas (%.0f%% x %.0f%%). Keep the canvas and output at %ux%u. The full-quality center can be at most ~%.0f%% wide at this squeeze. To sacrifice the edges more, use a smaller canvas (see the setup guide). Use View > Squeezed zone to see the result live. %s"},
 	{"InfoFillSmall",
 	 "NOT SQUEEZING: the source (%ux%u) must be larger than the canvas (%ux%u). Run the game at a higher resolution than the canvas (2560x1440 for a 1920x1080 canvas, e.g. with NVIDIA DLDSR 1.78x on a 1080p monitor), or use the Exact size layout. See the setup guide."},
 	{"InfoExact",
 	 "Source %ux%u -> streamed %ux%u (%.0f%% of the pixels). Set OBS Settings > Video > Base (Canvas) and Output resolution to %ux%u (you can type a custom size into those fields). Press Copy to update these numbers after moving the sliders. %s"},
 	{"Clamped",
 	 "(Squeeze limited by Max edge compression: raise it, or lower the curve or the sharp center size.)"},
-	{"Reduced", "(The sharp center/curve is reduced automatically so this squeeze fits.)"},
+	{"Reduced", "(The curve, or if needed the center, is lowered automatically so this squeeze fits.)"},
 	{"MaxCompression",
 	 "Max edge compression (x:1). Higher allows stronger squeeze with harder curves; above ~16 the outermost edge smears"},
 	{"Layout", "Layout"},
@@ -126,11 +126,12 @@ static const struct {
 	{"Link", "Same settings for height"},
 	{"SqueezeWidth", "Streamed width (% of source)"},
 	{"SqueezeHeight", "Streamed height (% of source)"},
-	{"CenterWidth", "Sharp center width (% of frame, 1:1 pixels)"},
-	{"CenterHeight", "Sharp center height (% of frame)"},
+	{"CenterWidth", "Full-quality center (% of the frame, untouched pixels)"},
+	{"CenterHeight", "Full-quality center, height (% of the frame)"},
 	{"FocusX", "Focus position, horizontal (%)"},
 	{"FocusY", "Focus position, vertical (%)"},
-	{"CurveX", "Curve, horizontal (1 = linear, <1 squeeze starts fast, >1 edges hardest)"},
+	{"CurveX",
+	 "Curve (low = edges squeezed evenly right from the center; high = squeeze pushed to the far edges, limited by the squeeze)"},
 	{"CurveY", "Curve, vertical"},
 	{"Prefilter", "Area filter when squeezing (prevents edge shimmer)"},
 	{"View", "View"},
@@ -138,7 +139,7 @@ static const struct {
 	{"View.Unsquished", "Unsquished preview (what extension viewers see)"},
 	{"View.Zone", "Squeezed zone (red = squeezed harder)"},
 	{"Share", "Share with viewers"},
-	{"Config", "Config string (press Copy to update it)"},
+	{"Config", "Config string as of opening this window (Copy always copies the current one)"},
 	{"Copy", "Copy config to clipboard"},
 	{"Import", "Paste a config string to load it"},
 	{"ApplyImport", "Load pasted config"},
@@ -204,21 +205,8 @@ static enum fit_result fit_axis(struct squish_axis *a, double r, double floor)
 	a->r = r > 1.0 ? 1.0 : r;
 	if (a->r >= squish_axis_min_r_floor(a, floor))
 		return FIT_OK;
+	/* Keep the center size (the main control); flatten the curve first. */
 	const double c0 = a->c, p0 = a->p;
-	a->c = 0.01;
-	if (a->r >= squish_axis_min_r_floor(a, floor)) {
-		double lo = 0.01, hi = c0;
-		for (int i = 0; i < 40; i++) {
-			a->c = 0.5 * (lo + hi);
-			if (a->r >= squish_axis_min_r_floor(a, floor))
-				lo = a->c;
-			else
-				hi = a->c;
-		}
-		a->c = lo;
-		return FIT_REDUCED;
-	}
-	a->c = 0.025; /* keep a small sharp center, flatten the curve instead */
 	a->p = 0.1;
 	if (a->r >= squish_axis_min_r_floor(a, floor)) {
 		double lo = 0.1, hi = p0;
@@ -232,6 +220,18 @@ static enum fit_result fit_axis(struct squish_axis *a, double r, double floor)
 		a->p = lo;
 		return FIT_REDUCED;
 	}
+	/* Even a flat curve can't: the center itself is too big for this squeeze. */
+	double lo = 0.005, hi = c0;
+	for (int i = 0; i < 40; i++) {
+		a->c = 0.5 * (lo + hi);
+		if (a->r >= squish_axis_min_r_floor(a, floor))
+			lo = a->c;
+		else
+			hi = a->c;
+	}
+	a->c = lo;
+	if (a->r >= squish_axis_min_r_floor(a, floor))
+		return FIT_REDUCED;
 	a->r = squish_axis_min_r_floor(a, floor);
 	return FIT_LIMITED;
 }
@@ -551,9 +551,12 @@ static void describe(struct squish_filter *f, obs_data_t *s, char *info, size_t 
 	case LAYOUT_FILL:
 		if (L.ow >= w && L.oh >= h)
 			snprintf(info, info_size, T("InfoFillSmall"), w, h, L.cw, L.ch);
-		else
+		else {
+			/* Largest center a flat curve (0.1) allows at this squeeze. */
+			const double cmax = 1.0 - (1.0 - L.c.x.r) * 1.1 / (1.0 - tmp.floor);
 			snprintf(info, info_size, T("InfoFill"), w, h, L.cw, L.ch, 100.0 * L.c.x.r, 100.0 * L.c.y.r,
-				 L.cw, L.ch, note);
+				 L.cw, L.ch, cmax > 0 ? 100.0 * cmax : 0.0, note);
+		}
 		break;
 	default:
 		snprintf(info, info_size, T("InfoExact"), w, h, L.ow, L.oh, pixels, L.ow, L.oh, note);
@@ -590,14 +593,13 @@ static bool cfg_modified(obs_properties_t *props, obs_property_t *p, obs_data_t 
 
 static bool copy_clicked(obs_properties_t *props, obs_property_t *p, void *data)
 {
+	UNUSED_PARAMETER(props);
 	UNUSED_PARAMETER(p);
 	struct squish_filter *f = data;
 	obs_data_t *s = obs_source_get_settings(f->context);
 	char info[512], cfg[256];
 	describe(f, s, info, sizeof(info), cfg, sizeof(cfg), NULL, 0);
 	obs_data_set_string(s, S_CONFIG, cfg);
-	if (props) /* refresh the info line too (Exact size may have changed) */
-		obs_property_set_description(obs_properties_get(props, S_INFO), info);
 #ifdef _WIN32
 	const int n = MultiByteToWideChar(CP_UTF8, 0, cfg, -1, NULL, 0);
 	HGLOBAL mem = n > 0 ? GlobalAlloc(GMEM_MOVEABLE, (size_t)n * sizeof(wchar_t)) : NULL;
@@ -617,7 +619,7 @@ static bool copy_clicked(obs_properties_t *props, obs_property_t *p, void *data)
 	obs_log(LOG_INFO, "config (copy from the text field): %s", cfg);
 #endif
 	obs_data_release(s);
-	return true; /* show the fresh string in the field */
+	return false; /* no panel rebuild (it blinks); the clipboard has the current string */
 }
 
 static bool import_clicked(obs_properties_t *props, obs_property_t *p, void *data)

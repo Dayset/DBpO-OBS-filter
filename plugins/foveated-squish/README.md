@@ -27,9 +27,9 @@ In short: the game renders at a higher resolution than your OBS canvas (e.g. 256
 |---|---|
 | Layout | **Fill the canvas** (squeeze = canvas ÷ source) or **Exact size** (manual squeeze; set the canvas to the squished size). See [SETUP.md](SETUP.md). |
 | Streamed width / height | Exact size only: squished size, % of the source. 75% is a good start; lower = sharper center, softer edges. (Fill derives it from the canvas.) |
-| Sharp center width / height | The region kept at exact 1:1 pixels, 1–99% of the frame. |
+| Full-quality center | The region kept at exact 1:1 pixels, 1–99% of the frame (width; separate height when unlinked). It can't exceed the total squeeze: at 75% the max is ~70%. |
 | Focus position | Where the sharp center sits, 1–99% (crosshair = 50/50). |
-| Curve | 0.1–10. How the squeeze ramps from the center edge to the frame edge. 1 = linear. Above 1: the ring right outside the center stays almost sharp and the far edges take the squeeze (best middle ring in tests). Below 1: squeeze starts right away, which allows stronger total squeeze. |
+| Curve | 0.1–10; the useful top depends on the squeeze (about 1.6 at 75%). How the squeeze ramps from the center edge to the frame edge. 1 = linear. Above 1: the ring right outside the center stays almost sharp and the far edges take the squeeze (best middle ring in tests). Below 1: squeeze starts right away, which allows stronger total squeeze. |
 | Same settings for height | Links the vertical settings to the horizontal ones. |
 | Max edge compression | 2–50 (x:1, default 12.5). How many source pixels the outermost streamed pixel may stand for. Hard curves (high values) put all the squeeze at the very edge, so they need a higher limit to squeeze much. Above ~16 the outer edge turns into a smear. |
 | Area filter | Averages all source pixels a squeezed pixel covers. Prevents shimmer/aliasing at the edges; keep on. |
@@ -37,7 +37,7 @@ In short: the game renders at a higher resolution than your OBS canvas (e.g. 256
 
 If you ask for more squeeze than the curve, center size and max edge compression allow, the filter limits it and says so. Raise Max edge compression, or lower the curve value or the center size, to go further.
 
-While you drag sliders the panel doesn't rebuild (rebuilding made the sliders jump). The config string and, in Exact layout, the size numbers update when you press **Copy config to clipboard**.
+While you drag sliders the panel doesn't rebuild (rebuilding made the sliders jump). Copy always copies the current config string; the text field and the Exact-size numbers show the state as of opening the filter window. For live feedback use **View → Squeezed zone** (green = full-quality center outline, red = squeeze strength).
 
 ## Config string
 
