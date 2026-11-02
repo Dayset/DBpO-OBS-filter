@@ -112,7 +112,7 @@ static const struct {
 	{"InfoFill",
 	 "Source %ux%u -> fills your %ux%u canvas: %.0f%% of the pixels are streamed. Full-quality center: up to ~%.0f%% of the frame.\nEstimated: the same center quality at ~%.0f-%.0f%% less bitrate (or, at your current bitrate, a sharper center). %s\nUse View > Squeezed zone to see the center (green) and edge squeeze (red) live."},
 	{"OptionsHeader",
-	 "\n\nHow much to sacrifice is set by the canvas (Settings > Video: Base and Output, the same). Smaller canvas = more saving, smaller possible center:"},
+	 "\n\nHow much to sacrifice is set by the canvas (Settings > Video: type it into Base and Output, both the same). Smaller canvas = more saving, smaller possible center. Standard sizes:"},
 	{"OptionRow", "\n  %ux%u: %.0f%% of pixels, center up to %.0f%%, est. %.0f-%.0f%% less bitrate%s"},
 	{"Current", "  <- now"},
 	{"InfoFillSmall",
@@ -561,11 +561,12 @@ static double max_center(double r, double floor)
 /* "How much to sacrifice" table: standard canvases below the source size. */
 static void append_options(char *info, size_t info_size, uint32_t w, uint32_t h, uint32_t cw, uint32_t ch, double floor)
 {
-	static const uint32_t heights[] = {1440, 1080, 900, 720, 540, 432, 360, 288};
+	/* Standard streaming sizes only: platforms (Twitch) expect these. */
+	static const uint32_t heights[] = {1440, 1080, 720, 480, 360};
 	size_t n = strlen(info);
 	n += (size_t)snprintf(info + n, n < info_size ? info_size - n : 0, "%s", T("OptionsHeader"));
 	for (size_t i = 0; i < sizeof(heights) / sizeof(heights[0]) && n < info_size; i++) {
-		const uint32_t oh = heights[i], ow = (uint32_t)(oh * 16.0 / 9.0 / 2.0 + 0.5) * 2;
+		const uint32_t oh = heights[i], ow = oh == 480 ? 854 : (uint32_t)(oh * 16.0 / 9.0 / 2.0 + 0.5) * 2;
 		if (ow >= w && oh >= h)
 			continue;
 		const double rx = ow < w ? (double)ow / w : 1.0, ry = oh < h ? (double)oh / h : 1.0;

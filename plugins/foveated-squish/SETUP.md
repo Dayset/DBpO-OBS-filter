@@ -40,25 +40,36 @@ Two different knobs:
 
 The center can never be better than full quality (1:1 pixels). A smaller center doesn't make the center sharper; it only spreads the same total squeeze over more of the frame. To sacrifice the edges harder, stream fewer pixels: keep the game at 2560×1440 and lower the canvas.
 
-| Game 2560×1440 → canvas | Streamed pixels | Full-quality center up to (12.5× / 50× edge compression) | Estimated saving for the same center quality |
+| Game 2560×1440 → canvas (standard sizes) | Streamed pixels | Full-quality center up to (12.5× / 50× edge compression) | Estimated saving for the same center quality |
 |---|---|---|---|
-| 1920×1080 | 56% | 70% / 72% | 25–38% |
-| 1600×900 | 39% | 55% / 58% | 37–54% |
-| 1280×720 | 25% | 40% / 44% | 49–69% |
-| 960×540 | 14% | 25% / 30% | 57–78% |
-| 768×432 | 9% | 16% / 21% | 61–84% |
-| 640×360 | 6% | **10%** / 16% | ~60–85%, barely more than 768×432 |
-| 512×288 | 4% | 4% / **10%** | ~60–85% |
+| 1920×1080 (1080p) | 56% | 70% / 72% | 25–38% |
+| 1280×720 (720p) | 25% | 40% / 44% | 49–69% |
+| 854×480 (480p) | 11% | 20% / 25% | 59–82% |
+| 640×360 (360p) | 6% | **10%** / 16% | ~60–85%, barely more than 480p |
 
 The filter's info line shows this table for your actual game resolution, with "<- now" next to your current canvas.
 
-- **A 10% full-quality center** needs about a 640×360 canvas (or 512×288 with *Max edge compression* at 50).
+- **A 10% full-quality center** needs a 640×360 canvas (360p).
 - **Diminishing returns below ~9% of the pixels:** the center is already close to perfect at your bitrate, so streaming even fewer pixels mostly just ruins the edges. In tests, 9% of the pixels saved up to 74%, 6% saved 74%, and 4% saved 80%.
 - **About the estimate:** "same center quality at X% less bitrate" was measured with x264 on synthetic game footage at a starved bitrate (low = clean picture, high = grainy). With NVENC and real game footage the numbers will differ. Use it to compare settings, not as a promise. Measure on your own footage when you can.
 
 Example: you want a 30% center at full quality and everything else heavily squeezed. Use a 1280×720 canvas, a full-quality center of 30%, and a low curve. Viewers with the extension see a 2560×1440-shaped picture whose center is exactly the game's pixels.
 
 **Curve:** low values (0.1–0.5) squeeze everything outside the center evenly, so there's a hard step at the center's edge. 1 is a linear ramp. High values keep a ring around the center almost sharp and push the squeeze to the far edges. A high curve can only throw away a little in total, so at 75% the curve tops out around 1.5–1.7, and higher slider values have no further effect (the filter lowers the curve automatically). Set **View → Squeezed zone** while you adjust: the preview shows the full-quality center as a green outline and tints the edges red by how hard they are squeezed, live, without reopening the filter.
+
+## Changing the canvas (e.g. to 480p)
+
+1. **Settings → Video:** click into **Base (Canvas) Resolution** and type `854x480` (the field accepts typed values). Do the same for **Output (Scaled) Resolution**. Keep your FPS.
+2. **Settings → Output → Streaming:** **Rescale Output** must be off. It would scale the whole frame again.
+3. **Settings → Stream:** turn **Enhanced Broadcasting** off. It picks its own resolutions.
+4. Click OK. In the scene, right-click the Game Capture → Transform → **Reset Transform** (Ctrl+R). Changing the canvas doesn't rescale the source, so it looks too big until you reset it.
+5. Open the filter: the info line shows *fills your 854x480 canvas* and marks 854x480 with "<- now" in the table.
+6. Copy the config again and update the `FSQ1:…` string in your stream title or send it to viewers. The squeeze changed, so the old string no longer matches.
+7. Bitrate: keep it to get a sharper center, or lower it to save bandwidth (that's the estimated saving).
+
+## Twitch quality options
+
+Twitch passes your stream through as **Source** and, when it has transcoding capacity for your channel, adds lower versions (720p, 480p, 360p, 160p). A transcode scales the **whole frame evenly**, and the extension works in fractions of the frame, so every version unfolds correctly. The lower versions just have less detail everywhere, including the center. Viewers should pick **Source** for the full-quality center. Standard sizes (1080p, 720p, 480p, 360p) avoid any surprises with players or transcoding.
 
 ## A. 1440p monitor → 1080p stream
 
