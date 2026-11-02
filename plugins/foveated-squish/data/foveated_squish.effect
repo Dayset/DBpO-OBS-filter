@@ -193,42 +193,6 @@ float4 PSZone(VertData v_in) : TARGET
 	return float4(rgb, c.a);
 }
 
-technique Squish
-{
-	pass
-	{
-		vertex_shader = VSDefault(v_in);
-		pixel_shader  = PSSquish(v_in);
-	}
-}
-
-technique Clean
-{
-	pass
-	{
-		vertex_shader = VSDefault(v_in);
-		pixel_shader  = PSClean(v_in);
-	}
-}
-
-technique Unsquish
-{
-	pass
-	{
-		vertex_shader = VSDefault(v_in);
-		pixel_shader  = PSUnsquish(v_in);
-	}
-}
-
-technique Zone
-{
-	pass
-	{
-		vertex_shader = VSDefault(v_in);
-		pixel_shader  = PSZone(v_in);
-	}
-}
-
 // ---------------------------------------------------------------- viewer look
 // Details, after NVIDIA Freestyle (details.yfx as ported to ReShade): one
 // Gaussian (15 linear-sampled steps per side, taps 2i - 0.5 apart) feeds
@@ -344,5 +308,41 @@ technique LookCAS
 	{
 		vertex_shader = VSDefault(v_in);
 		pixel_shader  = PSLookCAS(v_in);
+	}
+}
+
+technique Squish
+{
+	pass
+	{
+		vertex_shader = VSDefault(v_in);
+		pixel_shader  = PSSquish(v_in);
+	}
+}
+
+technique Clean
+{
+	pass
+	{
+		vertex_shader = VSDefault(v_in);
+		pixel_shader  = PSClean(v_in);
+	}
+}
+
+technique Unsquish
+{
+	pass
+	{
+		vertex_shader = VSDefault(v_in);
+		pixel_shader  = PSUnsquish(v_in);
+	}
+}
+
+technique Zone
+{
+	pass
+	{
+		vertex_shader = VSDefault(v_in);
+		pixel_shader  = PSZone(v_in);
 	}
 }
