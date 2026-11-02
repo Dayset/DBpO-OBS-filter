@@ -74,13 +74,41 @@ float sq_density(float x, float4 A, float4 B)
 	return 1.0 - (1.0 - B.w) * pow(saturate(t), B.y);
 }
 
-// Squished position -> source position (Newton; d >= dmin > 0 so it converges).
+// Solve len * (t - k t^(p+1)) = target, t in [0, 1]: Newton kept inside a
+// shrinking bracket (bisection when a step leaves it). Plain Newton cycles
+// for flat curves with strong squeeze.
+float solve_periph(float target, float len, float k, float p)
+{
+	if (len <= 1e-6)
+		return 0.0;
+	float lo = 0.0;
+	float hi = 1.0;
+	float t = saturate(target / len);
+	for (int i = 0; i < 20; i++) {
+		float f = len * (t - k * pow(t, p + 1.0)) - target;
+		if (f > 0.0)
+			hi = t;
+		else
+			lo = t;
+		float d = len * (1.0 - k * (p + 1.0) * pow(max(t, 1e-6), p));
+		float tn = d > 1e-6 ? t - f / d : 0.5 * (lo + hi);
+		if (!(tn >= lo && tn <= hi))
+			tn = 0.5 * (lo + hi);
+		t = tn;
+	}
+	return t;
+}
+
+// Squished position -> source position, per zone (exact in the center).
 float sq_inverse(float u, float4 A, float4 B)
 {
-	float x = u;
-	for (int i = 0; i < 8; i++)
-		x = saturate(x - (sq_forward(x, A, B) - u) / (sq_density(x, A, B) / B.z));
-	return x;
+	float v = saturate(u) * B.z;
+	float left_full = periph(1.0, A.z, B.x, B.y);
+	if (v < left_full)
+		return saturate(A.x - A.z * solve_periph(left_full - v, A.z, B.x, B.y));
+	if (v <= left_full + (A.y - A.x))
+		return A.x + (v - left_full);
+	return saturate(A.y + A.w * solve_periph(v - left_full - (A.y - A.x), A.w, B.x, B.y));
 }
 
 float4 PSSquish(VertData v_in) : TARGET

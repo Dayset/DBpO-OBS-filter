@@ -62,6 +62,22 @@ Held edges are not static during camera pans: they jump 2–3 frames of motion a
 - **Black bars instead of a smaller frame** (squished 720×404 centered in 960×540 black, 250 kbps): fovea 36.3 dB with the picture placed on 16-px blocks, 35.8 dB unaligned, vs 37.6 dB at the exact size and 35.0 dB without squish. Grain: 33.3 vs 34.0 vs 31.4. Bars keep roughly half the gain, so the plugin doesn't offer them: it fills a standard canvas by squeezing canvas ÷ source (game rendered above the canvas size, e.g. with DLDSR).
 - Curve 1.5 keeps the middle ring sharpest; curve 0.5 allows the strongest squeeze (65%) and the best center. Linear is the balanced default.
 
+## Bitrate saving vs. how many pixels are streamed
+
+`squish_savings.py [frames] [kbps] [r,...]`: 10% full-quality center, flat curve. A normal stream is encoded over a bitrate sweep to find the bitrate that matches the squished stream's center quality. Saving = 1 − squish bitrate / that bitrate.
+
+| Squeeze per side (pixels) | 250 kbps clean | 250 kbps grain | 600 kbps clean | 600 kbps grain |
+|---|---|---|---|---|
+| 75% (56%) | 31% | 38% | 25% | 37% |
+| 60% (36%) | 49% | 57% | 39% | 52% |
+| 50% (25%) | 62% | 69% | 49% | 68% |
+| 40% (16%) | 70% | 76% | 55% | >87% |
+| 30% (9%) | 74% | 84% | 61% | >86% |
+| 25% (6%) | 74% | | | |
+| 20% (4%) | 80% | | | |
+
+The plugin's info line uses the low/high envelope of these (excluding the saturated ">" cells). Below ~9% of the pixels the returns flatten. The 25%/20% rows needed a fix: plain Newton inversion of the mapping cycles for flat curves with strong squeeze, so all implementations now use a bracketed Newton/bisection solve per zone.
+
 ## Bitstream-level foveation: tiles and "server-side packet loss"
 
 `tiles_and_slices.py [frames] [kbps,...]`

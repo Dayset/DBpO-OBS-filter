@@ -90,12 +90,41 @@ double squish_density(const struct squish_axis *a, double x)
 	return 1.0 - (1.0 - o.dmin) * pow(clamp01(t), a->p);
 }
 
+/* Solve len * (t - k t^(p+1)) = target for t in [0, 1]: Newton kept inside a
+ * shrinking bracket (bisection when a step leaves it). The function is
+ * increasing (its slope is the density), so this always converges; plain
+ * Newton cycles for flat curves with strong squeeze. */
+static double solve_periph(double target, double len, double k, double p)
+{
+	if (len <= 1e-12)
+		return 0.0;
+	double lo = 0.0, hi = 1.0, t = clamp01(target / len);
+	for (int i = 0; i < SQUISH_INVERSE_ITERS; i++) {
+		const double f = len * (t - k * pow(t, p + 1.0)) - target;
+		if (f > 0.0)
+			hi = t;
+		else
+			lo = t;
+		const double d = len * (1.0 - k * (p + 1.0) * pow(t, p));
+		double tn = d > 1e-12 ? t - f / d : 0.5 * (lo + hi);
+		if (!(tn >= lo && tn <= hi))
+			tn = 0.5 * (lo + hi);
+		t = tn;
+	}
+	return t;
+}
+
 double squish_inverse(const struct squish_axis *a, double u)
 {
-	double x = u;
-	for (int i = 0; i < 8; i++)
-		x = clamp01(x - (squish_forward(a, x) - u) / (squish_density(a, x) / a->r));
-	return x;
+	struct squish_axis_params o;
+	squish_axis_derive(a, &o);
+	const double v = clamp01(u) * a->r; /* integral of density up to x */
+	const double left_full = periph(1.0, o.ll, o.k, a->p);
+	if (v < left_full)
+		return clamp01(o.lo - o.ll * solve_periph(left_full - v, o.ll, o.k, a->p));
+	if (v <= left_full + (o.hi - o.lo))
+		return o.lo + (v - left_full);
+	return clamp01(o.hi + o.lr * solve_periph(v - left_full - (o.hi - o.lo), o.lr, o.k, a->p));
 }
 
 double squish_axis_align(const struct squish_axis *a, unsigned n, unsigned m)

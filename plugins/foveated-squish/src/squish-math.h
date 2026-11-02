@@ -13,6 +13,7 @@
 #include <stddef.h>
 
 #define SQUISH_MIN_DENSITY 0.08
+#define SQUISH_INVERSE_ITERS 20 /* same count in the shader */
 
 struct squish_axis {
 	double r; /* squished / source size, (0, 1] */

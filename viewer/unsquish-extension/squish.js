@@ -37,6 +37,29 @@
 		return 1 - (1 - o.dmin) * Math.pow(clamp01(t), o.p);
 	}
 
+	/** Squished position -> source position (same safeguarded solver as the plugin). */
+	function inverse(a, u) {
+		const o = derive(a);
+		const solve = (target, len) => {
+			if (len <= 1e-12) return 0;
+			let lo = 0, hi = 1, t = clamp01(target / len);
+			for (let i = 0; i < 20; i++) {
+				const f = len * (t - o.k * Math.pow(t, o.p + 1)) - target;
+				if (f > 0) hi = t;
+				else lo = t;
+				const d = len * (1 - o.k * (o.p + 1) * Math.pow(t, o.p));
+				let tn = d > 1e-12 ? t - f / d : 0.5 * (lo + hi);
+				if (!(tn >= lo && tn <= hi)) tn = 0.5 * (lo + hi);
+				t = tn;
+			}
+			return t;
+		};
+		const v = clamp01(u) * a.r, leftFull = periph(1, o.ll, o.k, o.p);
+		if (v < leftFull) return clamp01(o.lo - o.ll * solve(leftFull - v, o.ll));
+		if (v <= leftFull + (o.hi - o.lo)) return o.lo + (v - leftFull);
+		return clamp01(o.hi + o.lr * solve(v - leftFull - (o.hi - o.lo), o.lr));
+	}
+
 	/** Parses "FSQ1:rx=..,...,ar=..[,ox=..,oy=..,bw=..,bh=..]". Returns null if invalid. */
 	function parse(text) {
 		const m = /FSQ1:([a-z]{2}=[-0-9.eE]+(?:,[a-z]{2}=[-0-9.eE]+)*)/.exec(text || "");
@@ -99,7 +122,7 @@ void main() {
 	gl_FragColor = texture2D(u_video, u);
 }`;
 
-	const api = { MIN_DENSITY, derive, forward, density, parse, uniforms, FRAGMENT_SHADER };
+	const api = { MIN_DENSITY, derive, forward, density, inverse, parse, uniforms, FRAGMENT_SHADER };
 	if (typeof module !== "undefined" && module.exports) module.exports = api;
 	else root.FSQ = api;
 })(typeof self !== "undefined" ? self : this);

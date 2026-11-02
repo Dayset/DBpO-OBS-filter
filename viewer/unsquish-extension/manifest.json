@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "DBpO Unsquish",
-  "version": "0.3.1",
+  "version": "0.4.0",
   "description": "Unfolds Foveated Squish streams (sharp center, squeezed edges) back to full size with a GPU shader.",
   "permissions": [
     "storage",

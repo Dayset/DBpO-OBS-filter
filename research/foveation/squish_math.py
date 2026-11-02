@@ -83,14 +83,39 @@ class Axis:
         t = np.where(x < lo, (lo - x) / max(ll, 1e-12), np.where(x > hi, (x - hi) / max(lr, 1e-12), 0.0))
         return 1.0 - (1.0 - self.dmin()) * np.power(np.clip(t, 0, 1), self.p)
 
-    def inverse(self, u, iters=8):
-        """Squished position u in [0,1] -> source position x (Newton, like the shader)."""
+    def inverse(self, u, iters=20):
+        """Squished position u in [0,1] -> source position x (like the shader and the C code).
+
+        Per zone: the center is linear; in the periphery solve len*(t - k t^(p+1)) = target
+        with Newton kept inside a shrinking bracket (bisection when a step leaves it).
+        Plain Newton cycles for flat curves with strong squeeze.
+        """
         u = np.asarray(u, dtype=np.float64)
-        x = u.copy()
-        for _ in range(iters):
-            fx = self.forward(x) - u
-            x = np.clip(x - fx / (self.density(x) / self.r), 0, 1)
-        return x
+        lo_c, hi_c, ll, lr = self.bounds()
+        p = self.p
+        k = (1.0 - self.dmin()) / (p + 1.0)
+
+        def solve(target, length):
+            target = np.asarray(target, dtype=np.float64)
+            if length <= 1e-12:
+                return np.zeros_like(target)
+            lo, hi = np.zeros_like(target), np.ones_like(target)
+            t = np.clip(target / length, 0, 1)
+            for _ in range(iters):
+                f = length * (t - k * np.power(t, p + 1.0)) - target
+                hi = np.where(f > 0, t, hi)
+                lo = np.where(f > 0, lo, t)
+                d = length * (1.0 - k * (p + 1.0) * np.power(t, p))
+                tn = np.where(d > 1e-12, t - f / np.where(d > 1e-12, d, 1), 0.5 * (lo + hi))
+                t = np.where((tn >= lo) & (tn <= hi), tn, 0.5 * (lo + hi))
+            return t
+
+        v = np.clip(u, 0, 1) * self.r
+        left_full = ll * (1.0 - k)
+        x_left = np.clip(lo_c - ll * solve(left_full - v, ll), 0, 1)
+        x_mid = lo_c + (v - left_full)
+        x_right = np.clip(hi_c + lr * solve(v - left_full - (hi_c - lo_c), lr), 0, 1)
+        return np.where(v < left_full, x_left, np.where(v <= left_full + (hi_c - lo_c), x_mid, x_right))
 
 
 @dataclass

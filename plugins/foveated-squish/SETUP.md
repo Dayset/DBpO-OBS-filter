@@ -40,13 +40,21 @@ Two different knobs:
 
 The center can never be better than full quality (1:1 pixels). A smaller center doesn't make the center sharper; it only spreads the same total squeeze over more of the frame. To sacrifice the edges harder, stream fewer pixels: keep the game at 2560×1440 and lower the canvas.
 
-| Game | Canvas (= stream) | Kept per side | Full-quality center can be up to | Edges squeezed |
-|---|---|---|---|---|
-| 2560×1440 | 1920×1080 | 75% | ~70% of the frame | lightly |
-| 2560×1440 | 1600×900 | 62.5% | ~55% | medium |
-| 2560×1440 | 1280×720 | 50% | ~40% | hard |
+| Game 2560×1440 → canvas | Streamed pixels | Full-quality center up to (12.5× / 50× edge compression) | Estimated saving for the same center quality |
+|---|---|---|---|
+| 1920×1080 | 56% | 70% / 72% | 25–38% |
+| 1600×900 | 39% | 55% / 58% | 37–54% |
+| 1280×720 | 25% | 40% / 44% | 49–69% |
+| 960×540 | 14% | 25% / 30% | 57–78% |
+| 768×432 | 9% | 16% / 21% | 61–84% |
+| 640×360 | 6% | **10%** / 16% | ~60–85%, barely more than 768×432 |
+| 512×288 | 4% | 4% / **10%** | ~60–85% |
 
-(The "up to" values are with *Max edge compression* at its default 12.5×. The info line shows the exact value for your setup.)
+The filter's info line shows this table for your actual game resolution, with "<- now" next to your current canvas.
+
+- **A 10% full-quality center** needs about a 640×360 canvas (or 512×288 with *Max edge compression* at 50).
+- **Diminishing returns below ~9% of the pixels:** the center is already close to perfect at your bitrate, so streaming even fewer pixels mostly just ruins the edges. In tests, 9% of the pixels saved up to 74%, 6% saved 74%, and 4% saved 80%.
+- **About the estimate:** "same center quality at X% less bitrate" was measured with x264 on synthetic game footage at a starved bitrate (low = clean picture, high = grainy). With NVENC and real game footage the numbers will differ. Use it to compare settings, not as a promise. Measure on your own footage when you can.
 
 Example: you want a 30% center at full quality and everything else heavily squeezed. Use a 1280×720 canvas, a full-quality center of 30%, and a low curve. Viewers with the extension see a 2560×1440-shaped picture whose center is exactly the game's pixels.
 

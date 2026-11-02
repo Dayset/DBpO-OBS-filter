@@ -110,11 +110,15 @@ static const struct {
 	{"InfoDefault",
 	 "Squeezes the edges (X and Y) so a fixed stream bitrate is spent on the sharp center. Viewers unfold it with the DBpO Unsquish browser extension."},
 	{"InfoFill",
-	 "Source %ux%u -> squeezed to fill your %ux%u canvas (%.0f%% x %.0f%%). Keep the canvas and output at %ux%u. The full-quality center can be at most ~%.0f%% wide at this squeeze. To sacrifice the edges more, use a smaller canvas (see the setup guide). Use View > Squeezed zone to see the result live. %s"},
+	 "Source %ux%u -> fills your %ux%u canvas: %.0f%% of the pixels are streamed. Full-quality center: up to ~%.0f%% of the frame.\nEstimated: the same center quality at ~%.0f-%.0f%% less bitrate (or, at your current bitrate, a sharper center). %s\nUse View > Squeezed zone to see the center (green) and edge squeeze (red) live."},
+	{"OptionsHeader",
+	 "\n\nHow much to sacrifice is set by the canvas (Settings > Video: Base and Output, the same). Smaller canvas = more saving, smaller possible center:"},
+	{"OptionRow", "\n  %ux%u: %.0f%% of pixels, center up to %.0f%%, est. %.0f-%.0f%% less bitrate%s"},
+	{"Current", "  <- now"},
 	{"InfoFillSmall",
 	 "NOT SQUEEZING: the source (%ux%u) must be larger than the canvas (%ux%u). Run the game at a higher resolution than the canvas (2560x1440 for a 1920x1080 canvas, e.g. with NVIDIA DLDSR 1.78x on a 1080p monitor), or use the Exact size layout. See the setup guide."},
 	{"InfoExact",
-	 "Source %ux%u -> streamed %ux%u (%.0f%% of the pixels). Set OBS Settings > Video > Base (Canvas) and Output resolution to %ux%u (you can type a custom size into those fields). Press Copy to update these numbers after moving the sliders. %s"},
+	 "Source %ux%u -> streamed %ux%u (%.0f%% of the pixels). Full-quality center: up to ~%.0f%%. Estimated: the same center quality at ~%.0f-%.0f%% less bitrate. Set OBS Settings > Video > Base (Canvas) and Output resolution to %ux%u (you can type a custom size). These numbers update when you reopen this window. %s"},
 	{"Clamped",
 	 "(Squeeze limited by Max edge compression: raise it, or lower the curve or the sharp center size.)"},
 	{"Reduced", "(The curve, or if needed the center, is lowered automatically so this squeeze fits.)"},
@@ -518,6 +522,64 @@ static void fsq_render(void *data, gs_effect_t *unused)
 
 /* ------------------------------------------------------------------ properties */
 
+/* Bitrate saving estimate for streaming a fraction of the pixels: "the same
+ * center quality at X% less bitrate". Range over clean and grainy synthetic
+ * game footage at two starved CBR budgets, x264 veryfast, 10% full-quality
+ * center (research/foveation/squish_savings.py). Real games and NVENC will
+ * differ; treat it as a guide. */
+static const double saving_table[][3] = {
+	/* pixel fraction, low, high */
+	{1.0, 0.0, 0.0},    {0.5625, 0.25, 0.38}, {0.36, 0.39, 0.57},
+	{0.25, 0.49, 0.69}, {0.16, 0.55, 0.76},   {0.09, 0.61, 0.84},
+};
+
+static void estimate_saving(double frac, double *lo, double *hi)
+{
+	const size_t n = sizeof(saving_table) / sizeof(saving_table[0]);
+	*lo = saving_table[n - 1][1];
+	*hi = saving_table[n - 1][2];
+	if (frac >= saving_table[0][0]) {
+		*lo = *hi = 0.0;
+		return;
+	}
+	for (size_t i = 1; i < n; i++)
+		if (frac >= saving_table[i][0]) {
+			const double t = (frac - saving_table[i][0]) / (saving_table[i - 1][0] - saving_table[i][0]);
+			*lo = saving_table[i][1] + t * (saving_table[i - 1][1] - saving_table[i][1]);
+			*hi = saving_table[i][2] + t * (saving_table[i - 1][2] - saving_table[i][2]);
+			return;
+		}
+}
+
+/* Largest full-quality center (fraction of the frame) a flat curve allows at squeeze r. */
+static double max_center(double r, double floor)
+{
+	const double c = 1.0 - (1.0 - r) * 1.1 / (1.0 - floor);
+	return c > 0.0 ? c : 0.0;
+}
+
+/* "How much to sacrifice" table: standard canvases below the source size. */
+static void append_options(char *info, size_t info_size, uint32_t w, uint32_t h, uint32_t cw, uint32_t ch, double floor)
+{
+	static const uint32_t heights[] = {1440, 1080, 900, 720, 540, 432, 360, 288};
+	size_t n = strlen(info);
+	n += (size_t)snprintf(info + n, n < info_size ? info_size - n : 0, "%s", T("OptionsHeader"));
+	for (size_t i = 0; i < sizeof(heights) / sizeof(heights[0]) && n < info_size; i++) {
+		const uint32_t oh = heights[i], ow = (uint32_t)(oh * 16.0 / 9.0 / 2.0 + 0.5) * 2;
+		if (ow >= w && oh >= h)
+			continue;
+		const double rx = ow < w ? (double)ow / w : 1.0, ry = oh < h ? (double)oh / h : 1.0;
+		const double cmax = max_center(rx < ry ? rx : ry, floor);
+		if (cmax < 0.02)
+			break;
+		const double frac = rx * ry;
+		double lo, hi;
+		estimate_saving(frac, &lo, &hi);
+		n += (size_t)snprintf(info + n, info_size - n, T("OptionRow"), ow, oh, 100.0 * frac, 100.0 * cmax,
+				      100.0 * lo, 100.0 * hi, (ow == cw && oh == ch) ? T("Current") : "");
+	}
+}
+
 /* Info line and (optionally) the config string for the given settings. */
 /* key: what decides whether the view must be rebuilt (never changes while a
  * slider is dragged, except when crossing into another state). */
@@ -552,15 +614,22 @@ static void describe(struct squish_filter *f, obs_data_t *s, char *info, size_t 
 		if (L.ow >= w && L.oh >= h)
 			snprintf(info, info_size, T("InfoFillSmall"), w, h, L.cw, L.ch);
 		else {
-			/* Largest center a flat curve (0.1) allows at this squeeze. */
-			const double cmax = 1.0 - (1.0 - L.c.x.r) * 1.1 / (1.0 - tmp.floor);
-			snprintf(info, info_size, T("InfoFill"), w, h, L.cw, L.ch, 100.0 * L.c.x.r, 100.0 * L.c.y.r,
-				 L.cw, L.ch, cmax > 0 ? 100.0 * cmax : 0.0, note);
+			const double r = L.c.x.r < L.c.y.r ? L.c.x.r : L.c.y.r;
+			double lo, hi;
+			estimate_saving(pixels / 100.0, &lo, &hi);
+			snprintf(info, info_size, T("InfoFill"), w, h, L.cw, L.ch, pixels,
+				 100.0 * max_center(r, tmp.floor), 100.0 * lo, 100.0 * hi, note);
+			append_options(info, info_size, w, h, L.cw, L.ch, tmp.floor);
 		}
 		break;
-	default:
-		snprintf(info, info_size, T("InfoExact"), w, h, L.ow, L.oh, pixels, L.ow, L.oh, note);
+	default: {
+		const double r = L.c.x.r < L.c.y.r ? L.c.x.r : L.c.y.r;
+		double lo, hi;
+		estimate_saving(pixels / 100.0, &lo, &hi);
+		snprintf(info, info_size, T("InfoExact"), w, h, L.ow, L.oh, pixels, 100.0 * max_center(r, tmp.floor),
+			 100.0 * lo, 100.0 * hi, L.ow, L.oh, note);
 		break;
+	}
 	}
 }
 
@@ -576,7 +645,7 @@ static bool cfg_modified(obs_properties_t *props, obs_property_t *p, obs_data_t 
 	obs_property_set_visible(obs_properties_get(props, S_RY), manual && !link);
 	obs_property_set_visible(obs_properties_get(props, S_CY), !link);
 	obs_property_set_visible(obs_properties_get(props, S_PY), !link);
-	char info[512], cfg[256], key[64];
+	char info[2048], cfg[256], key[64];
 	describe(f, s, info, sizeof(info), cfg, sizeof(cfg), key, sizeof(key));
 	obs_data_set_string(s, S_CONFIG, cfg);
 	/* Rebuild the view only when its state changes: rebuilding on every
@@ -597,7 +666,7 @@ static bool copy_clicked(obs_properties_t *props, obs_property_t *p, void *data)
 	UNUSED_PARAMETER(p);
 	struct squish_filter *f = data;
 	obs_data_t *s = obs_source_get_settings(f->context);
-	char info[512], cfg[256];
+	char info[2048], cfg[256];
 	describe(f, s, info, sizeof(info), cfg, sizeof(cfg), NULL, 0);
 	obs_data_set_string(s, S_CONFIG, cfg);
 #ifdef _WIN32

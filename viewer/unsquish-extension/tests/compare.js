@@ -3,14 +3,12 @@
 const FSQ = require("../squish.js");
 const cases = [
 	{ r: 0.75, c: 0.15, f: 0.5, p: 1.0 }, { r: 0.75, c: 0.15, f: 0.5, p: 0.5 }, { r: 0.65, c: 0.15, f: 0.5, p: 0.75 },
-	{ r: 0.7, c: 0.1, f: 0.35, p: 1.0 }, { r: 0.9, c: 0.3, f: 0.6, p: 2.0 },
+	{ r: 0.7, c: 0.1, f: 0.35, p: 1.0 }, { r: 0.9, c: 0.3, f: 0.6, p: 2.0 }, { r: 0.25, c: 0.05, f: 0.5, p: 0.1 },
 ];
 cases.forEach((a, c) => {
 	for (let i = 0; i <= 20; i++) {
 		const x = i / 20;
-		// inverse: Newton like the shader (the extension itself only needs forward)
-		let v = x;
-		for (let k = 0; k < 8; k++) v = Math.min(Math.max(v - (FSQ.forward(a, v) - x) / (FSQ.density(a, v) / a.r), 0), 1);
+		const v = FSQ.inverse(a, x); // the extension itself only needs forward
 		console.log(`${c} ${x.toFixed(6)} ${FSQ.forward(a, x).toFixed(12)} ${FSQ.density(a, x).toFixed(12)} ${v.toFixed(12)}`);
 	}
 });
