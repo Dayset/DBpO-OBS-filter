@@ -32,6 +32,7 @@ In short: the game renders at a higher resolution than your OBS canvas (e.g. 256
 | Curve | 0.1–10; the useful top depends on the squeeze (about 1.6 at 75%). How the squeeze ramps from the center edge to the frame edge. 1 = linear. Above 1: the ring right outside the center stays almost sharp and the far edges take the squeeze (best middle ring in tests). Below 1: squeeze starts right away, which allows stronger total squeeze. |
 | Same settings for height | Links the vertical settings to the horizontal ones. |
 | Max edge compression | 8×, 12.5× (default), 16×, 25×, 50×. How many source pixels the outermost streamed pixel may stand for. Hard curves (high values) put all the squeeze at the very edge, so they need a higher limit to squeeze much. Above ~16 the outer edge turns into a smear. |
+| Clean the squeezed area | 0–100%, default 50. Edge-preserving (bilateral) cleanup outside the full-quality center, before squeezing: removes grass/grain-type detail the encoder would pay for and keeps strong edges. It ramps in from the center edge with the squeeze. Measured through OBS at a fixed bitrate: +0.5 dB center on grainy footage, +0.16 dB on clean footage, and ring structure kept (research/foveation/ring_smoothing.py). |
 | Area filter | Averages all source pixels a squeezed pixel covers. Prevents shimmer/aliasing at the edges; keep on. |
 | View | *Squished* (what is streamed), *Unsquished preview* (what extension viewers see), *Squeezed zone* (red = squeezed harder). |
 

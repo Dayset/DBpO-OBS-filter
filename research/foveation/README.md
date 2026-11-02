@@ -92,7 +92,7 @@ The plugin's info line uses the low/high envelope of these (excluding the satura
 | Radon backprojection, 60 angles | 32.65 / 30.50 | 0.823 / 0.739 | 9.9 s |
 
 - **Radon backprojection is a loss on every count:** −4.1 / −2.2 dB in the center and the worst ring structure. Backprojection from few angles is a *linear* filter (a star-shaped blur), so it can't tell noise from edges. It adds streaks, ghost copies of repeating texture and a streak from the frame border, and those cost the encoder more bits than they save. Keeping edges while removing noise needs a *nonlinear* filter (bilateral, wavelet thresholding, BM3D). Radon only does that with thresholding in the Radon/ridgelet domain, which still streaks and is far too slow for live video.
-- **Edge-preserving smoothing of the ring frees a few bits:** +0.2 to +0.5 dB in the center, roughly 5–10% bitrate, while the bilateral filter keeps the ring's structure at least as well as no smoothing. A small extra on top of the squish (+1.3 to +2.6 dB), not a new tool.
+- **Edge-preserving smoothing of the ring frees a few bits:** +0.2 to +0.5 dB in the center, roughly 5–10% bitrate, while the bilateral filter keeps the ring's structure at least as well as no smoothing. A small extra on top of the squish (+1.3 to +2.6 dB), not a new tool. Now in the plugin as *Clean the squeezed area* (GPU bilateral 7×7, ramps in with the squeeze). Measured through OBS (squish 75%, CBR): center +0.16 dB clean / +0.45 dB grain at 50%, +0.16 / +0.52 at 100%, ring SSIM unchanged or better.
 
 ## Bitstream-level foveation: tiles and "server-side packet loss"
 

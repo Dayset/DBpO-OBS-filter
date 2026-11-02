@@ -42,6 +42,7 @@ with this program. If not, see <https://www.gnu.org/licenses/>
 #define S_PY "curve_y"
 #define S_LINK "same_for_y"
 #define S_PREFILTER "prefilter"
+#define S_CLEAN "clean_strength"
 #define S_VIEW "view"
 #define S_LAYOUT "layout" /* old setting, read for migration */
 #define S_TARGET "stream_resolution"
@@ -98,6 +99,7 @@ struct squish_filter {
 	gs_texrender_t *input;
 	gs_texrender_t *squished;
 	gs_texrender_t *output;
+	gs_texrender_t *cleaned;
 	gs_texrender_t *display;
 	bool needs_update;
 	bool output_valid;
@@ -105,6 +107,7 @@ struct squish_filter {
 	struct squish_config cfg; /* as requested (r may be clamped, see below) */
 	bool clamped;
 	bool prefilter;
+	double clean; /* 0..1 */
 	enum view_mode view;
 	enum layout_mode layout;
 	int target;   /* TARGET_CANVAS, TARGET_CUSTOM or a height */
@@ -160,6 +163,8 @@ static const struct {
 	{"CurveX",
 	 "Curve (low = edges squeezed evenly right from the center; high = squeeze pushed to the far edges, limited by the squeeze)"},
 	{"CurveY", "Curve, vertical"},
+	{"Clean",
+	 "Clean the squeezed area (edge-preserving: removes grass/grain detail outside the center, keeps edges; 0 = off)"},
 	{"Prefilter", "Area filter when squeezing (prevents edge shimmer)"},
 	{"View", "View"},
 	{"View.Squished", "Squished (what gets streamed)"},
@@ -333,6 +338,7 @@ static void fsq_update(void *data, obs_data_t *s)
 	f->floor = 1.0 / obs_data_get_double(s, S_MAXCOMP);
 	f->clamped = clamp_axis(&f->cfg.x, f->floor) | clamp_axis(&f->cfg.y, f->floor);
 	f->prefilter = obs_data_get_bool(s, S_PREFILTER);
+	f->clean = obs_data_get_double(s, S_CLEAN) / 100.0;
 	f->view = (enum view_mode)obs_data_get_int(s, S_VIEW);
 	f->target = read_target(s);
 	f->layout = f->target == TARGET_CUSTOM ? LAYOUT_EXACT : LAYOUT_FILL;
@@ -365,6 +371,7 @@ static void *fsq_create(obs_data_t *settings, obs_source_t *context)
 	f->input = gs_texrender_create(GS_RGBA, GS_ZS_NONE);
 	f->squished = gs_texrender_create(GS_RGBA, GS_ZS_NONE);
 	f->output = gs_texrender_create(GS_RGBA, GS_ZS_NONE);
+	f->cleaned = gs_texrender_create(GS_RGBA, GS_ZS_NONE);
 	obs_leave_graphics();
 	bfree(path);
 
@@ -373,6 +380,7 @@ static void *fsq_create(obs_data_t *settings, obs_source_t *context)
 		gs_texrender_destroy(f->input);
 		gs_texrender_destroy(f->squished);
 		gs_texrender_destroy(f->output);
+		gs_texrender_destroy(f->cleaned);
 		obs_leave_graphics();
 		bfree(f);
 		return NULL;
@@ -388,6 +396,7 @@ static void fsq_destroy(void *data)
 	gs_texrender_destroy(f->input);
 	gs_texrender_destroy(f->squished);
 	gs_texrender_destroy(f->output);
+	gs_texrender_destroy(f->cleaned);
 	gs_effect_destroy(f->effect);
 	obs_leave_graphics();
 	bfree(f);
@@ -471,6 +480,7 @@ static bool run_pass(struct squish_filter *f, gs_texrender_t *target, const char
 	set_axis(e, "ax_a", "ax_b", &c->x);
 	set_axis(e, "ay_a", "ay_b", &c->y);
 	gs_effect_set_float(gs_effect_get_param_by_name(e, "prefilter"), f->prefilter ? 1.0f : 0.0f);
+	gs_effect_set_float(gs_effect_get_param_by_name(e, "clean"), (float)f->clean);
 	/* Alignment uses the full/squished sizes regardless of pass direction. */
 	const uint32_t fw = sw > ow ? sw : ow, fh = sh > oh ? sh : oh;
 	const uint32_t qw = sw > ow ? ow : sw, qh = sh > oh ? oh : sh;
@@ -527,6 +537,8 @@ static void fsq_render(void *data, gs_effect_t *unused)
 		gs_blend_function(GS_BLEND_ONE, GS_BLEND_ZERO);
 		if (capture_input(f, target, parent, w, h)) {
 			gs_texture_t *in = gs_texrender_get_texture(f->input);
+			if (f->clean > 0.0 && run_pass(f, f->cleaned, "Clean", in, c, w, h, w, h))
+				in = gs_texrender_get_texture(f->cleaned);
 			if (f->view == VIEW_ZONE) {
 				f->output_valid = run_pass(f, f->output, "Zone", in, c, w, h, pw, ph);
 				f->display = f->output;
@@ -861,6 +873,7 @@ static obs_properties_t *fsq_properties(void *data)
 	obs_property_list_add_float(pr, "50x", 50.0);
 	obs_property_set_modified_callback(pr, cfg_modified);
 	obs_properties_add_bool(props, S_PREFILTER, T("Prefilter"));
+	obs_properties_add_float_slider(props, S_CLEAN, T("Clean"), 0.0, 100.0, 1.0);
 
 	obs_property_t *v =
 		obs_properties_add_list(props, S_VIEW, T("View"), OBS_COMBO_TYPE_LIST, OBS_COMBO_FORMAT_INT);
@@ -890,6 +903,7 @@ static void fsq_defaults(obs_data_t *s)
 	obs_data_set_default_double(s, S_PX, 1.0);
 	obs_data_set_default_double(s, S_PY, 1.0);
 	obs_data_set_default_bool(s, S_PREFILTER, true);
+	obs_data_set_default_double(s, S_CLEAN, 50.0);
 	obs_data_set_default_int(s, S_VIEW, VIEW_SQUISHED);
 	obs_data_set_default_int(s, S_TARGET, TARGET_CANVAS);
 	obs_data_set_default_double(s, S_MAXCOMP, 12.5);

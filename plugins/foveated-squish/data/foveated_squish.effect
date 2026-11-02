@@ -12,6 +12,7 @@
 //             source area it covers (up to 8x8 taps): a proper downscale
 //             filter, so the squeezed edges don't shimmer.
 //   Unsquish  squished -> source size (what extension viewers see; preview).
+//   Clean     optional edge-preserving cleanup outside the center (before Squish).
 //   Zone      source with the squeezed area tinted by squeeze strength.
 
 uniform float4x4 ViewProj;
@@ -24,6 +25,7 @@ uniform float4 ay_a;
 uniform float4 ay_b;
 uniform float  prefilter; // 1 = area filter when squeezing, 0 = single bilinear tap
 uniform float2 align;     // sub-pixel shift so sharp-center pixels land exactly on source pixels
+uniform float  clean;     // 0..1 edge-preserving cleanup strength outside the full-quality center
 
 sampler_state linearClamp {
 	Filter   = Linear;
@@ -132,6 +134,34 @@ float4 PSSquish(VertData v_in) : TARGET
 	return acc / float(kx * ky);
 }
 
+// Edge-preserving cleanup (bilateral, 7x7) of the area outside the
+// full-quality center, before squeezing: removes fine texture and noise
+// (grass, grain) the encoder would pay for, keeps strong edges. Strength
+// ramps in from the center edge with the squeeze (full where the density
+// is 0.85 or lower).
+float4 PSClean(VertData v_in) : TARGET
+{
+	float4 c = image.SampleLevel(linearClamp, v_in.uv, 0.0);
+	float d = min(sq_density(v_in.uv.x, ax_a, ax_b), sq_density(v_in.uv.y, ay_a, ay_b));
+	float w = saturate((1.0 - d) / 0.15);
+	if (w <= 0.0 || clean <= 0.0)
+		return c;
+	float range = 0.02 + 0.12 * clean;
+	float inv_r2 = 1.0 / (2.0 * range * range);
+	float4 acc = float4(0.0, 0.0, 0.0, 0.0);
+	float wsum = 0.0;
+	for (int j = -3; j <= 3; j++) {
+		for (int i = -3; i <= 3; i++) {
+			float4 s = image.SampleLevel(linearClamp, v_in.uv + float2(float(i), float(j)) / src_size, 0.0);
+			float3 dc = s.rgb - c.rgb;
+			float k = exp(-float(i * i + j * j) / 8.0 - dot(dc, dc) * inv_r2); // spatial sigma 2 px
+			acc += s * k;
+			wsum += k;
+		}
+	}
+	return lerp(c, acc / wsum, w);
+}
+
 float4 PSUnsquish(VertData v_in) : TARGET
 {
 	float2 u = float2(sq_forward(v_in.uv.x, ax_a, ax_b), sq_forward(v_in.uv.y, ay_a, ay_b)) - align;
@@ -160,6 +190,15 @@ technique Squish
 	{
 		vertex_shader = VSDefault(v_in);
 		pixel_shader  = PSSquish(v_in);
+	}
+}
+
+technique Clean
+{
+	pass
+	{
+		vertex_shader = VSDefault(v_in);
+		pixel_shader  = PSClean(v_in);
 	}
 }
 
