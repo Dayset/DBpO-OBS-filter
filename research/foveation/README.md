@@ -94,6 +94,21 @@ The plugin's info line uses the low/high envelope of these (excluding the satura
 - **Radon backprojection is a loss on every count:** −4.1 / −2.2 dB in the center and the worst ring structure. Backprojection from few angles is a *linear* filter (a star-shaped blur), so it can't tell noise from edges. It adds streaks, ghost copies of repeating texture and a streak from the frame border, and those cost the encoder more bits than they save. Keeping edges while removing noise needs a *nonlinear* filter (bilateral, wavelet thresholding, BM3D). Radon only does that with thresholding in the Radon/ridgelet domain, which still streaks and is far too slow for live video.
 - **Edge-preserving smoothing of the ring frees a few bits:** +0.2 to +0.5 dB in the center, roughly 5–10% bitrate, while the bilateral filter keeps the ring's structure at least as well as no smoothing. A small extra on top of the squish (+1.3 to +2.6 dB), not a new tool. Now in the plugin as *Clean the squeezed area* (GPU bilateral 7×7, ramps in with the squeeze). Measured through OBS (squish 75%, CBR): center +0.16 dB clean / +0.45 dB grain at 50%, +0.16 / +0.52 at 100%, ring SSIM unchanged or better.
 
+## The "256 colors + 0.3 temporal dither" recipe
+
+`palette256.py [frames]`: per-frame k-means palette in L*a*b*, ordered dither whose pattern shifts every 4 frames, x264 veryfast CRF 23.
+
+| Variant | Bitrate clean / grain | PSNR vs original clean / grain |
+|---|---|---|
+| original | 357 / 349 kbps | — |
+| 512 colors, dither 0.2 | +8.9% / +20.3% | 40.9 / 36.1 dB |
+| 256 colors, no dither | +3.5% / +12.5% | 40.8 / 36.2 dB |
+| 256 colors, dither 0.3 | **+54% / +66%** | 39.5 / 35.2 dB |
+| 256 colors, dither 0.5 | +141% / +226% | 36.6 / 33.7 dB |
+| 128 colors, dither 0.4 | +148% / +226% | 36.6 / 33.7 dB |
+
+None of these save bits: every variant costs more and looks worse. H.264 doesn't store pixels as palette indices. It codes YUV in DCT blocks, so a palette only adds hard color steps, and dither adds exactly the high-frequency noise the encoder pays for most. Palettes save space in GIF (lossless indexed coding), not in video codecs. Same conclusion as the Perceptual Color Reduction measurements (palettes +7% to +340%, dither ×2 to ×8.5).
+
 ## Bitstream-level foveation: tiles and "server-side packet loss"
 
 `tiles_and_slices.py [frames] [kbps,...]`
