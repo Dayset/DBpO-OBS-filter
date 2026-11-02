@@ -78,6 +78,22 @@ Held edges are not static during camera pans: they jump 2–3 frames of motion a
 
 The plugin's info line uses the low/high envelope of these (excluding the saturated ">" cells). Below ~9% of the pixels the returns flatten. The 25%/20% rows needed a fix: plain Newton inversion of the mapping cycles for flat curves with strong squeeze, so all implementations now use a bracketed Newton/bisection solve per zone.
 
+## Smoothing the middle ring (incl. the "Radon" idea)
+
+`ring_smoothing.py [frames] [kbps]`: smoothing only in the ring between the sharp center and the outer edges (the squish already averages the outer edges), then squish 75% → x264 CBR 250 kbps → unsquish, 30 frames.
+
+| Ring smoother | Center PSNR clean / grain | Ring SSIM after encode clean / grain | Cost per 960×540 frame (CPU) |
+|---|---|---|---|
+| none | 35.92 / 32.10 | 0.939 / 0.810 | |
+| Gaussian σ 1.5 | **36.24 / 32.64** | 0.933 / 0.812 | 14–19 ms |
+| **Bilateral** (edge-preserving) | 36.12 / 32.49 | **0.940 / 0.818** | 27 ms |
+| Wavelet (BayesShrink) | 35.79 / 32.47 | 0.940 / 0.814 | 70 ms |
+| Radon backprojection, 30 angles | 31.84 / 29.87 | 0.760 / 0.688 | 5.4 s |
+| Radon backprojection, 60 angles | 32.65 / 30.50 | 0.823 / 0.739 | 9.9 s |
+
+- **Radon backprojection is a loss on every count:** −4.1 / −2.2 dB in the center and the worst ring structure. Backprojection from few angles is a *linear* filter (a star-shaped blur), so it can't tell noise from edges. It adds streaks, ghost copies of repeating texture and a streak from the frame border, and those cost the encoder more bits than they save. Keeping edges while removing noise needs a *nonlinear* filter (bilateral, wavelet thresholding, BM3D). Radon only does that with thresholding in the Radon/ridgelet domain, which still streaks and is far too slow for live video.
+- **Edge-preserving smoothing of the ring frees a few bits:** +0.2 to +0.5 dB in the center, roughly 5–10% bitrate, while the bilateral filter keeps the ring's structure at least as well as no smoothing. A small extra on top of the squish (+1.3 to +2.6 dB), not a new tool.
+
 ## Bitstream-level foveation: tiles and "server-side packet loss"
 
 `tiles_and_slices.py [frames] [kbps,...]`
