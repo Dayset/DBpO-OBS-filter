@@ -1,5 +1,6 @@
 """Loads the real unpacked extension in Chromium, pastes a config through the popup and checks
-that it applies without a page reload and that player controls stay on top and clickable.
+that it applies without a page reload and that player controls stay on top and clickable,
+also with the viewer look on (popup sliders) and on a plain video ("normal videos" option).
 
 Usage (from the repo root): python3 viewer/unsquish-extension/tests/extension.py
 """
@@ -48,5 +49,43 @@ with sync_playwright() as p:
     hit = page.evaluate("(() => { const b = document.getElementById('ctl').getBoundingClientRect(); return document.elementFromPoint(b.x + 5, b.y + 5).id; })()")
     print("element on top at the control button:", hit)
     page.click("#ctl", timeout=2000); print("control click: OK")
+    fails = [] if hit == "ctl" else ["controls covered"]
+
+    # Viewer look from the popup: pick "My look", drag two sliders.
+    pop = ctx.new_page(); pop.goto(f"chrome-extension://{ext_id}/popup.html")
+    pop.select_option("#lookMode", "mine")
+    pop.wait_for_timeout(200)
+    for sid, val in (("sharpen", "60"), ("sharpenPlus", "40")):
+        pop.eval_on_selector(f"#{sid}", "(el, v) => { el.value = v; el.dispatchEvent(new Event('input')); el.dispatchEvent(new Event('change')); }", val)
+    pop.wait_for_timeout(300)
+    print("popup look hint:", pop.inner_text("#lookHint"))
+    pop.close()
+    page.bring_to_front(); page.wait_for_timeout(600)
+    look = page.evaluate("document.documentElement.dataset.dbpoLook")
+    print("look on the page:", look)
+    if look != "0.6,0,0,0,0.4": fails.append("look not applied")
+    hit = page.evaluate("(() => { const b = document.getElementById('ctl').getBoundingClientRect(); return document.elementFromPoint(b.x + 5, b.y + 5).id; })()")
+    print("with the look on, element on top at the control button:", hit)
+    if hit != "ctl": fails.append("controls covered with the look on")
+    page.click("#ctl", timeout=2000); print("control click with the look on: OK")
+
+    # Plain video: clear the config, turn on "Also use my look on normal videos".
+    pop = ctx.new_page(); pop.goto(f"chrome-extension://{ext_id}/popup.html")
+    pop.click("#clear"); pop.wait_for_timeout(200)
+    page.bring_to_front(); page.wait_for_timeout(600)
+    if has(): fails.append("overlay on a plain video with the option off")
+    pop.bring_to_front(); pop.check("#plainVideos"); pop.wait_for_timeout(200); pop.close()
+    page.bring_to_front(); page.wait_for_timeout(800)
+    tag = page.evaluate("document.documentElement.dataset.dbpoUnsquish")
+    print("plain video with my look, overlay:", has(), "tag:", tag)
+    if not has() or tag != "plain": fails.append("look not on the plain video")
+    page.click("#ctl", timeout=2000); print("control click on the plain video: OK")
+    pop = ctx.new_page(); pop.goto(f"chrome-extension://{ext_id}/popup.html")
+    pop.select_option("#lookMode", "off"); pop.wait_for_timeout(200); pop.close()
+    page.bring_to_front(); page.wait_for_timeout(600)
+    print("look off, plain video overlay:", has())
+    if has(): fails.append("overlay stayed with the look off")
     for l in logs: print("console:", l)
     ctx.close()
+print("PASS" if not fails else "FAIL: " + ", ".join(fails))
+sys.exit(1 if fails else 0)

@@ -49,9 +49,14 @@ for dir in "$root"/plugins/*/; do
 	# Optional per-plugin environment, e.g. OBS_HEADLESS_CANVAS=240x136 for a filter that fills the canvas.
 	read -r -a extra_env <<<"$(cat "$dir/tests/smoke-env" 2>/dev/null || true)"
 	ids="$(grep -ho '\.id = "[a-z0-9_]*"' "$dir"src/*.c | sed 's/.*"\(.*\)"/\1/')"
+	# Optional extra runs with settings, one "key=value ..." line each (tests/smoke-runs).
+	runs=("")
+	[[ -f "$dir/tests/smoke-runs" ]] && mapfile -t -O 1 runs <"$dir/tests/smoke-runs"
 	for id in $ids; do
+	for run in "${runs[@]}"; do
+		read -r -a run_args <<<"$run"
 		if env "${extra_env[@]}" DISPLAY="$display" timeout 300 "$work/obs-headless" "$so" "$data" "$id" "$W" "$H" \
-			<"$work/in.rgba" >"$work/out.rgba" 2>"$work/log.txt"; then
+			"${run_args[@]}" <"$work/in.rgba" >"$work/out.rgba" 2>"$work/log.txt"; then
 			size="$(grep -o 'output [0-9]*x[0-9]*' "$work/log.txt" | head -1 | cut -d' ' -f2)"
 			result="$(python3 - "$work/in.rgba" "$work/out.rgba" "$W" "$H" "$N" "$size" <<'EOF'
 import sys, numpy as np
@@ -73,8 +78,9 @@ EOF
 		else
 			result="FAIL ($(grep -E 'error|warning|counted|failed' "$work/log.txt" | head -3 | tr '\n' ' '))"
 		fi
-		echo "$name / $id: $result"
+		echo "$name / $id${run:+ ($run)}: $result"
 		[[ "$result" == ok* ]] || status=1
+	done
 	done
 done
 exit $status

@@ -32,6 +32,11 @@ jobs:
             bash "${script}"
             echo "::endgroup::"
           done
+      - name: Viewer extension in headless Chromium
+        run: |
+          pip install --quiet playwright pillow
+          python3 -m playwright install --with-deps chromium > /dev/null
+          bash plugins/foveated-squish/tests/run-tests.sh --e2e
       - name: Package the viewer extension
         uses: actions/upload-artifact@v4
         with:

@@ -14,6 +14,11 @@
 //   Unsquish  squished -> source size (what extension viewers see; preview).
 //   Clean     optional edge-preserving cleanup outside the center (before Squish).
 //   Zone      source with the squeezed area tinted by squeeze strength.
+//   Look*     viewer look, Unsquished preview only (never streamed): the same
+//             math as the extension (viewer/unsquish-extension/squish.js).
+//             LookBlurH/V: NVIDIA Freestyle Details' large Gaussian, at half
+//             resolution. LookDetails: HDR toning, sharpen, clarity, bloom.
+//             LookCAS: Sharpen+ (approximated with AMD FidelityFX CAS).
 
 uniform float4x4 ViewProj;
 uniform texture2d image;
@@ -26,6 +31,10 @@ uniform float4 ay_b;
 uniform float  prefilter; // 1 = area filter when squeezing, 0 = single bilinear tap
 uniform float2 align;     // sub-pixel shift so sharp-center pixels land exactly on source pixels
 uniform float  clean;     // 0..1 edge-preserving cleanup strength outside the full-quality center
+uniform texture2d large;  // look: large blur (half resolution)
+uniform float2 blur_step; // look: one blur step in uv (axis * scale / full size)
+uniform float4 look;      // look: sharpen, clarity, HDR toning, bloom (0..1)
+uniform float  sharp_plus; // look: Sharpen+ (0..1)
 
 sampler_state linearClamp {
 	Filter   = Linear;
@@ -217,5 +226,123 @@ technique Zone
 	{
 		vertex_shader = VSDefault(v_in);
 		pixel_shader  = PSZone(v_in);
+	}
+}
+
+// ---------------------------------------------------------------- viewer look
+// Details, after NVIDIA Freestyle (details.yfx as ported to ReShade): one
+// Gaussian (15 linear-sampled steps per side, taps 2i - 0.5 apart) feeds
+// HDR toning, clarity and bloom; an 8-tap box blur feeds sharpen.
+
+float4 PSLookBlur(VertData v_in) : TARGET
+{
+	float norm = -1.35914091423 / 225.0;
+	float4 acc = image.SampleLevel(linearClamp, v_in.uv, 0.0) * 0.5;
+	float div = 0.5;
+	for (int i = 1; i <= 15; i++) {
+		float fi = float(i);
+		float o = fi * 2.0 - 0.5;
+		float w = exp(fi * fi * norm);
+		acc += (image.SampleLevel(linearClamp, v_in.uv + blur_step * o, 0.0) +
+			image.SampleLevel(linearClamp, v_in.uv - blur_step * o, 0.0)) * w;
+		div += w;
+	}
+	return acc / (2.0 * div); // normalization as in the original
+}
+
+float look_luma(float3 c)
+{
+	return dot(c, float3(0.299, 0.587, 0.114));
+}
+
+float4 PSLookDetails(VertData v_in) : TARGET
+{
+	float2 px = 1.0 / src_size;
+	float4 src = image.SampleLevel(linearClamp, v_in.uv, 0.0);
+	float3 color = src.rgb;
+	float3 largeb = large.SampleLevel(linearClamp, v_in.uv, 0.0).rgb;
+	float3 boxb = (image.SampleLevel(linearClamp, v_in.uv + float2(0.5, 1.5) * px, 0.0).rgb +
+			image.SampleLevel(linearClamp, v_in.uv + float2(1.5, -0.5) * px, 0.0).rgb +
+			image.SampleLevel(linearClamp, v_in.uv + float2(-0.5, -1.5) * px, 0.0).rgb +
+			image.SampleLevel(linearClamp, v_in.uv + float2(-1.5, 0.5) * px, 0.0).rgb) * 1.5 +
+		       image.SampleLevel(linearClamp, v_in.uv + float2(2.5, 1.5) * px, 0.0).rgb +
+		       image.SampleLevel(linearClamp, v_in.uv + float2(1.5, -2.5) * px, 0.0).rgb +
+		       image.SampleLevel(linearClamp, v_in.uv + float2(-2.5, -1.5) * px, 0.0).rgb +
+		       image.SampleLevel(linearClamp, v_in.uv + float2(-1.5, 2.5) * px, 0.0).rgb;
+	boxb /= 10.0;
+	float a = look_luma(color);
+	float b = look_luma(largeb);
+	float ia = 1.0 / max(a, 1e-6);
+
+	// HDR toning (modified soft light)
+	float sa = sqrt(a);
+	float hdr = sa * (b > 0.5 ? (2.0 * sa * b - 2.0 * b + 1.0) : sa * (2.0 * a * b - a - 2.0 * b + 2.0));
+	color = color * ia * lerp(a, hdr, look.z);
+
+	// Sharpen
+	float sh = look_luma(color - boxb);
+	float lim = lerp(0.25, 0.6, look.x);
+	sh = clamp(sh, -lim, lim);
+	color = color * ia * lerp(a, a + sh, look.x);
+
+	// Clarity (modified soft light against the large blur)
+	float cl = 0.5 + a - b;
+	cl = a > b ? 2.0 * (1.0 - cl) + (2.0 * cl - 1.0) * rsqrt(max(a, 1e-6)) : 2.0 * cl + a * (1.0 - 2.0 * cl);
+	color *= lerp(1.0, cl, look.y);
+
+	// Bloom (screen blend of the large blur)
+	color = 1.0 - (1.0 - color) * (1.0 - largeb * look.w);
+	return float4(saturate(color), src.a);
+}
+
+// Sharpen+: contrast-adaptive sharpening (AMD FidelityFX CAS, MIT licence).
+float4 PSLookCAS(VertData v_in) : TARGET
+{
+	float2 px = 1.0 / src_size;
+	float2 uv = v_in.uv;
+	float3 a = image.SampleLevel(linearClamp, uv + float2(-1.0, -1.0) * px, 0.0).rgb;
+	float3 b = image.SampleLevel(linearClamp, uv + float2(0.0, -1.0) * px, 0.0).rgb;
+	float3 c = image.SampleLevel(linearClamp, uv + float2(1.0, -1.0) * px, 0.0).rgb;
+	float3 d = image.SampleLevel(linearClamp, uv + float2(-1.0, 0.0) * px, 0.0).rgb;
+	float4 e4 = image.SampleLevel(linearClamp, uv, 0.0);
+	float3 e = e4.rgb;
+	float3 f = image.SampleLevel(linearClamp, uv + float2(1.0, 0.0) * px, 0.0).rgb;
+	float3 g = image.SampleLevel(linearClamp, uv + float2(-1.0, 1.0) * px, 0.0).rgb;
+	float3 h = image.SampleLevel(linearClamp, uv + float2(0.0, 1.0) * px, 0.0).rgb;
+	float3 i = image.SampleLevel(linearClamp, uv + float2(1.0, 1.0) * px, 0.0).rgb;
+	float3 mn = min(min(min(d, e), min(f, b)), h);
+	mn += min(mn, min(min(a, c), min(g, i)));
+	float3 mx = max(max(max(d, e), max(f, b)), h);
+	mx += max(mx, max(max(a, c), max(g, i)));
+	float3 amp = sqrt(saturate(min(mn, 2.0 - mx) / max(mx, 1e-5)));
+	float3 w = amp * (-1.0 / lerp(8.0, 5.0, sharp_plus));
+	float3 o = ((b + d + f + h) * w + e) / (1.0 + 4.0 * w);
+	return float4(saturate(o), e4.a);
+}
+
+technique LookBlur
+{
+	pass
+	{
+		vertex_shader = VSDefault(v_in);
+		pixel_shader  = PSLookBlur(v_in);
+	}
+}
+
+technique LookDetails
+{
+	pass
+	{
+		vertex_shader = VSDefault(v_in);
+		pixel_shader  = PSLookDetails(v_in);
+	}
+}
+
+technique LookCAS
+{
+	pass
+	{
+		vertex_shader = VSDefault(v_in);
+		pixel_shader  = PSLookCAS(v_in);
 	}
 }

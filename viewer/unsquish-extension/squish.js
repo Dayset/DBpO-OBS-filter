@@ -78,6 +78,15 @@
 			ar: g("ar", 16 / 9),
 			// Where the squished picture sits in the video frame (black bars around it).
 			box: [g("ox", 0), g("oy", 0), g("bw", 1), g("bh", 1)],
+			// Viewer look, applied after unsquishing (0..1 each, 0 = off). Older
+			// strings have none; older extensions ignore these keys.
+			look: {
+				sharpen: clamp01(g("ls", 0)),
+				clarity: clamp01(g("lc", 0)),
+				hdr: clamp01(g("lh", 0)),
+				bloom: clamp01(g("lb", 0)),
+				sharpenPlus: clamp01(g("lp", 0)),
+			},
 			text: m[0],
 		};
 		const [ox, oy, bw, bh] = cfg.box;
@@ -89,6 +98,25 @@
 		}
 		if (!(cfg.ar > 0)) return null;
 		return cfg;
+	}
+
+	const NO_LOOK = Object.freeze({ sharpen: 0, clarity: 0, hdr: 0, bloom: 0, sharpenPlus: 0 });
+
+	/** Any look slider above zero? */
+	function lookActive(l) {
+		return !!l && (l.sharpen > 0 || l.clarity > 0 || l.hdr > 0 || l.bloom > 0 || l.sharpenPlus > 0);
+	}
+
+	/** Clamped copy of a look from storage or a string (missing values = 0). */
+	function cleanLook(l) {
+		const v = (k) => clamp01(Number(l && l[k]) || 0);
+		return { sharpen: v("sharpen"), clarity: v("clarity"), hdr: v("hdr"), bloom: v("bloom"), sharpenPlus: v("sharpenPlus") };
+	}
+
+	/** A config that leaves the picture as it is (forward(x) = x): for plain, non-squished videos. */
+	function identity(ar) {
+		const a = { r: 1, c: 0.5, f: 0.5, p: 1 };
+		return { x: { ...a }, y: { ...a }, ar: ar > 0 ? ar : 16 / 9, box: [0, 0, 1, 1], look: { ...NO_LOOK }, text: "" };
 	}
 
 	/** Uniform values for the unwarp shader: per axis A = (lo, hi, ll, lr), B = (k, p, r, dmin). */
@@ -122,7 +150,98 @@ void main() {
 	gl_FragColor = texture2D(u_video, u);
 }`;
 
-	const api = { MIN_DENSITY, derive, forward, density, inverse, parse, uniforms, FRAGMENT_SHADER };
+	/*
+	 * Viewer look shaders (post-process after unsquishing), the same math as the
+	 * OBS preview (plugins/foveated-squish/data/foveated_squish.effect).
+	 *
+	 * Details: NVIDIA Freestyle "Details" (details.yfx, as ported to ReShade):
+	 * one large Gaussian (15 linear-sampled steps per side, taps 2i - 0.5 texels
+	 * apart, run at half resolution with offsets scaled to a 1080p reference)
+	 * feeds HDR toning, clarity and bloom; an 8-tap box blur feeds sharpen.
+	 * Sharpen+: approximated with AMD FidelityFX CAS (contrast adaptive sharpening).
+	 * Post passes use GL texture orientation (v_uv.y up), see VERT_POST in content.js.
+	 */
+	const LOOK_BLUR_SHADER = `
+precision highp float;
+uniform sampler2D u_img;
+uniform vec2 u_step; // one blur step in uv (axis * scale / full size)
+varying vec2 v_uv;
+void main() {
+	float norm = -1.35914091423 / 225.0;
+	vec4 acc = texture2D(u_img, v_uv) * 0.5;
+	float div = 0.5;
+	for (int i = 1; i <= 15; i++) {
+		float fi = float(i);
+		float o = fi * 2.0 - 0.5;
+		float w = exp(fi * fi * norm);
+		acc += (texture2D(u_img, v_uv + u_step * o) + texture2D(u_img, v_uv - u_step * o)) * w;
+		div += w;
+	}
+	gl_FragColor = acc / (2.0 * div); // normalization as in the original
+}`;
+
+	const LOOK_DETAILS_SHADER = `
+precision highp float;
+uniform sampler2D u_img;
+uniform sampler2D u_large;
+uniform vec2 u_px;   // 1 / size, y negated (the original works top-down)
+uniform vec4 u_look; // sharpen, clarity, HDR toning, bloom
+varying vec2 v_uv;
+float luma(vec3 c) { return dot(c, vec3(0.299, 0.587, 0.114)); }
+vec3 tap(vec2 o) { return texture2D(u_img, v_uv + o * u_px).rgb; }
+void main() {
+	vec4 src = texture2D(u_img, v_uv);
+	vec3 color = src.rgb;
+	vec3 big = texture2D(u_large, v_uv).rgb;
+	vec3 small = ((tap(vec2(0.5, 1.5)) + tap(vec2(1.5, -0.5)) + tap(vec2(-0.5, -1.5)) + tap(vec2(-1.5, 0.5))) * 1.5 +
+		tap(vec2(2.5, 1.5)) + tap(vec2(1.5, -2.5)) + tap(vec2(-2.5, -1.5)) + tap(vec2(-1.5, 2.5))) / 10.0;
+	float a = luma(color);
+	float b = luma(big);
+	float ia = 1.0 / max(a, 1e-6);
+	// HDR toning (modified soft light)
+	float sa = sqrt(a);
+	float hdr = sa * (b > 0.5 ? (2.0 * sa * b - 2.0 * b + 1.0) : sa * (2.0 * a * b - a - 2.0 * b + 2.0));
+	color = color * ia * mix(a, hdr, u_look.z);
+	// Sharpen
+	float lim = mix(0.25, 0.6, u_look.x);
+	float sh = clamp(luma(color - small), -lim, lim);
+	color = color * ia * mix(a, a + sh, u_look.x);
+	// Clarity (modified soft light against the large blur)
+	float cl = 0.5 + a - b;
+	cl = a > b ? 2.0 * (1.0 - cl) + (2.0 * cl - 1.0) * inversesqrt(max(a, 1e-6)) : 2.0 * cl + a * (1.0 - 2.0 * cl);
+	color *= mix(1.0, cl, u_look.y);
+	// Bloom (screen blend of the large blur)
+	color = 1.0 - (1.0 - color) * (1.0 - big * u_look.w);
+	gl_FragColor = vec4(clamp(color, 0.0, 1.0), src.a);
+}`;
+
+	const LOOK_CAS_SHADER = `
+precision highp float;
+uniform sampler2D u_img;
+uniform vec2 u_px;
+uniform float u_sharp; // Sharpen+ 0..1
+varying vec2 v_uv;
+vec3 tap(float x, float y) { return texture2D(u_img, v_uv + vec2(x, y) * u_px).rgb; }
+void main() {
+	vec3 a = tap(-1.0, -1.0), b = tap(0.0, -1.0), c = tap(1.0, -1.0);
+	vec3 d = tap(-1.0, 0.0), f = tap(1.0, 0.0);
+	vec3 g = tap(-1.0, 1.0), h = tap(0.0, 1.0), i = tap(1.0, 1.0);
+	vec4 e4 = texture2D(u_img, v_uv);
+	vec3 e = e4.rgb;
+	vec3 mn = min(min(min(d, e), min(f, b)), h);
+	mn += min(mn, min(min(a, c), min(g, i)));
+	vec3 mx = max(max(max(d, e), max(f, b)), h);
+	mx += max(mx, max(max(a, c), max(g, i)));
+	vec3 amp = sqrt(clamp(min(mn, 2.0 - mx) / max(mx, vec3(1e-5)), 0.0, 1.0));
+	vec3 w = amp * (-1.0 / mix(8.0, 5.0, u_sharp));
+	vec3 o = ((b + d + f + h) * w + e) / (1.0 + 4.0 * w);
+	gl_FragColor = vec4(clamp(o, 0.0, 1.0), e4.a);
+}`;
+
+	const api = {
+		MIN_DENSITY, derive, forward, density, inverse, parse, uniforms, FRAGMENT_SHADER,
+		NO_LOOK, lookActive, cleanLook, identity, LOOK_BLUR_SHADER, LOOK_DETAILS_SHADER, LOOK_CAS_SHADER,
+	};
 	if (typeof module !== "undefined" && module.exports) module.exports = api;
 	else root.FSQ = api;
 })(typeof self !== "undefined" ? self : this);

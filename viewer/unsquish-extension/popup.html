@@ -10,6 +10,12 @@
   .status { margin-top: 8px; padding: 6px 8px; border-radius: 6px; background: #f2f2f4; word-break: break-all; }
   .bad { background: #fde8e8; }
   button { margin-top: 6px; }
+  fieldset { border: 1px solid #d0d0d6; border-radius: 6px; margin: 10px 0 0; padding: 6px 8px; }
+  legend { padding: 0 4px; font-weight: 600; }
+  .slider { display: grid; grid-template-columns: 92px 1fr 34px; gap: 6px; align-items: center; margin: 4px 0; }
+  .slider output { text-align: right; font-variant-numeric: tabular-nums; }
+  .hint { color: #6e6e73; font-size: 12px; margin: 2px 0 4px; }
+  select { font: inherit; }
   @media (prefers-color-scheme: dark) { body { background: #1e1e20; color: #eee; } .status { background: #2c2c30; } .bad { background: #4a2020; } textarea { background: #2c2c30; color: #eee; } }
 </style>
 </head>
@@ -21,6 +27,23 @@
   <textarea id="config" placeholder="FSQ1:rx=0.75,ry=0.75,cx=0.15,cy=0.15,fx=0.5,fy=0.5,px=1,py=1,ar=1.7778"></textarea>
   <button id="save">Save</button> <button id="clear">Clear</button>
   <div id="status" class="status"></div>
+  <fieldset>
+    <legend>Look (like NVIDIA Freestyle)</legend>
+    <label>Look: <select id="lookMode">
+      <option value="streamer">Streamer's look</option>
+      <option value="mine">My look</option>
+      <option value="off">Off</option>
+    </select></label>
+    <div id="lookHint" class="hint"></div>
+    <div id="sliders">
+      <div class="slider"><span>Sharpen</span><input type="range" id="sharpen" min="0" max="100" step="1"><output id="sharpenOut"></output></div>
+      <div class="slider"><span>Clarity</span><input type="range" id="clarity" min="0" max="100" step="1"><output id="clarityOut"></output></div>
+      <div class="slider"><span>HDR toning</span><input type="range" id="hdr" min="0" max="100" step="1"><output id="hdrOut"></output></div>
+      <div class="slider"><span>Bloom</span><input type="range" id="bloom" min="0" max="100" step="1"><output id="bloomOut"></output></div>
+      <div class="slider"><span>Sharpen+</span><input type="range" id="sharpenPlus" min="0" max="100" step="1"><output id="sharpenPlusOut"></output></div>
+    </div>
+    <label><input type="checkbox" id="plainVideos"> Also use my look on normal videos</label>
+  </fieldset>
   <script src="squish.js"></script>
   <script src="popup.js"></script>
 </body>

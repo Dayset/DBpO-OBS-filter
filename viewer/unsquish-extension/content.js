@@ -5,6 +5,11 @@
  *
  * Config comes from the popup (pasted FSQ1 string) or, with auto-detect on,
  * from an "FSQ1:..." tag in the page/stream title.
+ *
+ * Viewer look (optional, off unless the streamer or the viewer sets it): after
+ * unsquishing, Details (sharpen, clarity, HDR toning, bloom) and Sharpen+ run
+ * as extra passes through offscreen framebuffers. With no look the picture is
+ * drawn in one pass exactly as before.
  */
 (() => {
 	"use strict";
@@ -12,6 +17,11 @@
 attribute vec2 a_pos;
 varying vec2 v_uv;
 void main() { v_uv = vec2(a_pos.x * 0.5 + 0.5, 0.5 - a_pos.y * 0.5); gl_Position = vec4(a_pos, 0.0, 1.0); }`;
+	// Look passes read framebuffer textures, which are bottom-up.
+	const VERT_POST = `
+attribute vec2 a_pos;
+varying vec2 v_uv;
+void main() { v_uv = a_pos * 0.5 + 0.5; gl_Position = vec4(a_pos, 0.0, 1.0); }`;
 
 	// One live copy per page: after an extension update a fresh copy is injected
 	// and the old one (cut off from settings) must step aside.
@@ -20,7 +30,16 @@ void main() { v_uv = vec2(a_pos.x * 0.5 + 0.5, 0.5 - a_pos.y * 0.5); gl_Position
 	const superseded = () => document.documentElement.dataset.dbpoUnsquishGen !== GEN;
 	for (const old of document.querySelectorAll("canvas[data-dbpo-unsquish]")) old.remove();
 
-	let settings = { enabled: true, autoDetect: true, config: "" };
+	// lookMode: "streamer" (the look in the streamer's string), "mine" (myLook) or "off".
+	// plainVideos: also run myLook on normal (not squished) videos.
+	let settings = {
+		enabled: true,
+		autoDetect: true,
+		config: "",
+		lookMode: "streamer",
+		myLook: { sharpen: 0, clarity: 0, hdr: 0, bloom: 0, sharpenPlus: 0 },
+		plainVideos: false,
+	};
 	let detected = null; // config found in the page
 	let state = null; // { video, canvas, gl, prog, loc, tex, cfg }
 
@@ -28,6 +47,21 @@ void main() { v_uv = vec2(a_pos.x * 0.5 + 0.5, 0.5 - a_pos.y * 0.5); gl_Position
 		if (!settings.enabled) return null;
 		return FSQ.parse(settings.config) || (settings.autoDetect ? detected : null);
 	}
+
+	/* The look to apply on top of a squished stream's config. */
+	function activeLook(cfg) {
+		if (settings.lookMode === "off") return FSQ.NO_LOOK;
+		if (settings.lookMode === "mine") return FSQ.cleanLook(settings.myLook);
+		return cfg.look || FSQ.NO_LOOK;
+	}
+
+	/* Plain videos: only with the option on and a look of the viewer's own. */
+	function plainLook() {
+		if (!settings.enabled || !settings.plainVideos || settings.lookMode === "off") return null;
+		const look = FSQ.cleanLook(settings.myLook);
+		return FSQ.lookActive(look) ? look : null;
+	}
+	const blocked = new WeakSet(); // plain videos we cannot read (cross-origin)
 
 	function findVideo() {
 		let best = null, bestArea = 0;
@@ -50,6 +84,128 @@ void main() { v_uv = vec2(a_pos.x * 0.5 + 0.5, 0.5 - a_pos.y * 0.5); gl_Position
 		return s;
 	}
 
+	function program(gl, vert, frag, uniforms) {
+		const prog = gl.createProgram();
+		gl.attachShader(prog, compile(gl, gl.VERTEX_SHADER, vert));
+		gl.attachShader(prog, compile(gl, gl.FRAGMENT_SHADER, frag));
+		gl.bindAttribLocation(prog, 0, "a_pos");
+		gl.linkProgram(prog);
+		if (!gl.getProgramParameter(prog, gl.LINK_STATUS)) throw new Error(gl.getProgramInfoLog(prog));
+		const loc = {};
+		for (const n of uniforms) loc[n] = gl.getUniformLocation(prog, n);
+		return { prog, loc };
+	}
+
+	function makeTexture(gl) {
+		const tex = gl.createTexture();
+		gl.bindTexture(gl.TEXTURE_2D, tex);
+		gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
+		gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
+		gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+		gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+		return tex;
+	}
+
+	/* Look programs and framebuffers, made the first time a look is used. */
+	function lookSetup(s) {
+		if (s.look) return s.look;
+		const gl = s.gl;
+		s.look = {
+			blur: program(gl, VERT_POST, FSQ.LOOK_BLUR_SHADER, ["u_img", "u_step"]),
+			details: program(gl, VERT_POST, FSQ.LOOK_DETAILS_SHADER, ["u_img", "u_large", "u_px", "u_look"]),
+			cas: program(gl, VERT_POST, FSQ.LOOK_CAS_SHADER, ["u_img", "u_px", "u_sharp"]),
+			targets: [0, 1, 2, 3].map(() => ({ tex: makeTexture(gl), fb: gl.createFramebuffer(), w: 0, h: 0 })),
+		};
+		return s.look;
+	}
+
+	function sizeTarget(gl, t, w, h) {
+		if (t.w === w && t.h === h) return;
+		t.w = w;
+		t.h = h;
+		gl.bindTexture(gl.TEXTURE_2D, t.tex);
+		gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, w, h, 0, gl.RGBA, gl.UNSIGNED_BYTE, null);
+		gl.bindFramebuffer(gl.FRAMEBUFFER, t.fb);
+		gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, t.tex, 0);
+		gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+	}
+
+	function bindOutput(gl, t, w, h) {
+		gl.bindFramebuffer(gl.FRAMEBUFFER, t ? t.fb : null);
+		gl.viewport(0, 0, w, h);
+	}
+
+	function useTex(gl, unit, tex) {
+		gl.activeTexture(gl.TEXTURE0 + unit);
+		gl.bindTexture(gl.TEXTURE_2D, tex);
+	}
+
+	/*
+	 * Draws the unsquished picture through the look passes:
+	 * unsquish -> T0; T0 blur H -> T1 (half); T1 blur V -> T2 (half);
+	 * Details(T0, T2) -> screen or T3; Sharpen+(T3 or T0) -> screen.
+	 */
+	function drawWithLook(s, look, drawUnsquish) {
+		const gl = s.gl, L = lookSetup(s);
+		const w = s.canvas.width, h = s.canvas.height, hw = Math.max(1, (w + 1) >> 1), hh = Math.max(1, (h + 1) >> 1);
+		const [t0, t1, t2, t3] = L.targets;
+		const details = look.sharpen > 0 || look.clarity > 0 || look.hdr > 0 || look.bloom > 0;
+		const cas = look.sharpenPlus > 0;
+		sizeTarget(gl, t0, w, h);
+		if (details) {
+			sizeTarget(gl, t1, hw, hh);
+			sizeTarget(gl, t2, hw, hh);
+			if (cas) sizeTarget(gl, t3, w, h);
+		}
+		useTex(gl, 0, s.tex); // sizing rebinds textures: the video goes back on unit 0
+		bindOutput(gl, t0, w, h);
+		drawUnsquish();
+		let last = t0;
+		if (details) {
+			const scale = Math.max(h / 1080, 0.25); // blur size relative to a 1080p picture
+			gl.useProgram(L.blur.prog);
+			gl.uniform1i(L.blur.loc.u_img, 0);
+			bindOutput(gl, t1, hw, hh);
+			useTex(gl, 0, t0.tex);
+			gl.uniform2f(L.blur.loc.u_step, scale / w, 0);
+			gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
+			bindOutput(gl, t2, hw, hh);
+			useTex(gl, 0, t1.tex);
+			gl.uniform2f(L.blur.loc.u_step, 0, scale / h);
+			gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
+			gl.useProgram(L.details.prog);
+			gl.uniform1i(L.details.loc.u_img, 0);
+			gl.uniform1i(L.details.loc.u_large, 1);
+			gl.uniform2f(L.details.loc.u_px, 1 / w, -1 / h);
+			gl.uniform4f(L.details.loc.u_look, look.sharpen, look.clarity, look.hdr, look.bloom);
+			useTex(gl, 0, t0.tex);
+			useTex(gl, 1, t2.tex);
+			bindOutput(gl, cas ? t3 : null, w, h);
+			gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
+			last = t3;
+		}
+		if (cas) {
+			gl.useProgram(L.cas.prog);
+			gl.uniform1i(L.cas.loc.u_img, 0);
+			gl.uniform2f(L.cas.loc.u_px, 1 / w, 1 / h);
+			gl.uniform1f(L.cas.loc.u_sharp, look.sharpenPlus);
+			useTex(gl, 0, last.tex);
+			bindOutput(gl, null, w, h);
+			gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
+		}
+		// Back to the state the single-pass path expects.
+		useTex(gl, 1, null);
+		useTex(gl, 0, s.tex);
+		gl.useProgram(s.prog);
+	}
+
+	function useTexReset(gl, s) {
+		gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+		gl.viewport(0, 0, s.canvas.width, s.canvas.height);
+		useTex(gl, 0, s.tex);
+		gl.useProgram(s.prog);
+	}
+
 	function attach(video) {
 		const canvas = document.createElement("canvas");
 		canvas.dataset.dbpoUnsquish = "1";
@@ -61,6 +217,7 @@ void main() { v_uv = vec2(a_pos.x * 0.5 + 0.5, 0.5 - a_pos.y * 0.5); gl_Position
 		const prog = gl.createProgram();
 		gl.attachShader(prog, compile(gl, gl.VERTEX_SHADER, VERT));
 		gl.attachShader(prog, compile(gl, gl.FRAGMENT_SHADER, FSQ.FRAGMENT_SHADER));
+		gl.bindAttribLocation(prog, 0, "a_pos");
 		gl.linkProgram(prog);
 		if (!gl.getProgramParameter(prog, gl.LINK_STATUS)) throw new Error(gl.getProgramInfoLog(prog));
 		gl.useProgram(prog);
@@ -119,8 +276,18 @@ void main() { v_uv = vec2(a_pos.x * 0.5 + 0.5, 0.5 - a_pos.y * 0.5); gl_Position
 			detach();
 			return; // a newer copy of the extension took over
 		}
-		const cfg = activeConfig();
-		const video = cfg ? findVideo() : null;
+		let cfg = activeConfig();
+		let video = cfg ? findVideo() : null;
+		let look = cfg ? activeLook(cfg) : null;
+		const plain = !cfg && plainLook();
+		if (plain) {
+			// Normal video: unsquish with the identity mapping, then the viewer's look.
+			video = findVideo();
+			if (video && !blocked.has(video)) {
+				cfg = FSQ.identity(video.videoWidth / Math.max(video.videoHeight, 1));
+				look = plain;
+			} else video = null;
+		}
 		if (!cfg || !video) {
 			detach();
 		} else {
@@ -141,7 +308,8 @@ void main() { v_uv = vec2(a_pos.x * 0.5 + 0.5, 0.5 - a_pos.y * 0.5); gl_Position
 					gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, video);
 				} catch (e) {
 					console.warn("[DBpO Unsquish] cannot read this video (cross-origin):", e);
-					settings.enabled = false;
+					if (plain) blocked.add(video);
+					else settings.enabled = false;
 					detach();
 					return requestAnimationFrame(draw);
 				}
@@ -153,8 +321,25 @@ void main() { v_uv = vec2(a_pos.x * 0.5 + 0.5, 0.5 - a_pos.y * 0.5); gl_Position
 				gl.uniform4fv(loc.u_ay_b, uy.B);
 				gl.uniform4fv(loc.u_box, cfg.box);
 				gl.uniform2f(loc.u_texel, 1 / Math.max(video.videoWidth, 1), 1 / Math.max(video.videoHeight, 1));
-				gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
-				document.documentElement.dataset.dbpoUnsquish = cfg.text || "custom";
+				let lookOn = FSQ.lookActive(look) && !state.lookFailed;
+				if (lookOn) {
+					try {
+						drawWithLook(state, look, () => gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4));
+					} catch (e) {
+						console.warn("[DBpO Unsquish] viewer look unavailable:", e);
+						state.lookFailed = true;
+						lookOn = false;
+						useTexReset(gl, state);
+					}
+				}
+				if (!lookOn) {
+					gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+					gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
+				}
+				document.documentElement.dataset.dbpoUnsquish = plain ? "plain" : cfg.text || "custom";
+				document.documentElement.dataset.dbpoLook = lookOn
+					? [look.sharpen, look.clarity, look.hdr, look.bloom, look.sharpenPlus].map((v) => +v.toFixed(3)).join(",")
+					: "";
 			}
 		}
 		requestAnimationFrame(draw);

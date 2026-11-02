@@ -50,6 +50,13 @@ with this program. If not, see <https://www.gnu.org/licenses/>
 #define S_INFO "info"
 #define S_CONFIG "config"
 #define S_IMPORT "import"
+/* Viewer look: sent to viewers in the config string, applied by the browser
+ * extension, shown here only in the Unsquished preview (never streamed). */
+#define S_LOOK_SHARPEN "look_sharpen"
+#define S_LOOK_CLARITY "look_clarity"
+#define S_LOOK_HDR "look_hdr_toning"
+#define S_LOOK_BLOOM "look_bloom"
+#define S_LOOK_SHARPEN_PLUS "look_sharpen_plus"
 
 enum layout_mode {
 	LAYOUT_FILL = 0, /* squeeze = canvas / source: the picture fills a standard canvas */
@@ -100,6 +107,10 @@ struct squish_filter {
 	gs_texrender_t *squished;
 	gs_texrender_t *output;
 	gs_texrender_t *cleaned;
+	gs_texrender_t *look_h;    /* look: horizontal blur, half size */
+	gs_texrender_t *look_v;    /* look: vertical blur, half size */
+	gs_texrender_t *look_out;  /* look: Details result */
+	gs_texrender_t *look_out2; /* look: Sharpen+ result */
 	gs_texrender_t *display;
 	bool needs_update;
 	bool output_valid;
@@ -175,6 +186,14 @@ static const struct {
 	{"Copy", "Copy config to clipboard"},
 	{"Import", "Paste a config string to load it"},
 	{"ApplyImport", "Load pasted config"},
+	{"Look", "Viewer look (applied in the browser, costs no bitrate)"},
+	{"LookInfo",
+	 "Like NVIDIA Freestyle's Details and Sharpen+ filters, but run by each viewer's browser extension: the stream stays clean, so it costs no bitrate. Sent inside the config string; shown here only in the Unsquished preview. Viewers can turn it off."},
+	{"LookSharpen", "Sharpen (%)"},
+	{"LookClarity", "Clarity (%)"},
+	{"LookHdr", "HDR toning (%)"},
+	{"LookBloom", "Bloom (%)"},
+	{"LookSharpenPlus", "Sharpen+ (%)"},
 };
 
 static const char *T(const char *key)
@@ -207,6 +226,11 @@ static void read_config(obs_data_t *s, struct squish_config *cfg)
 	cfg->y.c = obs_data_get_double(s, link ? S_CX : S_CY) / 200.0;
 	cfg->y.f = obs_data_get_double(s, S_FY) / 100.0;
 	cfg->y.p = obs_data_get_double(s, link ? S_PX : S_PY);
+	cfg->look.sharpen = obs_data_get_double(s, S_LOOK_SHARPEN) / 100.0;
+	cfg->look.clarity = obs_data_get_double(s, S_LOOK_CLARITY) / 100.0;
+	cfg->look.hdr = obs_data_get_double(s, S_LOOK_HDR) / 100.0;
+	cfg->look.bloom = obs_data_get_double(s, S_LOOK_BLOOM) / 100.0;
+	cfg->look.sharpen_plus = obs_data_get_double(s, S_LOOK_SHARPEN_PLUS) / 100.0;
 }
 
 /* Keep each axis within what the curve can deliver (density >= 8%). */
@@ -372,6 +396,10 @@ static void *fsq_create(obs_data_t *settings, obs_source_t *context)
 	f->squished = gs_texrender_create(GS_RGBA, GS_ZS_NONE);
 	f->output = gs_texrender_create(GS_RGBA, GS_ZS_NONE);
 	f->cleaned = gs_texrender_create(GS_RGBA, GS_ZS_NONE);
+	f->look_h = gs_texrender_create(GS_RGBA, GS_ZS_NONE);
+	f->look_v = gs_texrender_create(GS_RGBA, GS_ZS_NONE);
+	f->look_out = gs_texrender_create(GS_RGBA, GS_ZS_NONE);
+	f->look_out2 = gs_texrender_create(GS_RGBA, GS_ZS_NONE);
 	obs_leave_graphics();
 	bfree(path);
 
@@ -381,6 +409,10 @@ static void *fsq_create(obs_data_t *settings, obs_source_t *context)
 		gs_texrender_destroy(f->squished);
 		gs_texrender_destroy(f->output);
 		gs_texrender_destroy(f->cleaned);
+		gs_texrender_destroy(f->look_h);
+		gs_texrender_destroy(f->look_v);
+		gs_texrender_destroy(f->look_out);
+		gs_texrender_destroy(f->look_out2);
 		obs_leave_graphics();
 		bfree(f);
 		return NULL;
@@ -397,6 +429,10 @@ static void fsq_destroy(void *data)
 	gs_texrender_destroy(f->squished);
 	gs_texrender_destroy(f->output);
 	gs_texrender_destroy(f->cleaned);
+	gs_texrender_destroy(f->look_h);
+	gs_texrender_destroy(f->look_v);
+	gs_texrender_destroy(f->look_out);
+	gs_texrender_destroy(f->look_out2);
 	gs_effect_destroy(f->effect);
 	obs_leave_graphics();
 	bfree(f);
@@ -493,6 +529,67 @@ static bool run_pass(struct squish_filter *f, gs_texrender_t *target, const char
 	return true;
 }
 
+/* One viewer-look pass: src (sw x sh) -> target (ow x oh). */
+static bool look_pass(struct squish_filter *f, gs_texrender_t *target, const char *tech, gs_texture_t *src,
+		      gs_texture_t *large, uint32_t sw, uint32_t sh, uint32_t ow, uint32_t oh, float step_x,
+		      float step_y)
+{
+	gs_texrender_reset(target);
+	if (!gs_texrender_begin(target, ow, oh))
+		return false;
+	struct vec4 v4;
+	vec4_zero(&v4);
+	gs_clear(GS_CLEAR_COLOR, &v4, 0.0f, 0);
+	gs_ortho(0.0f, (float)ow, 0.0f, (float)oh, -100.0f, 100.0f);
+	gs_effect_t *e = f->effect;
+	const struct squish_look *l = &f->cfg.look;
+	gs_effect_set_texture(gs_effect_get_param_by_name(e, "image"), src);
+	gs_effect_set_texture(gs_effect_get_param_by_name(e, "large"), large ? large : src);
+	struct vec2 v;
+	vec2_set(&v, (float)sw, (float)sh);
+	gs_effect_set_vec2(gs_effect_get_param_by_name(e, "src_size"), &v);
+	vec2_set(&v, step_x, step_y);
+	gs_effect_set_vec2(gs_effect_get_param_by_name(e, "blur_step"), &v);
+	vec4_set(&v4, (float)l->sharpen, (float)l->clarity, (float)l->hdr, (float)l->bloom);
+	gs_effect_set_vec4(gs_effect_get_param_by_name(e, "look"), &v4);
+	gs_effect_set_float(gs_effect_get_param_by_name(e, "sharp_plus"), (float)l->sharpen_plus);
+	while (gs_effect_loop(e, tech))
+		gs_draw_sprite(NULL, 0, ow, oh);
+	gs_texrender_end(target);
+	return true;
+}
+
+/* Viewer look on the Unsquished preview, the same passes as the extension.
+ * Blur offsets scale with the height (1080p reference), so the look matches
+ * at any size. Returns the texrender holding the result. */
+static gs_texrender_t *apply_look(struct squish_filter *f, gs_texrender_t *in, uint32_t w, uint32_t h)
+{
+	const struct squish_look *l = &f->cfg.look;
+	if (!squish_look_active(l))
+		return in;
+	gs_texrender_t *cur = in;
+	if (l->sharpen > 0.0 || l->clarity > 0.0 || l->hdr > 0.0 || l->bloom > 0.0) {
+		const uint32_t hw = (w + 1) / 2, hh = (h + 1) / 2;
+		double scale = h / 1080.0;
+		if (scale < 0.25)
+			scale = 0.25;
+		gs_texture_t *src = gs_texrender_get_texture(in);
+		if (!look_pass(f, f->look_h, "LookBlur", src, NULL, w, h, hw, hh, (float)(scale / w), 0.0f))
+			return in;
+		if (!look_pass(f, f->look_v, "LookBlur", gs_texrender_get_texture(f->look_h), NULL, hw, hh, hw, hh,
+			       0.0f, (float)(scale / h)))
+			return in;
+		if (!look_pass(f, f->look_out, "LookDetails", src, gs_texrender_get_texture(f->look_v), w, h, w, h,
+			       0.0f, 0.0f))
+			return in;
+		cur = f->look_out;
+	}
+	if (l->sharpen_plus > 0.0 &&
+	    look_pass(f, f->look_out2, "LookCAS", gs_texrender_get_texture(cur), NULL, w, h, w, h, 0.0f, 0.0f))
+		cur = f->look_out2;
+	return cur;
+}
+
 static bool capture_input(struct squish_filter *f, obs_source_t *target, obs_source_t *parent, uint32_t w, uint32_t h)
 {
 	gs_texrender_reset(f->input);
@@ -548,7 +645,7 @@ static void fsq_render(void *data, gs_effect_t *unused)
 				f->output_valid = true;
 				if (f->view == VIEW_UNSQUISHED) {
 					f->output_valid = run_pass(f, f->output, "Unsquish", sq, c, L.ow, L.oh, pw, ph);
-					f->display = f->output;
+					f->display = f->output_valid ? apply_look(f, f->output, pw, ph) : f->output;
 				}
 			}
 		}
@@ -819,6 +916,11 @@ static bool import_clicked(obs_properties_t *props, obs_property_t *p, void *dat
 		obs_data_set_double(s, S_FY, c.y.f * 100.0);
 		obs_data_set_double(s, S_PX, c.x.p);
 		obs_data_set_double(s, S_PY, c.y.p);
+		obs_data_set_double(s, S_LOOK_SHARPEN, c.look.sharpen * 100.0);
+		obs_data_set_double(s, S_LOOK_CLARITY, c.look.clarity * 100.0);
+		obs_data_set_double(s, S_LOOK_HDR, c.look.hdr * 100.0);
+		obs_data_set_double(s, S_LOOK_BLOOM, c.look.bloom * 100.0);
+		obs_data_set_double(s, S_LOOK_SHARPEN_PLUS, c.look.sharpen_plus * 100.0);
 		obs_data_set_string(s, S_IMPORT, "");
 		obs_source_update(f->context, s);
 		f->shown_key[0] = 0; /* force one refresh */
@@ -880,6 +982,19 @@ static obs_properties_t *fsq_properties(void *data)
 	obs_property_list_add_int(v, T("View.Squished"), VIEW_SQUISHED);
 	obs_property_list_add_int(v, T("View.Unsquished"), VIEW_UNSQUISHED);
 	obs_property_list_add_int(v, T("View.Zone"), VIEW_ZONE);
+
+	obs_properties_t *look = obs_properties_create();
+	obs_properties_add_text(look, "look_info", T("LookInfo"), OBS_TEXT_INFO);
+	const char *look_sliders[][2] = {{S_LOOK_SHARPEN, "LookSharpen"},
+					 {S_LOOK_CLARITY, "LookClarity"},
+					 {S_LOOK_HDR, "LookHdr"},
+					 {S_LOOK_BLOOM, "LookBloom"},
+					 {S_LOOK_SHARPEN_PLUS, "LookSharpenPlus"}};
+	for (int i = 0; i < 5; i++) {
+		pr = obs_properties_add_float_slider(look, look_sliders[i][0], T(look_sliders[i][1]), 0.0, 100.0, 1.0);
+		obs_property_set_modified_callback(pr, cfg_modified);
+	}
+	obs_properties_add_group(props, "look", T("Look"), OBS_GROUP_NORMAL, look);
 
 	obs_properties_t *share = obs_properties_create();
 	obs_properties_add_text(share, S_CONFIG, T("Config"), OBS_TEXT_DEFAULT);

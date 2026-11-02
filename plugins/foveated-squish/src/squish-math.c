@@ -146,6 +146,24 @@ void squish_config_format(const struct squish_config *cfg, char *buf, size_t siz
 			snprintf(buf + n, size - n, ",ox=%.6g,oy=%.6g,bw=%.6g,bh=%.6g", cfg->ox, cfg->oy, cfg->bw,
 				 cfg->bh);
 	}
+	const struct {
+		const char *key;
+		double v;
+	} look[] = {{"ls", cfg->look.sharpen},
+		    {"lc", cfg->look.clarity},
+		    {"lh", cfg->look.hdr},
+		    {"lb", cfg->look.bloom},
+		    {"lp", cfg->look.sharpen_plus}};
+	for (size_t i = 0; i < sizeof(look) / sizeof(look[0]); i++) {
+		const size_t n = strlen(buf);
+		if (look[i].v > 0.0 && n < size)
+			snprintf(buf + n, size - n, ",%s=%.3g", look[i].key, look[i].v);
+	}
+}
+
+bool squish_look_active(const struct squish_look *l)
+{
+	return l->sharpen > 0.0 || l->clarity > 0.0 || l->hdr > 0.0 || l->bloom > 0.0 || l->sharpen_plus > 0.0;
 }
 
 bool squish_config_parse(const char *s, struct squish_config *cfg)
@@ -155,7 +173,8 @@ bool squish_config_parse(const char *s, struct squish_config *cfg)
 	if (strncmp(s, "FSQ1:", 5) != 0)
 		return false;
 	struct squish_config c = {
-		{0.75, 0.15, 0.5, 1.0}, {0.75, 0.15, 0.5, 1.0}, 16.0 / 9.0, false, 0.0, 0.0, 1.0, 1.0};
+		{0.75, 0.15, 0.5, 1.0},   {0.75, 0.15, 0.5, 1.0}, 16.0 / 9.0, false, 0.0, 0.0, 1.0, 1.0,
+		{0.0, 0.0, 0.0, 0.0, 0.0}};
 	const char *p = s + 5;
 	while (*p) {
 		char key[8] = {0};
@@ -196,6 +215,16 @@ bool squish_config_parse(const char *s, struct squish_config *cfg)
 			c.bw = v, c.boxed = true;
 		else if (!strcmp(key, "bh"))
 			c.bh = v, c.boxed = true;
+		else if (!strcmp(key, "ls"))
+			c.look.sharpen = clamp01(v);
+		else if (!strcmp(key, "lc"))
+			c.look.clarity = clamp01(v);
+		else if (!strcmp(key, "lh"))
+			c.look.hdr = clamp01(v);
+		else if (!strcmp(key, "lb"))
+			c.look.bloom = clamp01(v);
+		else if (!strcmp(key, "lp"))
+			c.look.sharpen_plus = clamp01(v);
 		if (*p == ',')
 			p++;
 		else if (*p && *p != ' ' && *p != '\n' && *p != '\r')

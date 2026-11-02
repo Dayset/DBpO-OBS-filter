@@ -51,8 +51,17 @@ struct squish_config {
 	 * bw, bh) of the streamed frame (fractions); the rest is black bars. */
 	bool boxed;
 	double ox, oy, bw, bh;
+	/* Viewer look, applied only in the viewer's browser (never streamed), each
+	 * 0..1, 0 = off. Same effects as NVIDIA Freestyle "Details" (sharpen,
+	 * clarity, HDR toning, bloom) and "Sharpen+". Written only when non-zero
+	 * (keys ls, lc, lh, lb, lp), so older extensions just ignore them. */
+	struct squish_look {
+		double sharpen, clarity, hdr, bloom, sharpen_plus;
+	} look;
 };
 
-/* "FSQ1:rx=..,ry=..,cx=..,cy=..,fx=..,fy=..,px=..,py=..,ar=..[,ox=..,oy=..,bw=..,bh=..]" */
+bool squish_look_active(const struct squish_look *l);
+
+/* "FSQ1:rx=..,ry=..,cx=..,cy=..,fx=..,fy=..,px=..,py=..,ar=..[,ox=..,oy=..,bw=..,bh=..][,ls=..,lc=..,lh=..,lb=..,lp=..]" */
 void squish_config_format(const struct squish_config *cfg, char *buf, size_t size);
 bool squish_config_parse(const char *s, struct squish_config *cfg);

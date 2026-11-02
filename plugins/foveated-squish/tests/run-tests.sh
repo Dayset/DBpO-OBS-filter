@@ -2,7 +2,8 @@
 # Tests for foveated-squish and the viewer extension that unfolds it. Run from anywhere.
 #   run-tests.sh          math tests: C plugin + JS extension vs the Python reference
 #   run-tests.sh --e2e    also plays squished video through the extension in headless Chromium
-#                         (e2e.py: picture accuracy; extension.py: popup, live apply, controls)
+#                         (e2e.py: picture accuracy; extension.py: popup, live apply, controls;
+#                          look.py: viewer look vs a numpy model of the NVIDIA-style passes)
 #                         (needs Python playwright + its Chromium)
 set -euo pipefail
 here="$(cd "$(dirname "$0")" && pwd)"
@@ -25,4 +26,5 @@ fi
 if [[ "${1:-}" == "--e2e" ]]; then
 	python3 "$root/viewer/unsquish-extension/tests/e2e.py"
 	(cd "$root" && python3 viewer/unsquish-extension/tests/extension.py)
+	python3 "$root/viewer/unsquish-extension/tests/look.py"
 fi
