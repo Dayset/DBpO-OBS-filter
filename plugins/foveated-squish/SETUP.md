@@ -23,7 +23,7 @@ Not recommended:
 
 1. **Game resolution.** Set the game to the "Game resolution" from your row. For DLDSR, see [Turning on DLDSR](#turning-on-dldsr) first. PlanetSide 2: use **Fullscreen** mode so the DLDSR resolution is offered.
 2. **OBS Settings → Video.** Set **Base (Canvas) Resolution** and **Output (Scaled) Resolution** to the same value: "You stream at" from your row. These fields accept typed values (needed only for row E).
-3. **Add the filter.** Right-click your **Game Capture** source → *Filters* → **+** under *Effect Filters* → **Foveated Squish**. **Layout: Fill the canvas** (default; row E: *Exact size*, 75%).
+3. **Add the filter.** Right-click your **Game Capture** source → *Filters* → **+** under *Effect Filters* → **Foveated Squish**. Set **Stream resolution** to your stream size (row E: *Custom squeeze*, 75%). The info line now lists every OBS setting for that resolution, marked **OK** or **CHANGE**. Fix the CHANGE lines, close and reopen the filter, and they turn OK.
 4. **Reset the transform.** Close the filter window, right-click the Game Capture source → *Transform* → **Reset Transform** (Ctrl+R). The source must sit at 100% scale. If it was scaled down to fit the canvas before, the squished picture would be scaled down again.
 5. **Check the info line** at the top of the filter, for example: *Source 2560x1440 -> squeezed to fill your 1920x1080 canvas (75% x 75%)*. If it says NOT SQUEEZING, the game resolution is not above the canvas.
 6. **Bitrate:** keep what you use now. Same bits, fewer pixels, so the center gets more.

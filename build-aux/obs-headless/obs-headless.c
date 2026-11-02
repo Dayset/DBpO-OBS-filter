@@ -249,6 +249,22 @@ int main(int argc, char **argv)
 	}
 	obs_source_filter_add(src, flt);
 
+	/* OBS_HEADLESS_PRINT_PROP=name: run every property's modified callback the
+	 * way the properties window does, then print that property's text (e.g. a
+	 * filter's info line) to stderr. */
+	const char *print_prop = getenv("OBS_HEADLESS_PRINT_PROP");
+	if (print_prop) {
+		obs_properties_t *props = obs_source_properties(flt);
+		obs_data_t *fs = obs_source_get_settings(flt);
+		for (obs_property_t *pr = obs_properties_first(props); pr; obs_property_next(&pr))
+			obs_property_modified(pr, fs);
+		obs_property_t *target = obs_properties_get(props, print_prop);
+		fprintf(stderr, "obs-headless: property %s: %s\n", print_prop,
+			target ? obs_property_description(target) : "(not found)");
+		obs_data_release(fs);
+		obs_properties_destroy(props);
+	}
+
 	obs_enter_graphics();
 	feed_tex = gs_texture_create(W, H, GS_RGBA, 1, NULL, GS_DYNAMIC);
 	obs_leave_graphics();

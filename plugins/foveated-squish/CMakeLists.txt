@@ -1,4 +1,4 @@
-project(foveated-squish VERSION 0.4.0 LANGUAGES C)
+project(foveated-squish VERSION 0.5.0 LANGUAGES C)
 
 add_obs_plugin(${PROJECT_NAME} SOURCES src/plugin-main.c src/squish-filter.c src/squish-math.c)
 

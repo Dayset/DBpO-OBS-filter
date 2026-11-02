@@ -43,7 +43,8 @@ with this program. If not, see <https://www.gnu.org/licenses/>
 #define S_LINK "same_for_y"
 #define S_PREFILTER "prefilter"
 #define S_VIEW "view"
-#define S_LAYOUT "layout"
+#define S_LAYOUT "layout" /* old setting, read for migration */
+#define S_TARGET "stream_resolution"
 #define S_MAXCOMP "max_edge_compression"
 #define S_INFO "info"
 #define S_CONFIG "config"
@@ -68,9 +69,22 @@ struct layout {
 	uint32_t w, h;          /* source */
 	uint32_t ow, oh;        /* squished picture */
 	uint32_t fw, fh;        /* streamed frame */
-	uint32_t cw, ch;        /* canvas */
+	uint32_t cw, ch;        /* OBS canvas (base) */
+	uint32_t vw, vh;        /* OBS output (scaled) */
+	uint32_t tw, th;        /* chosen stream resolution (Fill) */
 	enum fit_result fit;
 };
+
+/* Stream resolution list: 0 = match the canvas, 1 = custom squeeze, else a
+ * standard height (16:9). */
+#define TARGET_CANVAS 0
+#define TARGET_CUSTOM 1
+
+static void target_dims(int target, uint32_t *tw, uint32_t *th)
+{
+	*th = (uint32_t)target;
+	*tw = target == 480 ? 854 : (uint32_t)(target * 16.0 / 9.0 / 2.0 + 0.5) * 2;
+}
 
 enum view_mode {
 	VIEW_SQUISHED = 0,   /* what gets streamed */
@@ -93,6 +107,7 @@ struct squish_filter {
 	bool prefilter;
 	enum view_mode view;
 	enum layout_mode layout;
+	int target;   /* TARGET_CANVAS, TARGET_CUSTOM or a height */
 	double floor; /* lowest density = 1 / max edge compression */
 
 	/* What the properties view shows, so it only rebuilds when this changes
@@ -109,24 +124,32 @@ static const struct {
 	{"FoveatedSquish", "Foveated Squish"},
 	{"InfoDefault",
 	 "Squeezes the edges (X and Y) so a fixed stream bitrate is spent on the sharp center. Viewers unfold it with the DBpO Unsquish browser extension."},
-	{"InfoFill",
-	 "Source %ux%u -> fills your %ux%u canvas: %.0f%% of the pixels are streamed. Full-quality center: up to ~%.0f%% of the frame.\nEstimated: the same center quality at ~%.0f-%.0f%% less bitrate (or, at your current bitrate, a sharper center). %s\nUse View > Squeezed zone to see the center (green) and edge squeeze (red) live."},
-	{"OptionsHeader",
-	 "\n\nHow much to sacrifice is set by the canvas (Settings > Video: type it into Base and Output, both the same). Smaller canvas = more saving, smaller possible center. Standard sizes:"},
+	{"InfoTarget", "Stream resolution %ux%u (game source %ux%u). OBS checklist for %ux%u:"},
+	{"Ok", "OK"},
+	{"Change", "CHANGE"},
+	{"CheckCanvas", "\n  [%s] Settings > Video > Base (Canvas) Resolution: %ux%u (now %ux%u)"},
+	{"CheckOutput", "\n  [%s] Settings > Video > Output (Scaled) Resolution: %ux%u (now %ux%u)"},
+	{"CheckGame", "\n  [%s] Game renders above %ux%u (now %ux%u)"},
+	{"CheckAfter",
+	 "\n  After changing the canvas: right-click the game source > Transform > Reset Transform, then Copy the config again for viewers."},
+	{"NotSqueezing",
+	 "\n\nNOT SQUEEZING: the game must render at a higher resolution than the stream (e.g. 2560x1440 for 1280x720)."},
+	{"InfoResult",
+	 "\n\nStreamed: %.0f%% of the game's pixels. Full-quality center: up to ~%.0f%% (the slider stops there). Estimated: the same center quality at ~%.0f-%.0f%% less bitrate, or a sharper center at your current bitrate. %s\nUse View > Squeezed zone to see the center (green) and edge squeeze (red) live."},
+	{"OptionsHeader", "\n\nOther stream resolutions:"},
 	{"OptionRow", "\n  %ux%u: %.0f%% of pixels, center up to %.0f%%, est. %.0f-%.0f%% less bitrate%s"},
-	{"Current", "  <- now"},
-	{"InfoFillSmall",
-	 "NOT SQUEEZING: the source (%ux%u) must be larger than the canvas (%ux%u). Run the game at a higher resolution than the canvas (2560x1440 for a 1920x1080 canvas, e.g. with NVIDIA DLDSR 1.78x on a 1080p monitor), or use the Exact size layout. See the setup guide."},
+	{"Current", "  <- selected"},
 	{"InfoExact",
 	 "Source %ux%u -> streamed %ux%u (%.0f%% of the pixels). Full-quality center: up to ~%.0f%%. Estimated: the same center quality at ~%.0f-%.0f%% less bitrate. Set OBS Settings > Video > Base (Canvas) and Output resolution to %ux%u (you can type a custom size). These numbers update when you reopen this window. %s"},
 	{"Clamped",
 	 "(Squeeze limited by Max edge compression: raise it, or lower the curve or the sharp center size.)"},
 	{"Reduced", "(The curve, or if needed the center, is lowered automatically so this squeeze fits.)"},
+	{"Comp.Default", "12.5x (default)"},
 	{"MaxCompression",
 	 "Max edge compression (x:1). Higher allows stronger squeeze with harder curves; above ~16 the outermost edge smears"},
-	{"Layout", "Layout"},
-	{"Layout.Fill", "Fill the canvas (auto squeeze = canvas / source, best)"},
-	{"Layout.Exact", "Manual squeeze, exact size (set the canvas to the squished size)"},
+	{"Target", "Stream resolution"},
+	{"Target.Canvas", "Match my OBS canvas"},
+	{"Target.Custom", "Custom squeeze (set the canvas to the size shown)"},
 	{"Link", "Same settings for height"},
 	{"SqueezeWidth", "Streamed width (% of source)"},
 	{"SqueezeHeight", "Streamed height (% of source)"},
@@ -240,16 +263,25 @@ static enum fit_result fit_axis(struct squish_axis *a, double r, double floor)
 	return FIT_LIMITED;
 }
 
-static void canvas_size(uint32_t *cw, uint32_t *ch, uint32_t w, uint32_t h)
+static void video_sizes(struct layout *L)
 {
 	struct obs_video_info ovi;
 	if (obs_get_video_info(&ovi) && ovi.base_width && ovi.base_height) {
-		*cw = ovi.base_width;
-		*ch = ovi.base_height;
+		L->cw = ovi.base_width;
+		L->ch = ovi.base_height;
+		L->vw = ovi.output_width;
+		L->vh = ovi.output_height;
 	} else {
-		*cw = w;
-		*ch = h;
+		L->cw = L->vw = L->w;
+		L->ch = L->vh = L->h;
 	}
+}
+
+static int read_target(obs_data_t *s)
+{
+	if (obs_data_has_user_value(s, S_TARGET))
+		return (int)obs_data_get_int(s, S_TARGET);
+	return obs_data_get_int(s, S_LAYOUT) == LAYOUT_EXACT ? TARGET_CUSTOM : TARGET_CANVAS;
 }
 
 static void compute_layout(const struct squish_filter *f, uint32_t w, uint32_t h, struct layout *L)
@@ -258,18 +290,24 @@ static void compute_layout(const struct squish_filter *f, uint32_t w, uint32_t h
 	L->w = w;
 	L->h = h;
 	struct squish_config c = f->cfg;
-	canvas_size(&L->cw, &L->ch, w, h);
+	video_sizes(L);
+	if (f->target == TARGET_CANVAS) {
+		L->tw = L->cw;
+		L->th = L->ch;
+	} else if (f->target != TARGET_CUSTOM) {
+		target_dims(f->target, &L->tw, &L->th);
+	}
 	if (f->layout == LAYOUT_FILL) {
-		const enum fit_result fx = fit_axis(&c.x, (double)L->cw / w, f->floor);
-		const enum fit_result fy = fit_axis(&c.y, (double)L->ch / h, f->floor);
+		const enum fit_result fx = fit_axis(&c.x, (double)L->tw / w, f->floor);
+		const enum fit_result fy = fit_axis(&c.y, (double)L->th / h, f->floor);
 		L->fit = fx > fy ? fx : fy;
 		L->ow = even_size(w * c.x.r);
 		L->oh = even_size(h * c.y.r);
-		/* Never larger than the canvas or the source (rounding). */
-		if (L->ow > L->cw && L->fit != FIT_LIMITED)
-			L->ow = L->cw;
-		if (L->oh > L->ch && L->fit != FIT_LIMITED)
-			L->oh = L->ch;
+		/* Never larger than the stream resolution or the source (rounding). */
+		if (L->ow > L->tw && L->fit != FIT_LIMITED)
+			L->ow = L->tw;
+		if (L->oh > L->th && L->fit != FIT_LIMITED)
+			L->oh = L->th;
 	} else {
 		L->fit = f->clamped ? FIT_LIMITED : FIT_OK;
 		L->ow = even_size(w * c.x.r);
@@ -296,7 +334,8 @@ static void fsq_update(void *data, obs_data_t *s)
 	f->clamped = clamp_axis(&f->cfg.x, f->floor) | clamp_axis(&f->cfg.y, f->floor);
 	f->prefilter = obs_data_get_bool(s, S_PREFILTER);
 	f->view = (enum view_mode)obs_data_get_int(s, S_VIEW);
-	f->layout = obs_data_get_int(s, S_LAYOUT) == LAYOUT_EXACT ? LAYOUT_EXACT : LAYOUT_FILL;
+	f->target = read_target(s);
+	f->layout = f->target == TARGET_CUSTOM ? LAYOUT_EXACT : LAYOUT_FILL;
 }
 
 /* ------------------------------------------------------------------ lifecycle */
@@ -591,7 +630,8 @@ static void describe(struct squish_filter *f, obs_data_t *s, char *info, size_t 
 	read_config(s, &tmp.cfg);
 	tmp.floor = 1.0 / obs_data_get_double(s, S_MAXCOMP);
 	tmp.clamped = clamp_axis(&tmp.cfg.x, tmp.floor) | clamp_axis(&tmp.cfg.y, tmp.floor);
-	tmp.layout = obs_data_get_int(s, S_LAYOUT) == LAYOUT_EXACT ? LAYOUT_EXACT : LAYOUT_FILL;
+	tmp.target = read_target(s);
+	tmp.layout = tmp.target == TARGET_CUSTOM ? LAYOUT_EXACT : LAYOUT_FILL;
 	tmp.view = VIEW_SQUISHED;
 
 	uint32_t w = 1920, h = 1080;
@@ -608,21 +648,32 @@ static void describe(struct squish_filter *f, obs_data_t *s, char *info, size_t 
 		snprintf(note, sizeof(note), "%s", T("Reduced"));
 	const double pixels = 100.0 * (double)L.ow * L.oh / ((double)w * h);
 	if (key)
-		snprintf(key, key_size, "%d %d %d %ux%u %ux%u", (int)tmp.layout, (int)L.fit, L.ow >= w && L.oh >= h, w,
-			 h, L.cw, L.ch);
+		snprintf(key, key_size, "%d %d %d %ux%u %ux%u %ux%u %.4g", tmp.target, (int)L.fit,
+			 L.ow >= w && L.oh >= h, w, h, L.cw, L.ch, L.vw, L.vh, tmp.floor);
 	switch (tmp.layout) {
-	case LAYOUT_FILL:
-		if (L.ow >= w && L.oh >= h)
-			snprintf(info, info_size, T("InfoFillSmall"), w, h, L.cw, L.ch);
-		else {
+	case LAYOUT_FILL: {
+		/* Checklist for the chosen resolution, checked against OBS. */
+		const char *ok = T("Ok"), *change = T("Change");
+		size_t n = (size_t)snprintf(info, info_size, T("InfoTarget"), L.tw, L.th, w, h, L.tw, L.th);
+		n += (size_t)snprintf(info + n, info_size - n, T("CheckCanvas"),
+				      (L.cw == L.tw && L.ch == L.th) ? ok : change, L.tw, L.th, L.cw, L.ch);
+		n += (size_t)snprintf(info + n, info_size - n, T("CheckOutput"),
+				      (L.vw == L.tw && L.vh == L.th) ? ok : change, L.tw, L.th, L.vw, L.vh);
+		n += (size_t)snprintf(info + n, info_size - n, T("CheckGame"), (w > L.tw || h > L.th) ? ok : change,
+				      L.tw, L.th, w, h);
+		n += (size_t)snprintf(info + n, info_size - n, "%s", T("CheckAfter"));
+		if (L.ow >= w && L.oh >= h) {
+			snprintf(info + n, info_size - n, "%s", T("NotSqueezing"));
+		} else {
 			const double r = L.c.x.r < L.c.y.r ? L.c.x.r : L.c.y.r;
 			double lo, hi;
 			estimate_saving(pixels / 100.0, &lo, &hi);
-			snprintf(info, info_size, T("InfoFill"), w, h, L.cw, L.ch, pixels,
-				 100.0 * max_center(r, tmp.floor), 100.0 * lo, 100.0 * hi, note);
-			append_options(info, info_size, w, h, L.cw, L.ch, tmp.floor);
+			snprintf(info + n, info_size - n, T("InfoResult"), pixels, 100.0 * max_center(r, tmp.floor),
+				 100.0 * lo, 100.0 * hi, note);
+			append_options(info, info_size, w, h, L.tw, L.th, tmp.floor);
 		}
 		break;
+	}
 	default: {
 		const double r = L.c.x.r < L.c.y.r ? L.c.x.r : L.c.y.r;
 		double lo, hi;
@@ -634,6 +685,50 @@ static void describe(struct squish_filter *f, obs_data_t *s, char *info, size_t 
 	}
 }
 
+/* Sliders stop where the chosen resolution stops: the center can't exceed
+ * what the squeeze allows (flat curve), the curve can't exceed what a 1%
+ * center allows. Values beyond the new limits are pulled back. */
+static void limit_slider(obs_properties_t *props, obs_data_t *s, const char *name, double lo, double hi, double step)
+{
+	obs_property_t *pr = obs_properties_get(props, name);
+	if (!pr)
+		return;
+	obs_property_float_set_limits(pr, lo, hi, step);
+	if (obs_data_get_double(s, name) > hi)
+		obs_data_set_double(s, name, hi);
+}
+
+static void set_slider_limits(struct squish_filter *f, obs_properties_t *props, obs_data_t *s, bool manual)
+{
+	if (manual) {
+		limit_slider(props, s, S_CX, 1.0, 99.0, 0.5);
+		limit_slider(props, s, S_CY, 1.0, 99.0, 0.5);
+		limit_slider(props, s, S_PX, 0.1, 10.0, 0.05);
+		limit_slider(props, s, S_PY, 0.1, 10.0, 0.05);
+		return;
+	}
+	struct squish_filter tmp = *f;
+	read_config(s, &tmp.cfg);
+	tmp.floor = 1.0 / obs_data_get_double(s, S_MAXCOMP);
+	tmp.target = read_target(s);
+	tmp.layout = LAYOUT_FILL;
+	uint32_t w = 1920, h = 1080;
+	target_size(f, &w, &h);
+	struct layout L;
+	compute_layout(&tmp, w, h, &L);
+	const double r[2] = {L.c.x.r, L.c.y.r};
+	const char *cs[2] = {S_CX, S_CY}, *ps[2] = {S_PX, S_PY};
+	for (int i = 0; i < 2; i++) {
+		double cmax = floor(max_center(r[i], tmp.floor) * 200.0) / 2.0; /* % of the frame, 0.5 steps */
+		if (cmax < 1.0)
+			cmax = 1.0;
+		double pmax = r[i] < 1.0 ? (1.0 - tmp.floor) * 0.99 / (1.0 - r[i]) - 1.0 : 10.0;
+		pmax = pmax > 10.0 ? 10.0 : pmax < 0.1 ? 0.1 : floor(pmax * 20.0) / 20.0;
+		limit_slider(props, s, cs[i], 1.0, cmax, 0.5);
+		limit_slider(props, s, ps[i], 0.1, pmax, 0.05);
+	}
+}
+
 static bool cfg_modified(obs_properties_t *props, obs_property_t *p, obs_data_t *s)
 {
 	UNUSED_PARAMETER(p);
@@ -641,7 +736,7 @@ static bool cfg_modified(obs_properties_t *props, obs_property_t *p, obs_data_t 
 	if (!f)
 		return false;
 	const bool link = obs_data_get_bool(s, S_LINK);
-	const bool manual = obs_data_get_int(s, S_LAYOUT) == LAYOUT_EXACT;
+	const bool manual = read_target(s) == TARGET_CUSTOM;
 	obs_property_set_visible(obs_properties_get(props, S_RX), manual);
 	obs_property_set_visible(obs_properties_get(props, S_RY), manual && !link);
 	obs_property_set_visible(obs_properties_get(props, S_CY), !link);
@@ -658,6 +753,7 @@ static bool cfg_modified(obs_properties_t *props, obs_property_t *p, obs_data_t 
 	f->shown_vis = vis;
 	snprintf(f->shown_key, sizeof(f->shown_key), "%s", key);
 	obs_property_set_description(obs_properties_get(props, S_INFO), info);
+	set_slider_limits(f, props, s, manual);
 	return true;
 }
 
@@ -731,11 +827,15 @@ static obs_properties_t *fsq_properties(void *data)
 
 	obs_properties_add_text(props, S_INFO, T("InfoDefault"), OBS_TEXT_INFO);
 
-	obs_property_t *lay =
-		obs_properties_add_list(props, S_LAYOUT, T("Layout"), OBS_COMBO_TYPE_LIST, OBS_COMBO_FORMAT_INT);
-	obs_property_list_add_int(lay, T("Layout.Fill"), LAYOUT_FILL);
-	obs_property_list_add_int(lay, T("Layout.Exact"), LAYOUT_EXACT);
-	obs_property_set_modified_callback(lay, cfg_modified);
+	obs_property_t *tgt =
+		obs_properties_add_list(props, S_TARGET, T("Target"), OBS_COMBO_TYPE_LIST, OBS_COMBO_FORMAT_INT);
+	obs_property_list_add_int(tgt, T("Target.Canvas"), TARGET_CANVAS);
+	obs_property_list_add_int(tgt, "1920x1080 (1080p)", 1080);
+	obs_property_list_add_int(tgt, "1280x720 (720p)", 720);
+	obs_property_list_add_int(tgt, "854x480 (480p)", 480);
+	obs_property_list_add_int(tgt, "640x360 (360p)", 360);
+	obs_property_list_add_int(tgt, T("Target.Custom"), TARGET_CUSTOM);
+	obs_property_set_modified_callback(tgt, cfg_modified);
 
 	const char *sliders[][2] = {{S_RX, "SqueezeWidth"}, {S_RY, "SqueezeHeight"}, {S_CX, "CenterWidth"},
 				    {S_CY, "CenterHeight"}, {S_FX, "FocusX"},        {S_FY, "FocusY"}};
@@ -752,7 +852,13 @@ static obs_properties_t *fsq_properties(void *data)
 	obs_property_set_modified_callback(pr, cfg_modified);
 	pr = obs_properties_add_float_slider(props, S_PY, T("CurveY"), 0.1, 10.0, 0.05);
 	obs_property_set_modified_callback(pr, cfg_modified);
-	pr = obs_properties_add_float_slider(props, S_MAXCOMP, T("MaxCompression"), 2.0, 50.0, 0.5);
+	pr = obs_properties_add_list(props, S_MAXCOMP, T("MaxCompression"), OBS_COMBO_TYPE_LIST,
+				     OBS_COMBO_FORMAT_FLOAT);
+	obs_property_list_add_float(pr, "8x", 8.0);
+	obs_property_list_add_float(pr, T("Comp.Default"), 12.5);
+	obs_property_list_add_float(pr, "16x", 16.0);
+	obs_property_list_add_float(pr, "25x", 25.0);
+	obs_property_list_add_float(pr, "50x", 50.0);
 	obs_property_set_modified_callback(pr, cfg_modified);
 	obs_properties_add_bool(props, S_PREFILTER, T("Prefilter"));
 
@@ -785,7 +891,7 @@ static void fsq_defaults(obs_data_t *s)
 	obs_data_set_default_double(s, S_PY, 1.0);
 	obs_data_set_default_bool(s, S_PREFILTER, true);
 	obs_data_set_default_int(s, S_VIEW, VIEW_SQUISHED);
-	obs_data_set_default_int(s, S_LAYOUT, LAYOUT_FILL);
+	obs_data_set_default_int(s, S_TARGET, TARGET_CANVAS);
 	obs_data_set_default_double(s, S_MAXCOMP, 12.5);
 }
 
