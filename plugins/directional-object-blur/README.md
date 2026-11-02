@@ -29,6 +29,21 @@ Without look-ahead, motion is measured between frame N−1 and N and blur is app
 
 ## Settings
 
+**Look** (top of the panel) is all most people need:
+
+| Look | What you get | Values it uses |
+|---|---|---|
+| **Off** | Picture passes through untouched (no GPU cost, no delay) | — |
+| **Subtle** (default for new filters) | Light film-camera blur, nothing smears ahead | Object strength 0.5 (180° shutter), camera strength 0.5, smoothing 0.5, max radius 24 px, 16 samples, trailing placement (0), no tail fade, no highlight streaks |
+| **Cinematic** | Long trailing exposure: comet-like tails and bright lights that streak | Object strength 1.0 (360° shutter), camera strength 1.0, smoothing 0.6, max radius 64 px, 32 samples, trailing placement (0), tail fade 40 %, highlight streaks 50 % |
+| **Custom** | Every setting below, under **Advanced** | Switching to Custom copies in the look you had selected, so you fine-tune from there |
+
+Everything a look doesn't list stays at its default (camera motion and UI protection on, look-ahead 0, mouse input off, no clear spot, no glow or trails). The **View** debug list stays available with every look.
+
+Filters saved before looks existed open as **Custom** if any setting had been changed, so they keep looking exactly the same; untouched ones become **Subtle**.
+
+The rest of the settings live in the **Advanced** group (shown only for Custom):
+
 - **Object blur strength** — blur length for moving objects, as a fraction of their per-frame motion (0.5 = 180° film shutter, 1.0 = 360°, up to 20× for stylized smears).
 - **Cinematic shutter**
   - **Blur placement** — 0 = trailing (real camera: the smear ends at the object's current position), 100 = centered (typical game motion blur, smears ahead too). With look-ahead, the camera model and motion blending center on the matching point of the exposure.
@@ -51,7 +66,7 @@ Without look-ahead, motion is measured between frame N−1 and N and blur is app
 - **Raw mouse input (camera turns)** — opt-in, Windows only. Reads relative mouse movement (no clicks, wheel or keys) via Windows Raw Input inside OBS's own process; it never touches the game. The filter learns counts → on-screen pixels per axis (sensitivity, FOV, inversion) and the input-to-capture latency from frames where image analysis is reliable, then uses the mouse for turns too fast to measure. The mouse is only used once it has agreed with the picture (≥50 % on-screen agreement), so wrong manual values or menus don't cause blur; in manual mode the automatic estimate is still shown as a reference. *Fast turns only* (default) or *All camera pan*; automatic or manual calibration. Progress is shown in the settings and logged every ~10 s.
 - **Look-ahead (frames)** — 0–6. Delays video by that many frames (6 = 100 ms at 60 fps) to average the camera model across frames before *and* after the output frame (smooth without lag) and to blend motion into and out of each frame (cleaner edges where objects appear or disappear). The settings show the exact delay; add the same **Sync Offset** to your audio sources in *Edit → Advanced Audio Properties*. Uses one extra full-res frame of GPU memory per frame of look-ahead (about 15 MB each at 1440p).
 - **Center clear spot** — keeps the middle of the frame sharp (e.g. your crosshair/aim point). *Oval* follows the frame's proportions; *Square* is square in pixels. Size is a percentage of frame height; edge softness blends the spot into the blur.
-- **Advanced** — analysis resolution, search radius (max detectable motion = radius × downscale px/frame), coherence radius, minimum motion, static bias (noise rejection), dither (off by default: per-pixel grain hides banding in long blurs but costs encoder bitrate).
+- **Motion analysis** — analysis resolution, search radius (max detectable motion = radius × downscale px/frame), coherence radius, minimum motion, static bias (noise rejection), dither (off by default: per-pixel grain hides banding in long blurs but costs encoder bitrate).
 - **View** — result, or debug overlays (hue = direction, brightness = speed) for the final motion, camera motion only, object motion only, the protected UI mask, or the **dilated blur reach** (where trails will land).
 
 ## Streaming / encoder notes

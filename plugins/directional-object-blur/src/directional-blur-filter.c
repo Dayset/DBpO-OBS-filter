@@ -74,6 +74,16 @@ with this program. If not, see <https://www.gnu.org/licenses/>
 #define S_SHUTTER_PHASE "shutter_phase"
 #define S_TAIL_FADE "tail_fade"
 #define S_HIGHLIGHTS "highlight_streaks"
+#define S_PRESET "preset"
+#define S_PRESET_SHOWN "preset_shown" /* last preset shown in the panel (to seed Custom) */
+
+/* One-click looks. Custom uses every setting under Advanced. */
+enum blur_preset {
+	PRESET_OFF = 0,
+	PRESET_SUBTLE = 1,
+	PRESET_CINEMATIC = 2,
+	PRESET_CUSTOM = 3,
+};
 
 enum object_blur_type {
 	OBJ_BLUR_DIRECTIONAL = 0,
@@ -215,6 +225,7 @@ struct dob_filter {
 	float shutter_phase; /* 0 trailing .. 0.5 centered */
 	float tail_fade;
 	float highlight_boost;
+	bool off; /* Preset Off: pass the picture through untouched */
 };
 
 /* English fallbacks used when the locale file can't be found. */
@@ -306,6 +317,14 @@ static const struct {
 	{"TailFade", "Tail fade (comet-like trail, %)"},
 	{"Highlights", "Highlight streaks (bright lights keep intensity, %)"},
 	{"View.Dilated", "Dilated blur reach (debug)"},
+	{"Preset", "Look"},
+	{"Preset.Off", "Off (no blur)"},
+	{"Preset.Subtle", "Subtle (film camera, half-frame shutter)"},
+	{"Preset.Cinematic", "Cinematic (long trailing exposure, glowing streaks)"},
+	{"Preset.Custom", "Custom (use the settings under Advanced)"},
+	{"PresetInfo",
+	 "Pick a look and you're done. Choose Custom to fine-tune: it starts from the look you had selected."},
+	{"Analysis", "Motion analysis"},
 };
 
 static const char *T(const char *key)
@@ -551,10 +570,17 @@ static void create_textures(struct dob_filter *f)
 
 /* ------------------------------------------------------------------ lifecycle */
 
-static void dob_update(void *data, obs_data_t *settings)
+static void dob_defaults(obs_data_t *settings);
+
+static void dob_read_settings(struct dob_filter *f, obs_data_t *data, bool user)
 {
-	struct dob_filter *f = data;
-	int old_downscale = f->downscale;
+	obs_data_t *settings = data;
+	if (!user) {
+		/* Preset: start from the defaults, then the preset's values. */
+		settings = obs_data_create();
+		dob_defaults(settings);
+		obs_data_apply(settings, data);
+	}
 
 	f->strength = (float)obs_data_get_double(settings, S_STRENGTH);
 	f->max_radius = (float)obs_data_get_double(settings, S_MAX_RADIUS);
@@ -611,9 +637,118 @@ static void dob_update(void *data, obs_data_t *settings)
 	f->shutter_phase = 0.5f * (float)obs_data_get_double(settings, S_SHUTTER_PHASE) / 100.0f;
 	f->tail_fade = 0.9f * (float)obs_data_get_double(settings, S_TAIL_FADE) / 100.0f;
 	f->highlight_boost = 4.0f * (float)obs_data_get_double(settings, S_HIGHLIGHTS) / 100.0f;
-
 	if (f->downscale < 1)
 		f->downscale = 4;
+	if (settings != data)
+		obs_data_release(settings);
+}
+
+/* Values of each preset. Everything not listed keeps its default. */
+struct preset_values {
+	double strength, max_radius, camera_strength, camera_smoothing, shutter_phase, tail_fade, highlights;
+	long long samples;
+};
+
+static const struct preset_values preset_table[] = {
+	/* strength, max radius, camera strength, camera smoothing, placement, tail fade, highlights, samples */
+	[PRESET_SUBTLE] = {0.5, 24.0, 0.5, 0.5, 0.0, 0.0, 0.0, 16},
+	[PRESET_CINEMATIC] = {1.0, 64.0, 1.0, 0.6, 0.0, 40.0, 50.0, 32},
+};
+
+/* Settings a preset controls, and the ones that only Custom can change. */
+static const char *const preset_keys[] = {
+	S_STRENGTH,
+	S_MAX_RADIUS,
+	S_SENSITIVITY,
+	S_SAMPLES,
+	S_OPACITY,
+	S_SHUTTER_PHASE,
+	S_TAIL_FADE,
+	S_HIGHLIGHTS,
+	S_OBJECT_BLUR_TYPE,
+	S_AREA_STRENGTH,
+	S_GLOW,
+	S_GLOW_RADIUS,
+	S_TRAILS,
+	S_TRAIL_LENGTH,
+	S_CAMERA,
+	S_CAMERA_STRENGTH,
+	S_CAMERA_SMOOTHING,
+	S_OBJECT_THRESHOLD,
+	S_CAM_SPEED_MIN,
+	S_CAM_SPEED_FULL,
+	S_CAM_CURVE,
+	S_UI,
+	S_UI_SENS,
+	S_UI_MARGIN,
+	S_MOUSE,
+	S_LOOKAHEAD,
+	S_CLEAR_SHAPE,
+	S_CLEAR_SIZE,
+	S_CLEAR_FEATHER,
+	S_DOWNSCALE,
+	S_SEARCH,
+	S_COHERENCE,
+	S_MIN_MOTION,
+	S_STATIC_BIAS,
+	S_DITHER,
+};
+
+/* Filters saved before presets existed have no preset: if any setting was
+ * changed from its default they become Custom (nothing changes for them),
+ * otherwise Subtle. */
+static int read_preset(obs_data_t *s)
+{
+	if (obs_data_has_user_value(s, S_PRESET))
+		return (int)obs_data_get_int(s, S_PRESET);
+	for (size_t i = 0; i < sizeof(preset_keys) / sizeof(preset_keys[0]); i++)
+		if (obs_data_has_user_value(s, preset_keys[i]))
+			return PRESET_CUSTOM;
+	return PRESET_SUBTLE;
+}
+
+/* Writes a preset's values into the settings (used to seed Custom). */
+static void write_preset(obs_data_t *s, int preset)
+{
+	if (preset != PRESET_SUBTLE && preset != PRESET_CINEMATIC)
+		return;
+	const struct preset_values *v = &preset_table[preset];
+	for (size_t i = 0; i < sizeof(preset_keys) / sizeof(preset_keys[0]); i++)
+		obs_data_unset_user_value(s, preset_keys[i]);
+	obs_data_set_double(s, S_STRENGTH, v->strength);
+	obs_data_set_double(s, S_MAX_RADIUS, v->max_radius);
+	obs_data_set_double(s, S_CAMERA_STRENGTH, v->camera_strength);
+	obs_data_set_double(s, S_CAMERA_SMOOTHING, v->camera_smoothing);
+	obs_data_set_double(s, S_SHUTTER_PHASE, v->shutter_phase);
+	obs_data_set_double(s, S_TAIL_FADE, v->tail_fade);
+	obs_data_set_double(s, S_HIGHLIGHTS, v->highlights);
+	obs_data_set_int(s, S_SAMPLES, v->samples);
+}
+
+/* A preset overrides what it controls; the rest stays at the defaults. */
+static void apply_preset(struct dob_filter *f, int preset)
+{
+	if (preset != PRESET_SUBTLE && preset != PRESET_CINEMATIC)
+		return;
+	obs_data_t *d = obs_data_create();
+	write_preset(d, preset);
+	dob_read_settings(f, d, false);
+	obs_data_release(d);
+}
+
+static void dob_update(void *data, obs_data_t *settings)
+{
+	struct dob_filter *f = data;
+	int old_downscale = f->downscale;
+	const int preset = read_preset(settings);
+
+	f->off = preset == PRESET_OFF;
+	if (preset == PRESET_CUSTOM)
+		dob_read_settings(f, settings, true);
+	else
+		apply_preset(f, preset);
+	/* The debug view stays available with any preset. */
+	f->view = (enum view_mode)obs_data_get_int(settings, S_VIEW);
 
 	/* A new flow resolution invalidates the previous frame. */
 	if (old_downscale != f->downscale)
@@ -665,6 +800,9 @@ static void *dob_create(obs_data_t *settings, obs_source_t *context)
 	for (int i = 0; i < CAM_HIST; i++)
 		f->mouse_hist_frame[i] = -1;
 
+	/* Saved before presets existed and tuned by hand: keep it as Custom. */
+	if (!obs_data_has_user_value(settings, S_PRESET) && read_preset(settings) == PRESET_CUSTOM)
+		obs_data_set_int(settings, S_PRESET, PRESET_CUSTOM);
 	dob_update(f, settings);
 	return f;
 }
@@ -1209,7 +1347,8 @@ static void dob_render(void *data, gs_effect_t *unused)
 	uint32_t w = target ? obs_source_get_base_width(target) : 0;
 	uint32_t h = target ? obs_source_get_base_height(target) : 0;
 
-	if (!f->effect || !target || !parent || !w || !h) {
+	if (f->off || !f->effect || !target || !parent || !w || !h) {
+		f->have_prev = false;
 		obs_source_skip_video_filter(f->context);
 		return;
 	}
@@ -1297,22 +1436,53 @@ static void mouse_status_text(const struct dob_filter *f, char *buf, size_t size
 	}
 }
 
+/* Advanced is only shown for Custom. Switching from a look to Custom copies
+ * that look's values in, so fine-tuning starts from what you saw. */
+static bool preset_modified(obs_properties_t *props, obs_property_t *p, obs_data_t *settings)
+{
+	UNUSED_PARAMETER(p);
+	const int preset = read_preset(settings);
+	const int shown = obs_data_has_user_value(settings, S_PRESET_SHOWN)
+				  ? (int)obs_data_get_int(settings, S_PRESET_SHOWN)
+				  : -1;
+	if (preset == PRESET_CUSTOM && shown != PRESET_CUSTOM)
+		write_preset(settings, shown);
+	obs_data_set_int(settings, S_PRESET_SHOWN, preset);
+
+	obs_property_t *adv = obs_properties_get(props, "advanced");
+	if (adv)
+		obs_property_set_visible(adv, preset == PRESET_CUSTOM);
+	return true;
+}
+
 static obs_properties_t *dob_properties(void *data)
 {
 	struct dob_filter *f = data;
 	obs_properties_t *props = obs_properties_create();
 
-	obs_properties_add_float_slider(props, S_STRENGTH, T("Strength"), 0.0, 20.0, 0.05);
-	obs_properties_add_float_slider(props, S_MAX_RADIUS, T("MaxBlurRadius"), 1.0, 512.0, 1.0);
-	obs_properties_add_float_slider(props, S_SENSITIVITY, T("ObjectSensitivity"), 0.0, 100.0, 1.0);
-	obs_properties_add_int_slider(props, S_SAMPLES, T("Samples"), 4, 64, 1);
-	obs_properties_add_float_slider(props, S_OPACITY, T("Opacity"), 0.0, 100.0, 1.0);
+	obs_property_t *pr =
+		obs_properties_add_list(props, S_PRESET, T("Preset"), OBS_COMBO_TYPE_LIST, OBS_COMBO_FORMAT_INT);
+	obs_property_list_add_int(pr, T("Preset.Off"), PRESET_OFF);
+	obs_property_list_add_int(pr, T("Preset.Subtle"), PRESET_SUBTLE);
+	obs_property_list_add_int(pr, T("Preset.Cinematic"), PRESET_CINEMATIC);
+	obs_property_list_add_int(pr, T("Preset.Custom"), PRESET_CUSTOM);
+	obs_property_set_modified_callback(pr, preset_modified);
+	obs_properties_add_text(props, "preset_info", T("PresetInfo"), OBS_TEXT_INFO);
+
+	/* Everything else lives under Advanced, shown only for Custom. */
+	obs_properties_t *all = obs_properties_create();
+
+	obs_properties_add_float_slider(all, S_STRENGTH, T("Strength"), 0.0, 20.0, 0.05);
+	obs_properties_add_float_slider(all, S_MAX_RADIUS, T("MaxBlurRadius"), 1.0, 512.0, 1.0);
+	obs_properties_add_float_slider(all, S_SENSITIVITY, T("ObjectSensitivity"), 0.0, 100.0, 1.0);
+	obs_properties_add_int_slider(all, S_SAMPLES, T("Samples"), 4, 64, 1);
+	obs_properties_add_float_slider(all, S_OPACITY, T("Opacity"), 0.0, 100.0, 1.0);
 
 	obs_properties_t *cine = obs_properties_create();
 	obs_properties_add_float_slider(cine, S_SHUTTER_PHASE, T("ShutterPhase"), 0.0, 100.0, 1.0);
 	obs_properties_add_float_slider(cine, S_TAIL_FADE, T("TailFade"), 0.0, 100.0, 1.0);
 	obs_properties_add_float_slider(cine, S_HIGHLIGHTS, T("Highlights"), 0.0, 100.0, 1.0);
-	obs_properties_add_group(props, "cinematic", T("Cinematic"), OBS_GROUP_NORMAL, cine);
+	obs_properties_add_group(all, "cinematic", T("Cinematic"), OBS_GROUP_NORMAL, cine);
 
 	obs_properties_t *obj = obs_properties_create();
 	obs_property_t *bt = obs_properties_add_list(obj, S_OBJECT_BLUR_TYPE, T("ObjectBlurType"), OBS_COMBO_TYPE_LIST,
@@ -1329,7 +1499,7 @@ static obs_properties_t *dob_properties(void *data)
 	obs_property_list_add_int(tr, T("Trails.Objects"), TRAILS_OBJECTS);
 	obs_property_list_add_int(tr, T("Trails.All"), TRAILS_ALL);
 	obs_properties_add_float_slider(obj, S_TRAIL_LENGTH, T("TrailLength"), 0.0, 100.0, 1.0);
-	obs_properties_add_group(props, "object_effects", T("ObjectEffects"), OBS_GROUP_NORMAL, obj);
+	obs_properties_add_group(all, "object_effects", T("ObjectEffects"), OBS_GROUP_NORMAL, obj);
 
 	obs_properties_t *cam = obs_properties_create();
 	obs_properties_add_float_slider(cam, S_CAMERA_STRENGTH, T("CameraStrength"), 0.0, 20.0, 0.05);
@@ -1338,13 +1508,13 @@ static obs_properties_t *dob_properties(void *data)
 	obs_properties_add_float_slider(cam, S_CAM_SPEED_MIN, T("CameraSpeedMin"), 0.0, 64.0, 0.5);
 	obs_properties_add_float_slider(cam, S_CAM_SPEED_FULL, T("CameraSpeedFull"), 0.0, 256.0, 1.0);
 	obs_properties_add_float_slider(cam, S_CAM_CURVE, T("CameraCurve"), 0.25, 4.0, 0.05);
-	obs_properties_add_group(props, S_CAMERA, T("CameraMotion"), OBS_GROUP_CHECKABLE, cam);
+	obs_properties_add_group(all, S_CAMERA, T("CameraMotion"), OBS_GROUP_CHECKABLE, cam);
 
 	obs_properties_t *ui = obs_properties_create();
 	obs_properties_add_text(ui, "ui_info", T("UIInfo"), OBS_TEXT_INFO);
 	obs_properties_add_float_slider(ui, S_UI_SENS, T("UISensitivity"), 0.0, 100.0, 1.0);
 	obs_properties_add_int_slider(ui, S_UI_MARGIN, T("UIMargin"), 0, 32, 1);
-	obs_properties_add_group(props, S_UI, T("UIProtect"), OBS_GROUP_CHECKABLE, ui);
+	obs_properties_add_group(all, S_UI, T("UIProtect"), OBS_GROUP_CHECKABLE, ui);
 
 	obs_properties_t *mouse = obs_properties_create();
 	obs_properties_add_text(mouse, S_MOUSE_INFO, T("MouseInfo"), OBS_TEXT_INFO);
@@ -1364,13 +1534,13 @@ static obs_properties_t *dob_properties(void *data)
 	obs_properties_add_float_slider(mouse, S_MOUSE_GAIN_X, T("MouseGainX"), -10.0, 10.0, 0.001);
 	obs_properties_add_float_slider(mouse, S_MOUSE_GAIN_Y, T("MouseGainY"), -10.0, 10.0, 0.001);
 	obs_properties_add_int_slider(mouse, S_MOUSE_LAG, T("MouseLatency"), 0, MOUSE_MAX_LAG, 1);
-	obs_property_t *mg = obs_properties_add_group(props, S_MOUSE, T("MouseInput"), OBS_GROUP_CHECKABLE, mouse);
+	obs_property_t *mg = obs_properties_add_group(all, S_MOUSE, T("MouseInput"), OBS_GROUP_CHECKABLE, mouse);
 	if (!raw_mouse_supported())
 		obs_property_set_enabled(mg, false);
 
-	obs_property_t *la = obs_properties_add_int_slider(props, S_LOOKAHEAD, T("LookAhead"), 0, MAX_LOOKAHEAD, 1);
+	obs_property_t *la = obs_properties_add_int_slider(all, S_LOOKAHEAD, T("LookAhead"), 0, MAX_LOOKAHEAD, 1);
 	obs_property_set_modified_callback(la, lookahead_modified);
-	obs_properties_add_text(props, S_LOOKAHEAD_INFO, T("LookAheadInfo.Off"), OBS_TEXT_INFO);
+	obs_properties_add_text(all, S_LOOKAHEAD_INFO, T("LookAheadInfo.Off"), OBS_TEXT_INFO);
 
 	obs_properties_t *clear = obs_properties_create();
 	obs_property_t *shape = obs_properties_add_list(clear, S_CLEAR_SHAPE, T("ClearShape"), OBS_COMBO_TYPE_LIST,
@@ -1380,7 +1550,7 @@ static obs_properties_t *dob_properties(void *data)
 	obs_property_list_add_int(shape, T("ClearShape.Square"), CLEAR_SQUARE);
 	obs_properties_add_float_slider(clear, S_CLEAR_SIZE, T("ClearSize"), 0.0, 100.0, 0.5);
 	obs_properties_add_float_slider(clear, S_CLEAR_FEATHER, T("ClearFeather"), 0.0, 100.0, 0.5);
-	obs_properties_add_group(props, "clear_spot", T("ClearSpot"), OBS_GROUP_NORMAL, clear);
+	obs_properties_add_group(all, "clear_spot", T("ClearSpot"), OBS_GROUP_NORMAL, clear);
 
 	obs_properties_t *adv = obs_properties_create();
 	obs_property_t *ds = obs_properties_add_list(adv, S_DOWNSCALE, T("FlowResolution"), OBS_COMBO_TYPE_LIST,
@@ -1393,7 +1563,8 @@ static obs_properties_t *dob_properties(void *data)
 	obs_properties_add_float_slider(adv, S_MIN_MOTION, T("MinMotion"), 0.0, 8.0, 0.1);
 	obs_properties_add_float_slider(adv, S_STATIC_BIAS, T("StaticBias"), 0.0, 1.0, 0.01);
 	obs_properties_add_bool(adv, S_DITHER, T("Dither"));
-	obs_properties_add_group(props, "advanced", T("Advanced"), OBS_GROUP_NORMAL, adv);
+	obs_properties_add_group(all, "analysis", T("Analysis"), OBS_GROUP_NORMAL, adv);
+	obs_properties_add_group(props, "advanced", T("Advanced"), OBS_GROUP_NORMAL, all);
 
 	obs_property_t *view =
 		obs_properties_add_list(props, S_VIEW, T("View"), OBS_COMBO_TYPE_LIST, OBS_COMBO_FORMAT_INT);
@@ -1409,6 +1580,7 @@ static obs_properties_t *dob_properties(void *data)
 
 static void dob_defaults(obs_data_t *settings)
 {
+	obs_data_set_default_int(settings, S_PRESET, PRESET_SUBTLE);
 	obs_data_set_default_double(settings, S_STRENGTH, 1.0); /* 360-degree shutter */
 	obs_data_set_default_bool(settings, S_CAMERA, true);
 	obs_data_set_default_double(settings, S_CAMERA_STRENGTH, 0.75);
