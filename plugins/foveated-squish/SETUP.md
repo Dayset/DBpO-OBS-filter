@@ -31,6 +31,28 @@ Not recommended:
 
 Optional check: set the filter's **View** to *Unsquished preview* to see what extension viewers will see, then set it back to *Squished* before going live.
 
+## Filter order
+
+Put every filter on the **Game Capture source itself**, not on a group or nested scene (those report the size of the box around everything inside, so the squeeze comes out wrong). In the source's *Filters* list, top to bottom:
+
+1. **Perceptual Color Reduction**: only **Flatten noise** on (default 50), everything else off.
+2. **Sharpen** (OBS built-in): **0.1**.
+3. **Directional Object Blur**: optional, pick a **Look**.
+4. **Foveated Squish**: always **last**.
+
+Why this order: OBS runs filters from top to bottom. Cleaning, sharpening and blurring work on the full game picture, where they look right and the sharp center gets them pixel-for-pixel. The squish must come last because it changes the picture's shape: a filter below it would sharpen or blur the squeezed edges (wasting bitrate on detail viewers never see), and motion blur would measure squeezed motion. Denoise goes before sharpen so the sharpen doesn't boost grain.
+
+## The only 4 squish settings to touch
+
+1. **Stream resolution**: pick your stream size, then fix every **CHANGE** line in the info text (close and reopen the filter; they turn OK).
+2. **Full-quality center**: start around **30%**.
+3. **Curve**: **1** is a gradual ramp; low values (0.1–0.5) give a hard step at the center's edge.
+4. **Clean the squeezed area**: start around **20–30**.
+
+Leave everything else at default. Use **View → Squeezed zone** to check the center and edges, then switch back to **Squished** before going live. After any change, **copy the config again** and update your stream title.
+
+**NVIDIA Freestyle (Alt+F3 filters):** don't use them on the game while streaming. Sharpen, Clarity and Details add fine detail the encoder has to pay for, so the stream needs more bitrate. Use the filter's **Viewer look** sliders instead: the extension applies the same kind of look in each viewer's browser, so it costs no bitrate.
+
 ## Center size vs. how much is sacrificed
 
 Two different knobs:

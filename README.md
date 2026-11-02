@@ -25,7 +25,7 @@ C:\ProgramData\obs-studio\plugins\
     └── data\…
 ```
 
-Restart OBS. The filters appear under **Effect Filters**. Remove any older copy of a plugin's DLL from `C:\Program Files\obs-studio\obs-plugins\64bit\` first.
+Restart OBS. The filters appear under **Effect Filters**. For the recommended filter order and the few settings worth touching, see [Filter order](plugins/foveated-squish/SETUP.md#filter-order). Remove any older copy of a plugin's DLL from `C:\Program Files\obs-studio\obs-plugins\64bit\` first.
 
 ## Building
 
