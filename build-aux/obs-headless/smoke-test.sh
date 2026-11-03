@@ -53,6 +53,15 @@ for dir in "$root"/plugins/*/; do
 	runs=("")
 	[[ -f "$dir/tests/smoke-runs" ]] && mapfile -t -O 1 runs <"$dir/tests/smoke-runs"
 	for id in $ids; do
+	# Every setting in the panel needs a hint (Hint.<setting> in the locale file).
+	if OBS_HEADLESS_DUMP_PROPS=1 env "${extra_env[@]}" DISPLAY="$display" timeout 300 "$work/obs-headless" "$so" "$data" "$id" "$W" "$H" \
+		<"$work/in.rgba" >/dev/null 2>"$work/props.txt"; then
+		echo "$name / $id settings panel: ok ($(grep -c 'obs-headless: prop' "$work/props.txt") controls, all with hints)"
+	else
+		grep 'NO HINT' "$work/props.txt" | head -20
+		echo "$name / $id settings panel: FAIL (controls without a hint)"
+		status=1
+	fi
 	for run in "${runs[@]}"; do
 		read -r -a run_args <<<"$run"
 		if env "${extra_env[@]}" DISPLAY="$display" timeout 300 "$work/obs-headless" "$so" "$data" "$id" "$W" "$H" \

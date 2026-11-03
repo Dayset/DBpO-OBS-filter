@@ -23,6 +23,7 @@ with this program. If not, see <https://www.gnu.org/licenses/>
 #include <math.h>
 #include <string.h>
 #include <plugin-support.h>
+#include <plugin-text.h>
 #include "embedded-effect.h" /* generated from data/perceptual_color_reduction.effect */
 #include "palette.h"
 
@@ -116,61 +117,10 @@ struct pcr_filter {
 	bool soften_vertical;
 };
 
-/* English fallbacks used when the locale file can't be found. */
-static const struct {
-	const char *key;
-	const char *text;
-} pcr_default_text[] = {
-	{"PerceptualColorReduction", "Perceptual Color Reduction"},
-	{"Info",
-	 "Prepares the picture for the encoder in OKLab (perceptual color space). Default: edge-preserving noise flattening only, the one option that lowered x264 bitrate on every test clip (up to -67% on grainy footage at high quality). Use View > Split compare to judge the look."},
-	{"Bandwidth", "Bandwidth (noise and detail the encoder pays for)"},
-	{"Flatten", "Flatten noise, edge-preserving (50 = measured sweet spot)"},
-	{"Chroma", "Chroma smoothing (helps gradients, costs bits on grainy footage)"},
-	{"Temporal", "Temporal denoise (helps static grainy scenes only)"},
-	{"Hold", "Hold unchanged pixels (costs bits on slow pans)"},
-	{"ColorReduction", "Color reduction (palette / posterize)"},
-	{"ReduceInfo",
-	 "Measured with x264: palette and posterize modes RAISE bitrate (+21% to +1100%), dithering roughly doubles it. Banding edges cost more bits than the gradients they replace. Use these for a stylized look, not to save bandwidth."},
-	{"Mode", "Mode"},
-	{"Mode.Off", "Off"},
-	{"Mode.Posterize", "Posterize (OKLab grid)"},
-	{"Mode.Octree", "Adaptive palette: octree"},
-	{"Mode.KMeans", "Adaptive palette: k-means (most stable)"},
-	{"LevelsL", "Posterize: lightness levels"},
-	{"LevelsC", "Posterize: chroma levels"},
-	{"Colors", "Palette: colors"},
-	{"Luma", "Luminance protection"},
-	{"Dither", "Dither"},
-	{"Dither.None", "None"},
-	{"Dither.Bayer4", "Bayer 4x4"},
-	{"Dither.Bayer8", "Bayer 8x8"},
-	{"DitherStrength", "Dither strength (%)"},
-	{"UpdateEvery", "Palette: update every N frames"},
-	{"PaletteSmoothing", "Palette: smoothing between updates (%)"},
-	{"SceneCut", "Palette: scene-change threshold (%)"},
-	{"View", "View"},
-	{"View.Result", "Result"},
-	{"View.Split", "Split compare (left original, right result)"},
-	{"Soften", "Edge softening (foveated, viewers need nothing)"},
-	{"SoftenInfo",
-	 "Blurs the sides while the center stays sharp: detail where nobody looks costs bits. Measured with x264: about -1% at typical quality, up to -14% at high quality on grainy footage. Check the zone with View > Softened zone."},
-	{"SoftenStrength", "Blur radius at the edges (px)"},
-	{"SoftenCenter", "Sharp center width (% of frame)"},
-	{"SoftenFeather", "Transition width (% of frame)"},
-	{"SoftenVertical", "Also soften top and bottom"},
-	{"View.Zone", "Softened zone (red tint)"},
-};
-
+/* Labels from data/locale/en-US.ini, or the copy compiled into the plugin. */
 static const char *T(const char *key)
 {
-	const char *out = NULL;
-	if (obs_module_get_string(key, &out) && out)
-		return out;
-	for (size_t i = 0; i < sizeof(pcr_default_text) / sizeof(pcr_default_text[0]); i++)
-		if (strcmp(pcr_default_text[i].key, key) == 0)
-			return pcr_default_text[i].text;
-	return key;
+	return plugin_text(key);
 }
 
 static const char *pcr_get_name(void *unused)
@@ -602,19 +552,44 @@ static void pcr_render(void *data, gs_effect_t *unused)
 
 /* ------------------------------------------------------------------ properties */
 
+/* Posterize and palette settings only matter for their own mode. */
+static bool mode_modified(obs_properties_t *props, obs_property_t *p, obs_data_t *settings)
+{
+	UNUSED_PARAMETER(p);
+	const int m = (int)obs_data_get_int(settings, S_MODE);
+	const bool post = m == MODE_POSTERIZE, pal = m == MODE_OCTREE || m == MODE_KMEANS;
+	plugin_ui_show(props, S_LEVELS_L, post);
+	plugin_ui_show(props, S_LEVELS_C, post);
+	plugin_ui_show(props, S_COLORS, pal);
+	plugin_ui_show(props, S_LUMA, pal);
+	plugin_ui_show(props, S_UPDATE_EVERY, pal);
+	plugin_ui_show(props, S_PAL_SMOOTH, pal);
+	plugin_ui_show(props, S_SCENE_CUT, pal);
+	plugin_ui_show(props, S_DITHER, m != MODE_OFF);
+	plugin_ui_show(props, S_DITHER_STRENGTH, m != MODE_OFF);
+	plugin_ui_show(props, "reduce_info", m != MODE_OFF);
+	return true;
+}
+
 static obs_properties_t *pcr_properties(void *data)
 {
-	UNUSED_PARAMETER(data);
+	struct pcr_filter *f = data;
 	obs_properties_t *props = obs_properties_create();
 	obs_properties_add_text(props, S_INFO, T("Info"), OBS_TEXT_INFO);
 
+	/* 1. The one setting most people need. */
 	obs_properties_t *bw = obs_properties_create();
 	obs_properties_add_float_slider(bw, S_FLATTEN, T("Flatten"), 0.0, 100.0, 1.0);
-	obs_properties_add_float_slider(bw, S_CHROMA, T("Chroma"), 0.0, 100.0, 1.0);
-	obs_properties_add_float_slider(bw, S_TEMPORAL, T("Temporal"), 0.0, 100.0, 1.0);
-	obs_properties_add_float_slider(bw, S_HOLD, T("Hold"), 0.0, 100.0, 1.0);
 	obs_properties_add_group(props, "bandwidth", T("Bandwidth"), OBS_GROUP_NORMAL, bw);
 
+	/* 2. Optional extras, off by default. */
+	obs_properties_t *ex = obs_properties_create();
+	obs_properties_add_float_slider(ex, S_CHROMA, T("Chroma"), 0.0, 100.0, 1.0);
+	obs_properties_add_float_slider(ex, S_TEMPORAL, T("Temporal"), 0.0, 100.0, 1.0);
+	obs_properties_add_float_slider(ex, S_HOLD, T("Hold"), 0.0, 100.0, 1.0);
+	obs_properties_add_group(props, "extras", T("Extras"), OBS_GROUP_NORMAL, ex);
+
+	/* 3. Foveated softening. */
 	obs_properties_t *sg = obs_properties_create();
 	obs_properties_add_text(sg, "soften_info", T("SoftenInfo"), OBS_TEXT_INFO);
 	obs_properties_add_float_slider(sg, S_SOFTEN_STRENGTH, T("SoftenStrength"), 0.5, 6.0, 0.1);
@@ -623,6 +598,7 @@ static obs_properties_t *pcr_properties(void *data)
 	obs_properties_add_bool(sg, S_SOFTEN_VERTICAL, T("SoftenVertical"));
 	obs_properties_add_group(props, S_SOFTEN, T("Soften"), OBS_GROUP_CHECKABLE, sg);
 
+	/* 4. Stylized look: costs bitrate, so it comes last. */
 	obs_properties_t *cr = obs_properties_create();
 	obs_properties_add_text(cr, "reduce_info", T("ReduceInfo"), OBS_TEXT_INFO);
 	obs_property_t *m = obs_properties_add_list(cr, S_MODE, T("Mode"), OBS_COMBO_TYPE_LIST, OBS_COMBO_FORMAT_INT);
@@ -630,6 +606,7 @@ static obs_properties_t *pcr_properties(void *data)
 	obs_property_list_add_int(m, T("Mode.Posterize"), MODE_POSTERIZE);
 	obs_property_list_add_int(m, T("Mode.Octree"), MODE_OCTREE);
 	obs_property_list_add_int(m, T("Mode.KMeans"), MODE_KMEANS);
+	obs_property_set_modified_callback(m, mode_modified);
 	obs_properties_add_int_slider(cr, S_LEVELS_L, T("LevelsL"), 8, 256, 1);
 	obs_properties_add_int_slider(cr, S_LEVELS_C, T("LevelsC"), 4, 128, 1);
 	obs_properties_add_int_slider(cr, S_COLORS, T("Colors"), 16, PALETTE_MAX, 1);
@@ -650,6 +627,14 @@ static obs_properties_t *pcr_properties(void *data)
 	obs_property_list_add_int(v, T("View.Result"), VIEW_RESULT);
 	obs_property_list_add_int(v, T("View.Split"), VIEW_SPLIT);
 	obs_property_list_add_int(v, T("View.Zone"), VIEW_ZONE);
+	plugin_ui_add_view_warning(props, v);
+
+	plugin_ui_decorate(props);
+	/* Initial visibility from the saved mode. */
+	obs_data_t *cur = obs_source_get_settings(f->context);
+	mode_modified(props, NULL, cur);
+	plugin_ui_show(props, "view_warning", obs_data_get_int(cur, S_VIEW) != 0);
+	obs_data_release(cur);
 	return props;
 }
 

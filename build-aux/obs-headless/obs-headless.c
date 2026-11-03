@@ -166,6 +166,26 @@ static void tick_cb(void *p, float seconds)
 	obs_leave_graphics();
 }
 
+/* OBS_HEADLESS_DUMP_PROPS=1: print every control of the settings panel and
+ * return how many lack a hint (info lines, buttons and groups are exempt). */
+static int dump_props(obs_properties_t *props, int depth)
+{
+	int missing = 0;
+	for (obs_property_t *p = obs_properties_first(props); p; obs_property_next(&p)) {
+		const enum obs_property_type t = obs_property_get_type(p);
+		const char *hint = obs_property_long_description(p);
+		const bool exempt = t == OBS_PROPERTY_TEXT && obs_property_text_type(p) == OBS_TEXT_INFO;
+		const bool needs = !exempt && t != OBS_PROPERTY_BUTTON && t != OBS_PROPERTY_GROUP;
+		if (needs && !(hint && *hint))
+			missing++;
+		fprintf(stderr, "obs-headless: prop %*s%s [%d]%s%s\n", depth * 2, "", obs_property_name(p), (int)t,
+			obs_property_visible(p) ? "" : " (hidden)", needs && !(hint && *hint) ? " NO HINT" : "");
+		if (t == OBS_PROPERTY_GROUP)
+			missing += dump_props(obs_property_group_content(p), depth + 1);
+	}
+	return missing;
+}
+
 int main(int argc, char **argv)
 {
 	if (argc < 6) {
@@ -263,6 +283,15 @@ int main(int argc, char **argv)
 			target ? obs_property_description(target) : "(not found)");
 		obs_data_release(fs);
 		obs_properties_destroy(props);
+	}
+
+	if (getenv("OBS_HEADLESS_DUMP_PROPS")) {
+		obs_properties_t *props = obs_source_properties(flt);
+		const int missing = dump_props(props, 0);
+		obs_properties_destroy(props);
+		fprintf(stderr, "obs-headless: %d controls without a hint\n", missing);
+		if (missing)
+			return 5;
 	}
 
 	obs_enter_graphics();

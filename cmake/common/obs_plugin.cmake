@@ -19,9 +19,19 @@ function(add_obs_plugin target)
   configure_file("${CMAKE_SOURCE_DIR}/common/plugin-support.c.in" "${CMAKE_CURRENT_BINARY_DIR}/plugin-support.c" @ONLY)
   target_sources(
     ${target}
-    PRIVATE "${CMAKE_CURRENT_BINARY_DIR}/plugin-support.c" "${CMAKE_SOURCE_DIR}/common/plugin-support.h"
+    PRIVATE
+      "${CMAKE_CURRENT_BINARY_DIR}/plugin-support.c"
+      "${CMAKE_SOURCE_DIR}/common/plugin-support.h"
+      "${CMAKE_SOURCE_DIR}/common/plugin-text.c"
+      "${CMAKE_SOURCE_DIR}/common/plugin-text.h"
+      "${CMAKE_SOURCE_DIR}/common/text-table.c"
+      "${CMAKE_SOURCE_DIR}/common/text-table.h"
   )
   target_include_directories(${target} PRIVATE "${CMAKE_SOURCE_DIR}/common" "${CMAKE_CURRENT_SOURCE_DIR}/src")
+
+  # English labels and hints compiled in (plugin_embedded_locale), so the
+  # settings panel reads the same without the data folder.
+  target_embed_text(${target} data/locale/en-US.ini plugin_embedded_locale embedded-locale.h)
 
   if(_AOP_FRONTEND_API)
     find_package(obs-frontend-api REQUIRED)

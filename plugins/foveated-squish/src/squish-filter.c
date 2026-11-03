@@ -24,6 +24,7 @@ with this program. If not, see <https://www.gnu.org/licenses/>
 #include <stdio.h>
 #include <string.h>
 #include <plugin-support.h>
+#include <plugin-text.h>
 #include "embedded-effect.h" /* generated from data/foveated_squish.effect */
 #include "squish-math.h"
 
@@ -130,81 +131,10 @@ struct squish_filter {
 	int shown_vis;
 };
 
-/* English fallbacks used when the locale file can't be found. */
-static const struct {
-	const char *key;
-	const char *text;
-} fsq_default_text[] = {
-	{"FoveatedSquish", "Foveated Squish"},
-	{"InfoDefault",
-	 "Squeezes the edges (X and Y) so a fixed stream bitrate is spent on the sharp center. Viewers unfold it with the DBpO Unsquish browser extension."},
-	{"InfoTarget", "Stream resolution %ux%u (game source %ux%u). OBS checklist for %ux%u:"},
-	{"Ok", "OK"},
-	{"Change", "CHANGE"},
-	{"CheckCanvas", "\n  [%s] Settings > Video > Base (Canvas) Resolution: %ux%u (now %ux%u)"},
-	{"CheckOutput", "\n  [%s] Settings > Video > Output (Scaled) Resolution: %ux%u (now %ux%u)"},
-	{"CheckGame", "\n  [%s] Game renders above %ux%u (now %ux%u)"},
-	{"CheckAfter",
-	 "\n  After changing the canvas: right-click the game source > Transform > Reset Transform, then Copy the config again for viewers."},
-	{"NotSqueezing",
-	 "\n\nNOT SQUEEZING: the game must render at a higher resolution than the stream (e.g. 2560x1440 for 1280x720)."},
-	{"InfoResult",
-	 "\n\nStreamed: %.0f%% of the game's pixels. Full-quality center: up to ~%.0f%% (the slider stops there). Estimated: the same center quality at ~%.0f-%.0f%% less bitrate, or a sharper center at your current bitrate. %s\nUse View > Squeezed zone to see the center (green) and edge squeeze (red) live."},
-	{"OptionsHeader", "\n\nOther stream resolutions:"},
-	{"OptionRow", "\n  %ux%u: %.0f%% of pixels, center up to %.0f%%, est. %.0f-%.0f%% less bitrate%s"},
-	{"Current", "  <- selected"},
-	{"InfoExact",
-	 "Source %ux%u -> streamed %ux%u (%.0f%% of the pixels). Full-quality center: up to ~%.0f%%. Estimated: the same center quality at ~%.0f-%.0f%% less bitrate. Set OBS Settings > Video > Base (Canvas) and Output resolution to %ux%u (you can type a custom size). These numbers update when you reopen this window. %s"},
-	{"Clamped",
-	 "(Squeeze limited by Max edge compression: raise it, or lower the curve or the sharp center size.)"},
-	{"Reduced", "(The curve, or if needed the center, is lowered automatically so this squeeze fits.)"},
-	{"Comp.Default", "12.5x (default)"},
-	{"MaxCompression",
-	 "Max edge compression (x:1). Higher allows stronger squeeze with harder curves; above ~16 the outermost edge smears"},
-	{"Target", "Stream resolution"},
-	{"Target.Canvas", "Match my OBS canvas"},
-	{"Target.Custom", "Custom squeeze (set the canvas to the size shown)"},
-	{"Link", "Same settings for height"},
-	{"SqueezeWidth", "Streamed width (% of source)"},
-	{"SqueezeHeight", "Streamed height (% of source)"},
-	{"CenterWidth", "Full-quality center (% of the frame, untouched pixels)"},
-	{"CenterHeight", "Full-quality center, height (% of the frame)"},
-	{"FocusX", "Focus position, horizontal (%)"},
-	{"FocusY", "Focus position, vertical (%)"},
-	{"CurveX",
-	 "Curve (low = edges squeezed evenly right from the center; high = squeeze pushed to the far edges, limited by the squeeze)"},
-	{"CurveY", "Curve, vertical"},
-	{"Clean",
-	 "Clean the squeezed area (edge-preserving: removes grass/grain detail outside the center, keeps edges; 0 = off)"},
-	{"Prefilter", "Area filter when squeezing (prevents edge shimmer)"},
-	{"View", "View"},
-	{"View.Squished", "Squished (what gets streamed)"},
-	{"View.Unsquished", "Unsquished preview (what extension viewers see)"},
-	{"View.Zone", "Squeezed zone (red = squeezed harder)"},
-	{"Share", "Share with viewers"},
-	{"Config", "Config string as of opening this window (Copy always copies the current one)"},
-	{"Copy", "Copy config to clipboard"},
-	{"Import", "Paste a config string to load it"},
-	{"ApplyImport", "Load pasted config"},
-	{"Look", "Viewer look (applied in the browser, costs no bitrate)"},
-	{"LookInfo",
-	 "Like NVIDIA Freestyle's Details and Sharpen+ filters, but run by each viewer's browser extension: the stream stays clean, so it costs no bitrate. Sent inside the config string; shown here only in the Unsquished preview. Viewers can turn it off."},
-	{"LookSharpen", "Sharpen (%)"},
-	{"LookClarity", "Clarity (%)"},
-	{"LookHdr", "HDR toning (%)"},
-	{"LookBloom", "Bloom (%)"},
-	{"LookSharpenPlus", "Sharpen+ (%)"},
-};
-
+/* Labels from data/locale/en-US.ini, or the copy compiled into the plugin. */
 static const char *T(const char *key)
 {
-	const char *out = NULL;
-	if (obs_module_get_string(key, &out) && out)
-		return out;
-	for (size_t i = 0; i < sizeof(fsq_default_text) / sizeof(fsq_default_text[0]); i++)
-		if (strcmp(fsq_default_text[i].key, key) == 0)
-			return fsq_default_text[i].text;
-	return key;
+	return plugin_text(key);
 }
 
 static const char *fsq_get_name(void *unused)
@@ -951,37 +881,50 @@ static obs_properties_t *fsq_properties(void *data)
 	obs_property_list_add_int(tgt, T("Target.Custom"), TARGET_CUSTOM);
 	obs_property_set_modified_callback(tgt, cfg_modified);
 
-	const char *sliders[][2] = {{S_RX, "SqueezeWidth"}, {S_RY, "SqueezeHeight"}, {S_CX, "CenterWidth"},
-				    {S_CY, "CenterHeight"}, {S_FX, "FocusX"},        {S_FY, "FocusY"}};
-	const double ranges[][3] = {{10, 100, 0.5}, {10, 100, 0.5}, {1, 99, 0.5},
-				    {1, 99, 0.5},   {1, 99, 0.5},   {1, 99, 0.5}};
-	obs_property_t *pr = obs_properties_add_bool(props, S_LINK, T("Link"));
+	/* The settings most people touch. */
+	obs_properties_t *main = obs_properties_create();
+	obs_property_t *pr = obs_properties_add_bool(main, S_LINK, T("Link"));
 	obs_property_set_modified_callback(pr, cfg_modified);
-	for (int i = 0; i < 6; i++) {
-		pr = obs_properties_add_float_slider(props, sliders[i][0], T(sliders[i][1]), ranges[i][0], ranges[i][1],
-						     ranges[i][2]);
+	const char *main_sliders[][2] = {{S_RX, "SqueezeWidth"},
+					 {S_RY, "SqueezeHeight"},
+					 {S_CX, "CenterWidth"},
+					 {S_CY, "CenterHeight"}};
+	const double main_ranges[][3] = {{10, 100, 0.5}, {10, 100, 0.5}, {1, 99, 0.5}, {1, 99, 0.5}};
+	for (int i = 0; i < 4; i++) {
+		pr = obs_properties_add_float_slider(main, main_sliders[i][0], T(main_sliders[i][1]), main_ranges[i][0],
+						     main_ranges[i][1], main_ranges[i][2]);
 		obs_property_set_modified_callback(pr, cfg_modified);
 	}
-	pr = obs_properties_add_float_slider(props, S_PX, T("CurveX"), 0.1, 10.0, 0.05);
+	pr = obs_properties_add_float_slider(main, S_PX, T("CurveX"), 0.1, 10.0, 0.05);
 	obs_property_set_modified_callback(pr, cfg_modified);
-	pr = obs_properties_add_float_slider(props, S_PY, T("CurveY"), 0.1, 10.0, 0.05);
+	pr = obs_properties_add_float_slider(main, S_PY, T("CurveY"), 0.1, 10.0, 0.05);
 	obs_property_set_modified_callback(pr, cfg_modified);
-	pr = obs_properties_add_list(props, S_MAXCOMP, T("MaxCompression"), OBS_COMBO_TYPE_LIST,
-				     OBS_COMBO_FORMAT_FLOAT);
+	obs_properties_add_float_slider(main, S_CLEAN, T("Clean"), 0.0, 100.0, 1.0);
+	obs_properties_add_group(props, "main", T("Main"), OBS_GROUP_NORMAL, main);
+
+	/* Rarely needed. */
+	obs_properties_t *fine = obs_properties_create();
+	const char *fine_sliders[][2] = {{S_FX, "FocusX"}, {S_FY, "FocusY"}};
+	for (int i = 0; i < 2; i++) {
+		pr = obs_properties_add_float_slider(fine, fine_sliders[i][0], T(fine_sliders[i][1]), 1.0, 99.0, 0.5);
+		obs_property_set_modified_callback(pr, cfg_modified);
+	}
+	pr = obs_properties_add_list(fine, S_MAXCOMP, T("MaxCompression"), OBS_COMBO_TYPE_LIST, OBS_COMBO_FORMAT_FLOAT);
 	obs_property_list_add_float(pr, "8x", 8.0);
 	obs_property_list_add_float(pr, T("Comp.Default"), 12.5);
 	obs_property_list_add_float(pr, "16x", 16.0);
 	obs_property_list_add_float(pr, "25x", 25.0);
 	obs_property_list_add_float(pr, "50x", 50.0);
 	obs_property_set_modified_callback(pr, cfg_modified);
-	obs_properties_add_bool(props, S_PREFILTER, T("Prefilter"));
-	obs_properties_add_float_slider(props, S_CLEAN, T("Clean"), 0.0, 100.0, 1.0);
+	obs_properties_add_bool(fine, S_PREFILTER, T("Prefilter"));
+	obs_properties_add_group(props, "fine", T("Fine"), OBS_GROUP_NORMAL, fine);
 
 	obs_property_t *v =
 		obs_properties_add_list(props, S_VIEW, T("View"), OBS_COMBO_TYPE_LIST, OBS_COMBO_FORMAT_INT);
 	obs_property_list_add_int(v, T("View.Squished"), VIEW_SQUISHED);
 	obs_property_list_add_int(v, T("View.Unsquished"), VIEW_UNSQUISHED);
 	obs_property_list_add_int(v, T("View.Zone"), VIEW_ZONE);
+	plugin_ui_add_view_warning(props, v);
 
 	obs_properties_t *look = obs_properties_create();
 	obs_properties_add_text(look, "look_info", T("LookInfo"), OBS_TEXT_INFO);
@@ -1002,6 +945,11 @@ static obs_properties_t *fsq_properties(void *data)
 	obs_properties_add_text(share, S_IMPORT, T("Import"), OBS_TEXT_DEFAULT);
 	obs_properties_add_button2(share, "apply_import", T("ApplyImport"), import_clicked, f);
 	obs_properties_add_group(props, "share", T("Share"), OBS_GROUP_NORMAL, share);
+
+	plugin_ui_decorate(props);
+	obs_data_t *cur = obs_source_get_settings(f->context);
+	plugin_ui_show(props, "view_warning", obs_data_get_int(cur, S_VIEW) != VIEW_SQUISHED);
+	obs_data_release(cur);
 	return props;
 }
 

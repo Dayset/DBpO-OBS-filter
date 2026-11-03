@@ -18,6 +18,8 @@ with this program. If not, see <https://www.gnu.org/licenses/>
 
 #include <obs-module.h>
 #include <plugin-support.h>
+#include <plugin-text.h>
+#include "embedded-locale.h" /* generated from data/locale/en-US.ini */
 
 OBS_DECLARE_MODULE()
 OBS_MODULE_USE_DEFAULT_LOCALE(PLUGIN_NAME, "en-US")
@@ -26,6 +28,7 @@ extern struct obs_source_info perceptual_color_reduction_filter;
 
 bool obs_module_load(void)
 {
+	plugin_text_load(plugin_embedded_locale);
 	obs_register_source(&perceptual_color_reduction_filter);
 	obs_log(LOG_INFO, "plugin loaded successfully (version %s)", PLUGIN_VERSION);
 	return true;
@@ -33,5 +36,6 @@ bool obs_module_load(void)
 
 void obs_module_unload(void)
 {
+	plugin_text_unload();
 	obs_log(LOG_INFO, "plugin unloaded");
 }
