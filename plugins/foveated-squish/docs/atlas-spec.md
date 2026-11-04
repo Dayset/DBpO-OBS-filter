@@ -41,8 +41,8 @@ The region also appears inside the squished picture. The atlas option `blank dup
 ## 5. Config string
 
 - Format unchanged: `FSQ1:` followed by `key=number` pairs, keys exactly two lowercase letters.
-- New keys: a region is five numeric keys, `a0..a3` (x0, y0, x1, y1) and `s0` (scale), with region index as the digit (`a0` … `a3`, `s0`, then `b0..` for region 2 — exact scheme to be fixed in #5). Values use 3 decimals.
-- Old parsers: the current `parse()` in `viewer/unsquish-extension/squish.js` matches `[a-z]{2}=number` pairs only, so a colon-separated region value would break the whole match. **Decision:** every region number is its own `key=number` pair so existing parsers still match and ignore unknown keys. Confirmed by a test in #5.
+- New keys: a region is five pairs, one letter prefix per region (`g`, `h`, `i`, `j`) and one field letter (`x` = x0, `y` = y0, `z` = x1, `v` = y1, `s` = scale), e.g. `gx=0.800,gy=0.850,gz=1.000,gv=1.000,gs=1.000`. Two-letter keys; the prefixes avoid the existing `r`, `c`, `f`, `p`, `a`, `o`, `b` keys and the look keys (`l*`). Values use 3 decimals.
+- Old parsers: the current `parse()` in `viewer/unsquish-extension/squish.js` matches `[a-z]{2}=number` pairs only, so a colon-separated region value would break the whole match. **Decision:** every region number is its own `key=number` pair so existing parsers still match and ignore unknown keys. Confirmed by the parser test in `atlas_math.py` (#3).
 - Length budget: a typical config (2 regions, boxed layout, two look keys) must be ≤ 140 characters to fit a Twitch title. Worst case (4 regions, all keys) is documented in the table below.
 - A config with 0 regions must produce a string byte-identical to today's output.
 
