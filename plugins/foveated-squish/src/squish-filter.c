@@ -27,6 +27,7 @@ with this program. If not, see <https://www.gnu.org/licenses/>
 #include <plugin-text.h>
 #include "embedded-effect.h" /* generated from data/foveated_squish.effect */
 #include "squish-math.h"
+#include "atlas-math.h"
 
 #ifdef _WIN32
 #define WIN32_LEAN_AND_MEAN
@@ -50,6 +51,13 @@ with this program. If not, see <https://www.gnu.org/licenses/>
 #define S_MAXCOMP "max_edge_compression"
 #define S_INFO "info"
 #define S_CONFIG "config"
+/* Sharp regions (atlas): how many, then per region a rectangle in percent of the source and a scale in percent. */
+#define S_ATLAS_COUNT "atlas_count"
+#define S_ATLAS_X0 "atlas_%d_x0"
+#define S_ATLAS_Y0 "atlas_%d_y0"
+#define S_ATLAS_X1 "atlas_%d_x1"
+#define S_ATLAS_Y1 "atlas_%d_y1"
+#define S_ATLAS_SCALE "atlas_%d_scale"
 #define S_IMPORT "import"
 /* Viewer look: sent to viewers in the config string, applied by the browser
  * extension, shown here only in the Unsquished preview (never streamed). */
@@ -662,6 +670,53 @@ static void append_options(char *info, size_t info_size, uint32_t w, uint32_t h,
 /* Info line and (optionally) the config string for the given settings. */
 /* key: what decides whether the view must be rebuilt (never changes while a
  * slider is dragged, except when crossing into another state). */
+/* Regions from the settings, clamped to valid rectangles. */
+static int read_regions(obs_data_t *s, struct atlas_region *out)
+{
+	int n = (int)obs_data_get_int(s, S_ATLAS_COUNT);
+	if (n < 0)
+		n = 0;
+	if (n > ATLAS_MAX_REGIONS)
+		n = ATLAS_MAX_REGIONS;
+	int count = 0;
+	char key[64];
+	for (int i = 0; i < n; i++) {
+		struct atlas_region r;
+		snprintf(key, sizeof(key), S_ATLAS_X0, i);
+		r.x0 = obs_data_get_double(s, key) / 100.0;
+		snprintf(key, sizeof(key), S_ATLAS_Y0, i);
+		r.y0 = obs_data_get_double(s, key) / 100.0;
+		snprintf(key, sizeof(key), S_ATLAS_X1, i);
+		r.x1 = obs_data_get_double(s, key) / 100.0;
+		snprintf(key, sizeof(key), S_ATLAS_Y1, i);
+		r.y1 = obs_data_get_double(s, key) / 100.0;
+		snprintf(key, sizeof(key), S_ATLAS_SCALE, i);
+		r.s = obs_data_get_double(s, key) / 100.0;
+		if (r.x1 <= r.x0 || r.y1 <= r.y0)
+			continue; /* empty rectangle: ignored */
+		if (r.s <= 0.0 || r.s > 1.0)
+			r.s = 1.0;
+		out[count++] = r;
+	}
+	return count;
+}
+
+/* Appends the region keys (gx..gs, hx.., ix.., jx..) to a squish config string. */
+static void append_regions(char *cfg, size_t cfg_size, const struct atlas_region *r, int count)
+{
+	const char prefixes[] = "ghij";
+	size_t n = strlen(cfg);
+	for (int i = 0; i < count && i < ATLAS_MAX_REGIONS; i++) {
+		int w = snprintf(cfg + n, cfg_size > n ? cfg_size - n : 0,
+				 ",%c%c=%.3f,%c%c=%.3f,%c%c=%.3f,%c%c=%.3f,%c%c=%.3f", prefixes[i], 'x', r[i].x0,
+				 prefixes[i], 'y', r[i].y0, prefixes[i], 'z', r[i].x1, prefixes[i], 'v', r[i].y1,
+				 prefixes[i], 's', r[i].s);
+		if (w < 0 || (size_t)w >= cfg_size - n)
+			break;
+		n += (size_t)w;
+	}
+}
+
 static void describe(struct squish_filter *f, obs_data_t *s, char *info, size_t info_size, char *cfg, size_t cfg_size,
 		     char *key, size_t key_size)
 {
@@ -679,6 +734,10 @@ static void describe(struct squish_filter *f, obs_data_t *s, char *info, size_t 
 	compute_layout(&tmp, w, h, &L);
 	if (cfg)
 		squish_config_format(&L.c, cfg, cfg_size);
+	struct atlas_region regions[ATLAS_MAX_REGIONS];
+	const int nregions = read_regions(s, regions);
+	if (cfg && nregions > 0)
+		append_regions(cfg, cfg_size, regions, nregions);
 
 	char note[160] = "";
 	if (L.fit == FIT_LIMITED)
@@ -938,6 +997,29 @@ static obs_properties_t *fsq_properties(void *data)
 		obs_property_set_modified_callback(pr, cfg_modified);
 	}
 	obs_properties_add_group(props, "look", T("Look"), OBS_GROUP_NORMAL, look);
+	/* Sharp regions (atlas): rectangles of the source kept at about 1:1 in a side strip. */
+	obs_properties_t *atlas = obs_properties_create();
+	obs_property_t *cnt = obs_properties_add_int_slider(atlas, S_ATLAS_COUNT, "Regions", 0, ATLAS_MAX_REGIONS, 1);
+	obs_property_set_modified_callback(cnt, cfg_modified);
+	obs_properties_add_text(atlas, "atlas_info", "Sharp regions are placed in a strip beside the squished picture (standard output size only).", OBS_TEXT_INFO);
+	static const char *labels[4] = {"Left", "Top", "Right", "Bottom"};
+	static const char *keys[4] = {S_ATLAS_X0, S_ATLAS_Y0, S_ATLAS_X1, S_ATLAS_Y1};
+	for (int i = 0; i < ATLAS_MAX_REGIONS; i++) {
+		/* OBS copies names and labels, so these buffers can be local. */
+		for (int k = 0; k < 4; k++) {
+			char key[64], name[64];
+			snprintf(key, sizeof(key), keys[k], i);
+			snprintf(name, sizeof(name), "Region %d %s", i + 1, labels[k]);
+			pr = obs_properties_add_float_slider(atlas, key, name, 0.0, 100.0, 0.5);
+			obs_property_set_modified_callback(pr, cfg_modified);
+		}
+		char key[64], name[64];
+		snprintf(key, sizeof(key), S_ATLAS_SCALE, i);
+		snprintf(name, sizeof(name), "Region %d scale", i + 1);
+		pr = obs_properties_add_float_slider(atlas, key, name, 50.0, 100.0, 1.0);
+		obs_property_set_modified_callback(pr, cfg_modified);
+	}
+	obs_properties_add_group(props, "atlas", "Sharp regions", OBS_GROUP_NORMAL, atlas);
 
 	obs_properties_t *share = obs_properties_create();
 	obs_properties_add_text(share, S_CONFIG, T("Config"), OBS_TEXT_DEFAULT);
@@ -968,6 +1050,20 @@ static void fsq_defaults(obs_data_t *s)
 	obs_data_set_default_bool(s, S_PREFILTER, true);
 	obs_data_set_default_double(s, S_CLEAN, 50.0);
 	obs_data_set_default_int(s, S_VIEW, VIEW_SQUISHED);
+	obs_data_set_default_int(s, S_ATLAS_COUNT, 0);
+	for (int i = 0; i < ATLAS_MAX_REGIONS; i++) {
+		char key[64];
+		snprintf(key, sizeof(key), S_ATLAS_X0, i);
+		obs_data_set_default_double(s, key, 0.0);
+		snprintf(key, sizeof(key), S_ATLAS_Y0, i);
+		obs_data_set_default_double(s, key, 0.0);
+		snprintf(key, sizeof(key), S_ATLAS_X1, i);
+		obs_data_set_default_double(s, key, 20.0);
+		snprintf(key, sizeof(key), S_ATLAS_Y1, i);
+		obs_data_set_default_double(s, key, 40.0);
+		snprintf(key, sizeof(key), S_ATLAS_SCALE, i);
+		obs_data_set_default_double(s, key, 100.0);
+	}
 	obs_data_set_default_int(s, S_TARGET, TARGET_CANVAS);
 	obs_data_set_default_double(s, S_MAXCOMP, 12.5);
 }
