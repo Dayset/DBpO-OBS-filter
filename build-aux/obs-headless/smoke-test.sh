@@ -96,7 +96,6 @@ EOF
 		if env "${extra_env[@]}" DISPLAY="$display" timeout 300 "$work/obs-headless" "$so" "$data" "$id" "$W" "$H" \
 			"${place_args[@]}" <"$work/pin.rgba" >"$work/pout.rgba" 2>"$work/plog.txt"; then
 			size="$(grep -o 'output [0-9]*x[0-9]*' "$work/plog.txt" | head -1 | cut -d' ' -f2)"
-			grep 'fsq atlas' "$work/plog.txt" | head -4 | sed 's/^/\t/' || true
 			if result="$(python3 "$dir/tests/placement.py" check "$work/pout.rgba" "$size")"; then
 				echo "$name / $id placement:"; echo "$result" | sed 's/^/\t/'
 			else

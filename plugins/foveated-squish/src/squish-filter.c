@@ -645,14 +645,6 @@ static bool compose_atlas(struct squish_filter *f, const struct layout *L, gs_te
 			   (float)s->x - g, (float)L->fh - (float)s->y - (float)s->h - g);
 	}
 	gs_texrender_end(f->composed);
-	static int logged = 0;
-	if (logged++ < 2) {
-		obs_log(LOG_INFO, "fsq atlas: frame %ux%u picture %ux%u regions %d", L->fw, L->fh, L->ow, L->oh,
-			L->nslots);
-		for (int i = 0; i < L->nslots; i++)
-			obs_log(LOG_INFO, "fsq atlas: slot %d x=%d y=%d w=%d h=%d scale=%.3f", i, L->slots[i].x,
-				L->slots[i].y, L->slots[i].w, L->slots[i].h, L->slots[i].scale);
-	}
 	return true;
 }
 

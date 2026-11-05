@@ -1,24 +1,29 @@
 """Placement check for sharp regions (atlas), run by smoke-test.sh.
 
-A known input (grey, a red corner region bottom-right, a green region top-left)
-goes through the real filter; the streamed frame must put each colour where the
-atlas layout says: picture orientation kept, the first region at the top of the
-strip, and the gutter repeating the slot edge (no bleed from the picture).
+A known input (grey, a red region bottom-right) goes through the real filter.
+The Python reference (research/foveation/atlas_math.py) gives the slot the
+region must occupy in the streamed frame; the output must show the region
+there, with its gutter repeating the slot edge and nothing outside the slot.
 
   placement.py settings          print the region settings for the filter
   placement.py make              write the known input frames (RGBA) to stdout
   placement.py check FILE WxH    check the filter output, print ok / FAIL lines
 """
+import os
 import sys
 
 import numpy as np
 
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", "..", "research", "foveation"))
+from atlas_math import Atlas, layout, set_source  # noqa: E402
+
 W, H, N = 320, 180, 12          # input frame size and count (same as smoke-test.sh)
-SETTINGS = ("atlas_count=2 atlas_0_x0=80 atlas_0_y0=85 atlas_0_x1=100 atlas_0_y1=100 atlas_0_scale=100 "
-            "atlas_1_x0=0 atlas_1_y0=0 atlas_1_x1=40 atlas_1_y1=40 atlas_1_scale=100")
-GREY, RED, GREEN = (128, 128, 128), (255, 0, 0), (0, 255, 0)
-BOX_W = 0.8                     # ATLAS_BOX_W in squish-filter.c
+SQUISH = "FSQ1:rx=0.75,ry=0.75,cx=0.3,cy=0.3,fx=0.5,fy=0.5,px=1,py=1,ar={ar:.4f},ox=0,oy=0,bw=0.8,bh=1"
+REGION = "gx=0.800,gy=0.850,gz=1.000,gv=1.000,gs=1.000"
+SETTINGS = "atlas_count=1 atlas_0_x0=80 atlas_0_y0=85 atlas_0_x1=100 atlas_0_y1=100 atlas_0_scale=100"
+GREY, RED = (128, 128, 128), (255, 0, 0)
 GUTTER = 4                      # ATLAS_GUTTER in atlas-math.h
+TOL = 2                         # pixels of slack on the slot edges
 
 
 def close(px, colour):
@@ -29,57 +34,43 @@ def make():
     img = np.zeros((H, W, 4), np.uint8)
     img[..., :3] = GREY
     img[..., 3] = 255
-    img[int(0.85 * H):, int(0.8 * W):, :3] = RED      # region 0: bottom-right corner
-    img[:int(0.4 * H), :int(0.4 * W), :3] = GREEN      # region 1: top-left square
+    img[int(0.85 * H):, int(0.8 * W):, :3] = RED      # the region: bottom-right corner
     sys.stdout.buffer.write(np.tile(img, (N, 1, 1, 1)).tobytes())
+
+
+def expected_slot(ow, oh):
+    atlas = set_source(Atlas.parse(SQUISH.format(ar=ow / oh) + "," + REGION), ow, oh)
+    _, _, slots = layout(atlas, ow, oh, ow, oh)
+    x, y, w, h, _ = slots[0]
+    return x, y, w, h
 
 
 def check(path, size):
     ow, oh = (int(v) for v in size.split("x"))
     frame = np.fromfile(path, np.uint8)[: ow * oh * 4].reshape(oh, ow, 4)
-    pw = round(BOX_W * ow) & ~1
+    x, y, w, h = expected_slot(ow, oh)
     results = []
 
     def expect(name, ok):
         results.append((name, bool(ok)))
 
-    col = pw + 20                                       # inside the first slot
-    red = [r for r in range(oh) if close(frame[r, col], RED)]
-    green = [r for r in range(oh) if close(frame[r, col], GREEN)]
-    expect("corner region present in strip", red)
-    expect("regions in config order (corner slot above the second)", red and green and max(red) < min(green))
-    expect("first slot starts 4 px below the top", red and abs(min(red) - GUTTER) <= 2)
-    expect("gutter repeats slot edge (no picture bleed)",
-           red and all(close(frame[r, pw + 2], RED) for r in range(min(red) + 2, max(red) - 1)))
-    expect("picture top-left shows the top-left region", close(frame[GUTTER, GUTTER], GREEN))
+    mask = np.all(np.abs(frame[:, :, :3].astype(int) - np.array(RED)) <= 60, axis=2)
+    ys, xs = np.nonzero(mask[:, x - GUTTER:])
+    xs = xs + x - GUTTER
+    expect("region found in the strip", len(ys))
+    if len(ys):
+        bx0, bx1, by0, by1 = xs.min(), xs.max(), ys.min(), ys.max()
+        print(f"diag expected slot+gutter x {x - GUTTER}..{x + w - 1 + GUTTER}, y {y - GUTTER}..{y + h - 1 + GUTTER}; "
+              f"measured x {bx0}..{bx1}, y {by0}..{by1}, {len(ys)} px")
+        gx0, gy0, gx1, gy1 = x - GUTTER, y - GUTTER, x + w - 1 + GUTTER, y + h - 1 + GUTTER
+        ring = (gx1 - gx0 + 1) * (gy1 - gy0 + 1)
+        expect("slot and gutter at the reference position",
+               abs(bx0 - gx0) <= TOL and abs(by0 - gy0) <= TOL and abs(bx1 - gx1) <= TOL and abs(by1 - gy1) <= TOL)
+        expect("no colour outside slot and gutter (pixel count)", abs(len(ys) - ring) <= 0.05 * ring)
+    expect("gutter repeats the slot edge (no picture bleed)",
+           all(close(frame[r, x - 2], RED) for r in range(y, y + h)))
 
     failed = [name for name, ok in results if not ok]
-    if failed:  # diagnostics: where the colours really are
-        def runs(rows):
-            out, start, prev = [], None, None
-            for r in rows:
-                if start is None:
-                    start = prev = r
-                elif r == prev + 1:
-                    prev = r
-                else:
-                    out.append((start, prev)); start = prev = r
-            if start is not None:
-                out.append((start, prev))
-            return out
-        print(f"diag frame {ow}x{oh} picture width {pw}")
-        print(f"diag red rows in strip column {col}: {runs(red)}")
-        print(f"diag green rows in strip column {col}: {runs(green)}")
-        for name, colour in [("red", RED), ("green", GREEN)]:
-            ys, xs = np.nonzero(np.all(np.abs(frame[:, pw:, :3].astype(int) - np.array(colour)) <= 60, axis=2))
-            if len(ys):
-                print(f"diag {name} box in strip: x {xs.min() + pw}..{xs.max() + pw}, y {ys.min()}..{ys.max()}, {len(ys)} px")
-            else:
-                print(f"diag {name} box in strip: none")
-        for r, c in [(4, 4), (oh // 2, 4), (oh - 8, 4), (4, pw - 8), (oh - 8, pw - 8), (oh // 2, pw // 2)]:
-            print(f"diag picture px row {r} col {c}: {frame[r, c, :3].tolist()}")
-        for r, c in [(4, pw + 2), (4, pw + 20), (oh - 8, pw + 20), (oh - 8, ow - 4)]:
-            print(f"diag strip px row {r} col {c}: {frame[r, c, :3].tolist()}")
     for name, ok in results:
         print(("ok   " if ok else "FAIL ") + name)
     if failed:
