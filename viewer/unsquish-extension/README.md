@@ -66,3 +66,12 @@ When the streamer marks HUD areas (a minimap, ammo, a webcam) as "Keep sharp", t
 - Tests: `tests/atlas.js` (layout vs the golden vectors), `tests/e2e_atlas.py` (plays an atlas frame in headless Chromium and compares with the reference viewer).
 
 See `plugins/foveated-squish/README.md` for the streamer's side.
+
+## Phones (Android and iPhone)
+
+Chrome on a phone can't run extensions, and the Twitch app can't run anything, so watch in a browser that can.
+
+- **iPhone (Safari):** install a userscript manager (the free "Userscripts" app from the App Store, then enable it in Settings > Safari > Extensions), open `https://raw.githubusercontent.com/Dayset/DBpO-OBS-filter/main/viewer/userscript/dbpo-unsquish.user.js` in Safari and install the script. No developer account is needed.
+- **Android:** Firefox for Android with a userscript add-on (Tampermonkey or Violentmonkey), same script. Or build the extension itself for Firefox: `python3 viewer/unsquish-extension/build.py --firefox` writes `dist/dbpo-unsquish-firefox.zip` (Firefox release builds only install signed add-ons, so use Firefox Nightly or a developer build, or sign it on addons.mozilla.org).
+
+The userscript is generated from this folder by `build.py` (never edit it by hand) and runs on twitch.tv by default; add an `@match` line for other sites. It has the same shader, config and chat on/off as the extension. Settings are in a small round button in the lower-left corner of the page instead of the toolbar popup. The test `tests/e2e_userscript.py` checks it in headless Chromium. It has not been tried on a real phone yet.

@@ -1,0 +1,20 @@
+{
+  "manifest_version": 2,
+  "name": "DBpO Unsquish",
+  "version": "0.6.0",
+  "description": "Unfolds Foveated Squish streams (sharp center, squeezed edges) back to full size with a GPU shader.",
+  "browser_specific_settings": {
+    "gecko": { "id": "dbpo-unsquish@dayset.invalid", "strict_min_version": "113.0" },
+    "gecko_android": { "strict_min_version": "113.0" }
+  },
+  "permissions": ["storage", "<all_urls>"],
+  "browser_action": {
+    "default_popup": "popup.html",
+    "default_icon": { "16": "icons/16.png", "48": "icons/48.png", "128": "icons/128.png" }
+  },
+  "icons": { "16": "icons/16.png", "48": "icons/48.png", "128": "icons/128.png" },
+  "content_scripts": [
+    { "matches": ["<all_urls>"], "js": ["squish.js", "content.js"], "run_at": "document_idle", "all_frames": true },
+    { "matches": ["https://www.twitch.tv/*", "https://m.twitch.tv/*"], "js": ["chatsignal.js"], "run_at": "document_idle", "all_frames": false }
+  ]
+}
