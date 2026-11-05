@@ -34,11 +34,29 @@ def pct(px, py, pw, ph):
 # (name, colour, region in percent of the source: x0 y0 x1 y1, scale in percent, key string for the config)
 # The minimap is the user's demo spin: source x 23, y 680, 368 x 368 px.
 MINIMAP = pct(23, 680, 368, 368)
-REGIONS = [
+ALL_REGIONS = [
     ("hud", (255, 0, 0), (80.0, 85.0, 100.0, 100.0), 90.0, "gx=0.800,gy=0.850,gz=1.000,gv=1.000,gs=0.900"),
     ("minimap", (0, 255, 0), MINIMAP, 100.0,
      "hx={:.6f},hy={:.6f},hz={:.6f},hv={:.6f},hs=1.000".format(*(v / 100 for v in MINIMAP))),
 ]
+# Optional selection by name (hud, minimap), for checking one region at a time: argv after the command.
+REGIONS = ALL_REGIONS
+
+
+def region_key(i, r):
+    """Config keys for region i: the prefixes g, h, i, j in order, so any selection stays gap-free."""
+    p = "ghij"[i]
+    x0, y0, x1, y1 = (v / 100 for v in r[2])
+    return f"{p}x={x0:.6f},{p}y={y0:.6f},{p}z={x1:.6f},{p}v={y1:.6f},{p}s={r[3] / 100:.3f}"
+
+
+def select(names):
+    global REGIONS
+    if names:
+        REGIONS = [r for r in ALL_REGIONS if r[0] in names]
+    return REGIONS
+
+
 GREY = (128, 128, 128)
 GUTTER = 4                      # ATLAS_GUTTER in atlas-math.h
 TOL = 2                         # pixels of slack on the slot edges
@@ -61,14 +79,14 @@ def make():
     img[..., :3] = GREY
     img[..., 3] = 255
     # Each colour covers its region and a little more, so the edges are solid colour.
-    img[int(0.70 * H):, int(0.60 * W):, :3] = REGIONS[0][1]
+    img[int(0.70 * H):, int(0.60 * W):, :3] = ALL_REGIONS[0][1]
     x0, y0, x1, y1 = MINIMAP
-    img[int(y0 / 100 * H):int(y1 / 100 * H) + 1, int(x0 / 100 * W):int(x1 / 100 * W) + 1, :3] = REGIONS[1][1]
+    img[int(y0 / 100 * H):int(y1 / 100 * H) + 1, int(x0 / 100 * W):int(x1 / 100 * W) + 1, :3] = ALL_REGIONS[1][1]
     sys.stdout.buffer.write(np.tile(img, (N, 1, 1, 1)).tobytes())
 
 
 def expected_slots(ow, oh):
-    cfg = SQUISH.format(ar=ow / oh) + "," + ",".join(r[4] for r in REGIONS)
+    cfg = SQUISH.format(ar=ow / oh) + "," + ",".join(region_key(i, r) for i, r in enumerate(REGIONS))
     atlas = set_source(Atlas.parse(cfg), ow, oh)
     _, _, slots = layout(atlas, ow, oh, ow, oh)
     return [tuple(s[:4]) for s in slots]
@@ -121,6 +139,8 @@ def check(path, size):
 
 if __name__ == "__main__":
     cmd = sys.argv[1]
+    if cmd in ("settings", "check"):
+        select(sys.argv[4:] if cmd == "check" else sys.argv[2:])
     if cmd == "settings":
         print(settings())
     elif cmd == "canvas":

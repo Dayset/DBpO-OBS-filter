@@ -91,22 +91,26 @@ EOF
 		[[ "$result" == ok* ]] || status=1
 	# Placement (optional per plugin): a known input must land in the right places.
 	if [[ -f "$dir/tests/placement.py" ]]; then
-		read -r -a place_args <<<"$(python3 "$dir/tests/placement.py" settings)"
 		python3 "$dir/tests/placement.py" make >"$work/pin.rgba"
 		# The check states the canvas it needs (regions must fit the strip); it overrides the plugin's default.
 		canvas="$(python3 "$dir/tests/placement.py" canvas)"
+	# All regions together, then each region alone (to see which one the filter rejects).
+	for sel in "" hud minimap; do
+		read -r -a place_args <<<"$(python3 "$dir/tests/placement.py" settings $sel)"
+		label="${sel:-all regions}"
 		if env OBS_HEADLESS_CANVAS="$canvas" DISPLAY="$display" timeout 300 "$work/obs-headless" "$so" "$data" "$id" "$W" "$H" \
 			"${place_args[@]}" <"$work/pin.rgba" >"$work/pout.rgba" 2>"$work/plog.txt"; then
 			# The output is the canvas the check asked for (the log's "output" line is the input size).
 			grep 'obs-headless:' "$work/plog.txt" | sed 's/^/\tlog: /' || true
-			if result="$(python3 "$dir/tests/placement.py" check "$work/pout.rgba" "$canvas")"; then
-				echo "$name / $id placement:"; echo "$result" | sed 's/^/\t/'
+			if result="$(python3 "$dir/tests/placement.py" check "$work/pout.rgba" "$canvas" $sel)"; then
+				echo "$name / $id placement ($label):"; echo "$result" | sed 's/^/\t/'
 			else
-				echo "$name / $id placement:"; echo "$result" | sed 's/^/\t/'; status=1
+				echo "$name / $id placement ($label):"; echo "$result" | sed 's/^/\t/'; status=1
 			fi
 		else
-			echo "$name / $id placement: FAIL (render error)"; status=1
+			echo "$name / $id placement ($label): FAIL (render error)"; status=1
 		fi
+	done
 	fi
 	done
 	done
