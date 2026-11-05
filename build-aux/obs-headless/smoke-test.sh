@@ -95,7 +95,7 @@ EOF
 		python3 "$dir/tests/placement.py" make >"$work/pin.rgba"
 		# The check states the canvas it needs (regions must fit the strip); it overrides the plugin's default.
 		canvas="$(python3 "$dir/tests/placement.py" canvas)"
-		if env "${extra_env[@]}" OBS_HEADLESS_CANVAS="$canvas" DISPLAY="$display" timeout 300 "$work/obs-headless" "$so" "$data" "$id" "$W" "$H" \
+		if env OBS_HEADLESS_CANVAS="$canvas" DISPLAY="$display" timeout 300 "$work/obs-headless" "$so" "$data" "$id" "$W" "$H" \
 			"${place_args[@]}" <"$work/pin.rgba" >"$work/pout.rgba" 2>"$work/plog.txt"; then
 			# The output is the canvas the check asked for (the log's "output" line is the input size).
 			if result="$(python3 "$dir/tests/placement.py" check "$work/pout.rgba" "$canvas")"; then
