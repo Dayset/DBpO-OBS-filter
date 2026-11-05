@@ -50,3 +50,11 @@ After installing or updating the extension, open tabs are switched to the new ve
 `content.js` finds the largest playing `<video>`, sets it to `opacity: 0` (it keeps playing, with sound intact) and puts a canvas directly above it, below the player's own controls (they stay visible and clickable), sized to the source aspect ratio. Every animation frame the video is uploaded as a texture and drawn with `squish.js`'s fragment shader, which maps each screen pixel to its position in the squished frame. The math is identical to the OBS shader; `tests/compare.js` checks it against the Python reference (worst difference 5e-13), and `tests/e2e.py` plays a squished VP9 video in headless Chromium and checks the canvas against the reference viewer (0.5/255 mean difference, landmarks within 0.02 px). `tests/look.py` checks the look against a numpy model of the same passes (0/255 difference) for the streamer's look, your own look, look off and plain videos; `tests/extension.py` loads the real extension, sets the look through the popup and checks that player controls stay on top and clickable. CI runs all of them (`run-tests.sh --e2e`).
 
 Limits: videos served cross-origin without CORS can't be read by WebGL; the extension then turns itself off for that page and logs a warning. DRM-protected video (not used by live streams) can't be read either.
+
+## Chat signal (test)
+
+On twitch.tv the extension listens to the channel owner's chat for `fsq:on:<n>` and `fsq:off:<n>`, and switches the unsquish on or off with a delay (`chatDelayMs` in extension storage, default 1500 ms). Only the channel owner's account counts. Before the first signal nothing changes. `<n>` must increase each time.
+
+## Atlas
+
+The viewer pastes sharp regions from their slots when the config has region keys (`gx`…`gs` and the other prefixes). See `plugins/foveated-squish/README.md`.

@@ -54,3 +54,19 @@ FSQ1:rx=0.75,ry=0.75,cx=0.15,cy=0.15,fx=0.5,fy=0.5,px=1,py=1,ar=1.7778
 - Viewers without the extension see a squeezed picture: center normal, edges compressed. It's watchable but odd, so tell them.
 - The center is sharp for the configured focus point only. Per-viewer gaze would need a separate stream per viewer (see the tile notes in the research README).
 - Chat overlays and webcams inside the squished source get squeezed too. Put them inside the sharp center, or accept that.
+
+## Sharp regions (texture atlas)
+
+Up to four rectangles of the source (a minimap, a webcam, a crosshair area) can reach the viewer at about 1:1 instead of squished. The streamed frame keeps the squished picture in a box and puts each region in a slot in the strip beside it. Each slot has a 4 px gutter. The viewer unfolds the picture and pastes each slot back over its region.
+
+- Config keys: one letter per region (`g`, `h`, `i`, `j`) and one field (`x`, `y` = top-left, `z` = right, `v` = bottom, `s` = scale). Example: `gx=0.010,gy=0.610,gz=0.210,gv=0.980,gs=1.000`.
+- Needs a boxed layout (`bw` or `bh` below 1). The strip may take at most 20% of the output.
+- Scale is limited by the squish density at the region centre: the floor is `(d + 1) / 2`, so a region keeps at least half of its squish-free detail.
+- Specification: `docs/atlas-spec.md`. Python reference and golden vectors: `research/foveation/atlas_math.py`, `atlas_golden.json`. Measurements: `research/foveation/atlas_measurements.md`.
+- Tests: `tests/run-tests.sh` runs the C layout test against the golden vectors, and `viewer/unsquish-extension/tests/atlas.js` runs the viewer's layout.
+
+Status: the streamer's OBS filter does not render the atlas yet (issue #6), and its settings page has no region controls yet (issue #7). Only the viewer side and the reference math are built.
+
+## Motion gate and chat signal (experimental)
+
+`src/motion-gate.c` maps per-frame motion to a squish level 0..3, with hysteresis and a hold time. It is not connected to OBS yet. The viewer's chat signal (`viewer/unsquish-extension/chatsignal.js`) switches the squish on and off from messages the streamer posts in Twitch chat, as `fsq:on:<n>` or `fsq:off:<n>`.
