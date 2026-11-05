@@ -69,6 +69,7 @@ enum atlas_state {
 #define S_MAXCOMP "max_edge_compression"
 #define S_INFO "info"
 #define S_CONFIG "config"
+#define S_TITLE "title_text"
 /* Sharp regions (atlas): master switch, "hide the duplicate", then per region an on/off switch,
  * a name (only for the info line), a rectangle (left, top, width, height) in percent of the
  * source and a scale in percent. */
@@ -1234,6 +1235,17 @@ static void show_region_groups(obs_properties_t *props, bool visible)
 	plugin_ui_show(props, S_ATLAS_BLANK, visible);
 }
 
+/* "My title [code]" when a title is given, else just the code. Twitch titles hold 140 characters. */
+static void wrap_title(obs_data_t *s, char *cfg, size_t size)
+{
+	const char *title = obs_data_get_string(s, S_TITLE);
+	if (!title || !*title)
+		return;
+	char out[512];
+	snprintf(out, sizeof(out), "%s [%s]", title, cfg);
+	snprintf(cfg, size, "%s", out);
+}
+
 static bool cfg_modified(obs_properties_t *props, obs_property_t *p, obs_data_t *s)
 {
 	UNUSED_PARAMETER(p);
@@ -1248,8 +1260,9 @@ static bool cfg_modified(obs_properties_t *props, obs_property_t *p, obs_data_t 
 	obs_property_set_visible(obs_properties_get(props, S_PY), !link);
 	const bool atlas_on = obs_data_get_bool(s, S_ATLAS_ON);
 	show_region_groups(props, atlas_on);
-	char info[2048], cfg[256], key[64];
+	char info[2048], cfg[512], key[64];
 	describe(f, s, info, sizeof(info), cfg, sizeof(cfg), key, sizeof(key));
+	wrap_title(s, cfg, sizeof(cfg));
 	obs_data_set_string(s, S_CONFIG, cfg);
 	/* Rebuild the view only when its state changes: rebuilding on every
 	 * slider tick detaches the slider being dragged. Live numbers (Exact
@@ -1293,8 +1306,9 @@ static bool copy_clicked(obs_properties_t *props, obs_property_t *p, void *data)
 	UNUSED_PARAMETER(p);
 	struct squish_filter *f = data;
 	obs_data_t *s = obs_source_get_settings(f->context);
-	char info[2048], cfg[256];
+	char info[2048], cfg[512];
 	describe(f, s, info, sizeof(info), cfg, sizeof(cfg), NULL, 0);
+	wrap_title(s, cfg, sizeof(cfg));
 	obs_data_set_string(s, S_CONFIG, cfg);
 #ifdef _WIN32
 	const int n = MultiByteToWideChar(CP_UTF8, 0, cfg, -1, NULL, 0);
@@ -1484,6 +1498,8 @@ static obs_properties_t *fsq_properties(void *data)
 	}
 
 	obs_properties_t *share = obs_properties_create();
+	obs_property_t *tp = obs_properties_add_text(share, S_TITLE, T("TitleText"), OBS_TEXT_DEFAULT);
+	obs_property_set_modified_callback(tp, cfg_modified);
 	obs_properties_add_text(share, S_CONFIG, T("Config"), OBS_TEXT_DEFAULT);
 	obs_properties_add_button2(share, "copy", T("Copy"), copy_clicked, f);
 	obs_properties_add_text(share, S_IMPORT, T("Import"), OBS_TEXT_DEFAULT);

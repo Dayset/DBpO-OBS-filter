@@ -1,5 +1,6 @@
 /* Prints the mapping for fixed configs; compare_reference.py checks it
  * against research/foveation/squish_math.py (and the JS extension). */
+#include <math.h>
 #include <stdio.h>
 #include <string.h>
 #include "squish-math.h"

@@ -274,7 +274,7 @@ bool squish_config_parse(const char *s, struct squish_config *cfg)
 		return false;
 	struct squish_config c = {
 		{0.75, 0.15, 0.5, 1.0},   {0.75, 0.15, 0.5, 1.0}, 16.0 / 9.0, false, 0.0, 0.0, 1.0, 1.0,
-		{0.0}};
+		{.sharpen = 0.0}};
 	const char *p = s + 5;
 	while (*p) {
 		char key[8] = {0};
