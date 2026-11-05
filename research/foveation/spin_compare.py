@@ -151,6 +151,8 @@ def stage_pick(work, n):
         return json.load(open(path))
     rng = np.random.default_rng(2026)
     idx = sorted(int(i) for i in rng.choice(np.arange(60, n), 10, replace=False))
+    if os.environ.get("SPIN_PICK"):
+        idx = [int(os.environ["SPIN_PICK"])]
     sel = "+".join(f"eq(n\\,{i})" for i in idx)
     for name in ("base", "squish"):
         src = os.path.join(work, f"{name}.mp4")
