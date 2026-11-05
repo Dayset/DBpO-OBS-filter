@@ -82,8 +82,10 @@ def make():
     img[..., 3] = 255
     # Each colour covers its region and a little more, so the edges are solid colour.
     img[int(0.70 * H):, int(0.60 * W):, :3] = ALL_REGIONS[0][1]
+    # The minimap's colour runs a few pixels past its region, so the sampled edge is the colour, not grey.
+    m = 8
     x0, y0, x1, y1 = MINIMAP
-    img[int(y0 / 100 * H):int(y1 / 100 * H) + 1, int(x0 / 100 * W):int(x1 / 100 * W) + 1, :3] = ALL_REGIONS[1][1]
+    img[max(0, int(y0 / 100 * H) - m):int(y1 / 100 * H) + m, max(0, int(x0 / 100 * W) - m):int(x1 / 100 * W) + m, :3] = ALL_REGIONS[1][1]
     sys.stdout.buffer.write(np.tile(img, (N, 1, 1, 1)).tobytes())
 
 
