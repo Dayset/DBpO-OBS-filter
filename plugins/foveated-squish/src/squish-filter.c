@@ -934,6 +934,7 @@ static obs_properties_t *fsq_properties(void *data)
 		obs_properties_add_list(props, S_TARGET, T("Target"), OBS_COMBO_TYPE_LIST, OBS_COMBO_FORMAT_INT);
 	obs_property_list_add_int(tgt, T("Target.Canvas"), TARGET_CANVAS);
 	obs_property_list_add_int(tgt, "1920x1080 (1080p)", 1080);
+	obs_property_list_add_int(tgt, "1664x936 (16:9)", 936);
 	obs_property_list_add_int(tgt, "1280x720 (720p)", 720);
 	obs_property_list_add_int(tgt, "854x480 (480p)", 480);
 	obs_property_list_add_int(tgt, "640x360 (360p)", 360);
