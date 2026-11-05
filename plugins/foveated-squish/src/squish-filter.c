@@ -22,6 +22,7 @@ with this program. If not, see <https://www.gnu.org/licenses/>
 #include <util/bmem.h>
 #include <math.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 #include <plugin-support.h>
 #include <plugin-text.h>
@@ -31,6 +32,11 @@ with this program. If not, see <https://www.gnu.org/licenses/>
 
 /* Width of the squished picture when sharp regions are on; the strip uses the rest. */
 #define ATLAS_BOX_W 0.8
+
+/* Timing stages for DBPO_FSQ_ANALYZE. */
+enum analyze_stage { STAGE_SQUISH, STAGE_BLANK, STAGE_COMPOSE, STAGE_PASTE, ANALYZE_STAGES };
+#define ANALYZE_PERIOD 300
+static const char *stage_name[ANALYZE_STAGES] = {"squish", "blank", "compose", "paste"};
 
 /* Why sharp regions are or are not streamed (shown in the settings info). */
 enum atlas_state {
@@ -138,6 +144,12 @@ struct squish_filter {
 	gs_texrender_t *display;
 	gs_texrender_t *composed; /* streamed frame: picture + atlas strip */
 	gs_texrender_t *mean;     /* 1x1: average colour of one region */
+	/* DBPO_FSQ_ANALYZE=1: GPU time per stage, logged every ANALYZE_PERIOD frames. */
+	bool analyze;
+	gs_timer_t *timers[ANALYZE_STAGES];
+	uint64_t timer_sum[ANALYZE_STAGES];
+	uint32_t timer_n[ANALYZE_STAGES];
+	uint32_t frames;
 	bool needs_update;
 	bool output_valid;
 
@@ -420,6 +432,11 @@ static void *fsq_create(obs_data_t *settings, obs_source_t *context)
 	f->look_out2 = gs_texrender_create(GS_RGBA, GS_ZS_NONE);
 	f->composed = gs_texrender_create(GS_RGBA, GS_ZS_NONE);
 	f->mean = gs_texrender_create(GS_RGBA, GS_ZS_NONE);
+	const char *an = getenv("DBPO_FSQ_ANALYZE");
+	f->analyze = an && an[0] == '1';
+	if (f->analyze)
+		for (int k = 0; k < ANALYZE_STAGES; k++)
+			f->timers[k] = gs_timer_create();
 	obs_leave_graphics();
 	bfree(path);
 
@@ -457,6 +474,9 @@ static void fsq_destroy(void *data)
 	gs_texrender_destroy(f->look_out2);
 	gs_texrender_destroy(f->composed);
 	gs_texrender_destroy(f->mean);
+	for (int k = 0; k < ANALYZE_STAGES; k++)
+		if (f->timers[k])
+			gs_timer_destroy(f->timers[k]);
 	gs_effect_destroy(f->effect);
 	obs_leave_graphics();
 	bfree(f);
@@ -758,6 +778,42 @@ static void blank_duplicates(struct squish_filter *f, const struct layout *L, gs
 	}
 }
 
+static void analyze_begin(struct squish_filter *f, int stage)
+{
+	if (f->analyze && f->timers[stage])
+		gs_timer_begin(f->timers[stage]);
+}
+
+static void analyze_end(struct squish_filter *f, int stage)
+{
+	if (f->analyze && f->timers[stage])
+		gs_timer_end(f->timers[stage]);
+}
+
+/* Reads finished timers and logs averages. A timer whose result is not ready yet
+ * (the GPU is behind) is skipped; the averages use the samples that are ready. */
+static void analyze_collect(struct squish_filter *f)
+{
+	if (!f->analyze || ++f->frames < ANALYZE_PERIOD)
+		return;
+	f->frames = 0;
+	char line[512];
+	size_t n = (size_t)snprintf(line, sizeof(line), "fsq analysis (%d frames):", ANALYZE_PERIOD);
+	for (int k = 0; k < ANALYZE_STAGES; k++) {
+		uint64_t ticks = 0;
+		if (f->timers[k] && gs_timer_get_data(f->timers[k], &ticks)) {
+			f->timer_sum[k] += ticks;
+			f->timer_n[k]++;
+		}
+		if (f->timer_n[k])
+			n += (size_t)snprintf(line + n, sizeof(line) - n, " %s %.3f ms", stage_name[k],
+					      (double)f->timer_sum[k] / f->timer_n[k] / 1e6);
+		f->timer_sum[k] = 0;
+		f->timer_n[k] = 0;
+	}
+	blog(LOG_INFO, "%s", line);
+}
+
 static void fsq_render(void *data, gs_effect_t *unused)
 {
 	UNUSED_PARAMETER(unused);
@@ -790,21 +846,29 @@ static void fsq_render(void *data, gs_effect_t *unused)
 			if (f->view == VIEW_ZONE) {
 				f->output_valid = run_pass(f, f->output, "Zone", in, c, w, h, pw, ph);
 				f->display = f->output;
-			} else if (run_pass(f, f->squished, "Squish", in, c, w, h, L.ow, L.oh)) {
+			} else if (analyze_begin(f, STAGE_SQUISH),
+				   run_pass(f, f->squished, "Squish", in, c, w, h, L.ow, L.oh) &&
+					   (analyze_end(f, STAGE_SQUISH), true)) {
 				gs_texture_t *sq = gs_texrender_get_texture(f->squished);
 				f->display = f->squished;
 				f->output_valid = true;
 				if (L.nslots > 0) {
+					analyze_begin(f, STAGE_BLANK);
 					blank_duplicates(f, &L, raw, f->squished);
+					analyze_end(f, STAGE_BLANK);
 					/* Sharp regions: every view shows the streamed frame (picture + strip). */
+					analyze_begin(f, STAGE_COMPOSE);
 					f->output_valid = compose_atlas(f, &L, raw, sq);
 					f->display = f->composed;
+					analyze_end(f, STAGE_COMPOSE);
 					if (f->output_valid && f->view == VIEW_UNSQUISHED) {
+						analyze_begin(f, STAGE_PASTE);
 						f->output_valid =
 							run_pass(f, f->output, "Unsquish", sq, c, L.ow, L.oh, pw, ph) &&
 							paste_regions(f, &L, pw, ph);
 						f->display = f->output_valid ? apply_look(f, f->output, pw, ph)
 									     : f->output;
+						analyze_end(f, STAGE_PASTE);
 					}
 				} else if (f->view == VIEW_UNSQUISHED) {
 					f->output_valid = run_pass(f, f->output, "Unsquish", sq, c, L.ow, L.oh, pw, ph);
@@ -829,6 +893,7 @@ static void fsq_render(void *data, gs_effect_t *unused)
 	while (gs_effect_loop(def, "Draw"))
 		gs_draw_sprite(tex, 0, dw, dh);
 	gs_blend_state_pop();
+	analyze_collect(f);
 }
 
 /* ------------------------------------------------------------------ properties */
