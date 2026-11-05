@@ -55,6 +55,12 @@ def check(path, size):
         results.append((name, bool(ok)))
 
     mask = np.all(np.abs(frame[:, :, :3].astype(int) - np.array(RED)) <= 60, axis=2)
+    fy, fx = np.nonzero(mask)
+    if len(fy):
+        print(f"diag red anywhere in frame: x {fx.min()}..{fx.max()}, y {fy.min()}..{fy.max()}, {len(fy)} px; "
+              f"picture width guess {round(0.8 * ow) & ~1}")
+    else:
+        print("diag no red anywhere in frame")
     ys, xs = np.nonzero(mask[:, x - GUTTER:])
     xs = xs + x - GUTTER
     expect("region found in the strip", len(ys))
