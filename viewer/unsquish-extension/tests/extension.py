@@ -63,7 +63,7 @@ with sync_playwright() as p:
     page.bring_to_front(); page.wait_for_timeout(600)
     look = page.evaluate("document.documentElement.dataset.dbpoLook")
     print("look on the page:", look)
-    if look != "0.6,0,0,0,0.4": fails.append("look not applied")
+    if not look or [float(v) for v in look.split(",")] != [0.6, 0, 0, 0, 0.4] + [0] * 13: fails.append("look not applied")
     hit = page.evaluate("(() => { const b = document.getElementById('ctl').getBoundingClientRect(); return document.elementFromPoint(b.x + 5, b.y + 5).id; })()")
     print("with the look on, element on top at the control button:", hit)
     if hit != "ctl": fails.append("controls covered with the look on")

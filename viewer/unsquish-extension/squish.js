@@ -81,6 +81,7 @@
 			// Viewer look, applied after unsquishing (0..1 each, 0 = off). Older
 			// strings have none; older extensions ignore these keys.
 			look: {
+				...NO_LOOK,
 				sharpen: clamp01(g("ls", 0)),
 				clarity: clamp01(g("lc", 0)),
 				hdr: clamp01(g("lh", 0)),
@@ -89,6 +90,13 @@
 			},
 			text: m[0],
 		};
+		// A look code ("※" + CJK characters) right after the numbers carries the whole look.
+		const lc = /\u203b([\u4e00-\u8dff]+)/.exec((text || "").slice(m.index + m[0].length, m.index + m[0].length + 40));
+		const packed = lc ? unpackLook(lc[1]) : null;
+		if (packed) {
+			cfg.look = { ...NO_LOOK, ...packed };
+			cfg.text = m[0] + LOOK_MARK + lc[1];
+		}
 		const [ox, oy, bw, bh] = cfg.box;
 		if (!(ox >= 0 && oy >= 0 && bw > 0 && bh > 0 && ox + bw <= 1 + 1e-6 && oy + bh <= 1 + 1e-6)) return null;
 		for (const a of [cfg.x, cfg.y]) {
@@ -170,17 +178,82 @@
 		}
 	}
 
-	const NO_LOOK = Object.freeze({ sharpen: 0, clarity: 0, hdr: 0, bloom: 0, sharpenPlus: 0 });
+	/* Look values in code order (same as research/foveation/color_math.py): [name, label, signed]. */
+	const LOOK_FIELDS = [
+		["sharpen", "Sharpen", false], ["clarity", "Clarity", false], ["hdr", "HDR toning", false],
+		["bloom", "Bloom", false], ["sharpenPlus", "Sharpen+", false],
+		["brightness", "Brightness", true], ["contrast", "Contrast", true], ["gamma", "Gamma", true],
+		["saturation", "Saturation", true], ["vibrance", "Vibrance", true], ["temperature", "Temperature", true],
+		["tint", "Tint", true], ["hue", "Hue", true], ["highlights", "Highlights", true], ["shadows", "Shadows", true],
+		["bw", "Black & white", false], ["sepia", "Sepia", false], ["night", "Night mode", false],
+	];
+	const NO_LOOK = Object.freeze(Object.fromEntries(LOOK_FIELDS.map(([k]) => [k, 0])));
+	const COLOR_KEYS = ["brightness", "contrast", "gamma", "saturation", "vibrance", "temperature", "tint", "hue",
+		"highlights", "shadows", "bw", "sepia", "night"];
 
-	/** Any look slider above zero? */
+	/** Any look value away from zero? */
 	function lookActive(l) {
-		return !!l && (l.sharpen > 0 || l.clarity > 0 || l.hdr > 0 || l.bloom > 0 || l.sharpenPlus > 0);
+		return !!l && LOOK_FIELDS.some(([k]) => (Number(l[k]) || 0) !== 0);
+	}
+
+	/** Any colour-correction value away from zero (needs the colour pass)? */
+	function colorActive(l) {
+		return !!l && COLOR_KEYS.some((k) => (Number(l[k]) || 0) !== 0);
 	}
 
 	/** Clamped copy of a look from storage or a string (missing values = 0). */
 	function cleanLook(l) {
-		const v = (k) => clamp01(Number(l && l[k]) || 0);
-		return { sharpen: v("sharpen"), clarity: v("clarity"), hdr: v("hdr"), bloom: v("bloom"), sharpenPlus: v("sharpenPlus") };
+		const out = {};
+		for (const [k, , signed] of LOOK_FIELDS) {
+			const n = Number(l && l[k]) || 0;
+			out[k] = signed ? Math.max(-1, Math.min(1, n)) : clamp01(n);
+		}
+		return out;
+	}
+
+	/*
+	 * Look code: "※" + CJK characters (14 bits each, U+4E00..) carrying every look value, so a
+	 * title or chat line holds the whole look in about 11 characters. Bits: version (2), then 7 bits
+	 * per LOOK_FIELDS entry. Same format as color_math.py.
+	 */
+	const LOOK_MARK = "※";
+	function packLook(l) {
+		const c = cleanLook(l);
+		const qs = LOOK_FIELDS.map(([k, , signed]) => (signed ? Math.floor(c[k] * 63 + 0.5) + 64 : Math.floor(c[k] * 127 + 0.5)));
+		if (qs.every((q, i) => q === (LOOK_FIELDS[i][2] ? 64 : 0))) return "";
+		const bits = [0, 1];
+		for (const q of qs) for (let i = 6; i >= 0; i--) bits.push((q >> i) & 1);
+		while (bits.length % 14) bits.push(0);
+		let out = "";
+		for (let i = 0; i < bits.length; i += 14) {
+			let n = 0;
+			for (let j = 0; j < 14; j++) n = (n << 1) | bits[i + j];
+			out += String.fromCharCode(0x4e00 + n);
+		}
+		return LOOK_MARK + out;
+	}
+
+	/** Look from a code (the mark is optional), or null if it is not a valid code. */
+	function unpackLook(code) {
+		code = String(code || "");
+		if (code.startsWith(LOOK_MARK)) code = code.slice(1);
+		if (code.length * 14 < 2 + 7 * LOOK_FIELDS.length) return null;
+		const bits = [];
+		for (const ch of code) {
+			const n = ch.charCodeAt(0) - 0x4e00;
+			if (!(n >= 0 && n < 16384)) return null;
+			for (let i = 13; i >= 0; i--) bits.push((n >> i) & 1);
+		}
+		if (((bits[0] << 1) | bits[1]) !== 1) return null;
+		const look = {};
+		let pos = 2;
+		for (const [k, , signed] of LOOK_FIELDS) {
+			let q = 0;
+			for (let i = 0; i < 7; i++) q = (q << 1) | bits[pos + i];
+			pos += 7;
+			look[k] = signed ? (q - 64) / 63 : q / 127;
+		}
+		return look;
 	}
 
 	/** A config that leaves the picture as it is (forward(x) = x): for plain, non-squished videos. */
@@ -322,9 +395,58 @@ void main() {
 	gl_FragColor = vec4(clamp(o, 0.0, 1.0), e4.a);
 }`;
 
+	/*
+	 * Colour correction pass (before the Details and Sharpen+ passes). Math: research/foveation/color_math.py
+	 * (apply_color); u_a = brightness, contrast, gamma, saturation; u_b = vibrance, temperature, tint, hue;
+	 * u_c = highlights, shadows, bw, sepia; u_n = night.
+	 */
+	const LOOK_COLOR_SHADER = `
+precision highp float;
+uniform sampler2D u_img;
+uniform vec4 u_a;
+uniform vec4 u_b;
+uniform vec4 u_c;
+uniform float u_n;
+varying vec2 v_uv;
+const vec3 W = vec3(0.2126, 0.7152, 0.0722);
+void main() {
+	vec4 src = texture2D(u_img, v_uv);
+	vec3 c = src.rgb;
+	c.r += u_b.y * 0.10 + u_b.z * 0.04;
+	c.b += -u_b.y * 0.10 + u_b.z * 0.04;
+	c.g -= u_b.z * 0.08;
+	float l = clamp(dot(c, W), 0.0, 1.0);
+	c += u_c.x * 0.25 * smoothstep(0.5, 1.0, l) + u_c.y * 0.25 * (1.0 - smoothstep(0.0, 0.5, l));
+	c += u_a.x * 0.5;
+	c = (c - 0.5) * (1.0 + u_a.y) + 0.5;
+	c = clamp(c, 0.0, 1.0);
+	c = pow(c, vec3(exp2(-u_a.z)));
+	if (u_b.w != 0.0) {
+		float ang = u_b.w * 3.14159265358979;
+		float ca = cos(ang), sa = sin(ang);
+		float y = dot(c, vec3(0.299, 0.587, 0.114));
+		float i = dot(c, vec3(0.596, -0.274, -0.322));
+		float q = dot(c, vec3(0.211, -0.523, 0.312));
+		float i2 = i * ca - q * sa, q2 = i * sa + q * ca;
+		c = clamp(vec3(y + 0.956 * i2 + 0.621 * q2, y - 0.272 * i2 - 0.647 * q2, y - 1.106 * i2 + 1.703 * q2), 0.0, 1.0);
+	}
+	l = dot(c, W);
+	float sat = max(max(c.r, c.g), c.b) - min(min(c.r, c.g), c.b);
+	float f = max(1.0 + u_a.w + 1.5 * u_b.x * (1.0 - sat), 0.0);
+	c = clamp(vec3(l) + (c - vec3(l)) * f, 0.0, 1.0);
+	l = dot(c, W);
+	c += (vec3(l) - c) * u_c.z;
+	vec3 sep = clamp(vec3(dot(c, vec3(0.393, 0.769, 0.189)), dot(c, vec3(0.349, 0.686, 0.168)), dot(c, vec3(0.272, 0.534, 0.131))), 0.0, 1.0);
+	c += (sep - c) * u_c.w;
+	vec3 night = clamp(pow(c, vec3(0.8)) * vec3(0.7, 0.85, 1.15), 0.0, 1.0);
+	c += (night - c) * u_n;
+	gl_FragColor = vec4(clamp(c, 0.0, 1.0), src.a);
+}`;
+
 	const api = {
 		MIN_DENSITY, derive, forward, density, inverse, parse, uniforms, FRAGMENT_SHADER, atlasLayout,
-		NO_LOOK, lookActive, cleanLook, identity, LOOK_BLUR_SHADER, LOOK_DETAILS_SHADER, LOOK_CAS_SHADER,
+		NO_LOOK, lookActive, colorActive, cleanLook, identity, LOOK_BLUR_SHADER, LOOK_DETAILS_SHADER, LOOK_CAS_SHADER,
+		LOOK_COLOR_SHADER, LOOK_FIELDS, packLook, unpackLook,
 	};
 	if (typeof module !== "undefined" && module.exports) module.exports = api;
 	else root.FSQ = api;

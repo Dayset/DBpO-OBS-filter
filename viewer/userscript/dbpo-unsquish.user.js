@@ -144,6 +144,7 @@ const chrome = (() => {
 			// Viewer look, applied after unsquishing (0..1 each, 0 = off). Older
 			// strings have none; older extensions ignore these keys.
 			look: {
+				...NO_LOOK,
 				sharpen: clamp01(g("ls", 0)),
 				clarity: clamp01(g("lc", 0)),
 				hdr: clamp01(g("lh", 0)),
@@ -152,6 +153,13 @@ const chrome = (() => {
 			},
 			text: m[0],
 		};
+		// A look code ("※" + CJK characters) right after the numbers carries the whole look.
+		const lc = /\u203b([\u4e00-\u8dff]+)/.exec((text || "").slice(m.index + m[0].length, m.index + m[0].length + 40));
+		const packed = lc ? unpackLook(lc[1]) : null;
+		if (packed) {
+			cfg.look = { ...NO_LOOK, ...packed };
+			cfg.text = m[0] + LOOK_MARK + lc[1];
+		}
 		const [ox, oy, bw, bh] = cfg.box;
 		if (!(ox >= 0 && oy >= 0 && bw > 0 && bh > 0 && ox + bw <= 1 + 1e-6 && oy + bh <= 1 + 1e-6)) return null;
 		for (const a of [cfg.x, cfg.y]) {
@@ -233,17 +241,82 @@ const chrome = (() => {
 		}
 	}
 
-	const NO_LOOK = Object.freeze({ sharpen: 0, clarity: 0, hdr: 0, bloom: 0, sharpenPlus: 0 });
+	/* Look values in code order (same as research/foveation/color_math.py): [name, label, signed]. */
+	const LOOK_FIELDS = [
+		["sharpen", "Sharpen", false], ["clarity", "Clarity", false], ["hdr", "HDR toning", false],
+		["bloom", "Bloom", false], ["sharpenPlus", "Sharpen+", false],
+		["brightness", "Brightness", true], ["contrast", "Contrast", true], ["gamma", "Gamma", true],
+		["saturation", "Saturation", true], ["vibrance", "Vibrance", true], ["temperature", "Temperature", true],
+		["tint", "Tint", true], ["hue", "Hue", true], ["highlights", "Highlights", true], ["shadows", "Shadows", true],
+		["bw", "Black & white", false], ["sepia", "Sepia", false], ["night", "Night mode", false],
+	];
+	const NO_LOOK = Object.freeze(Object.fromEntries(LOOK_FIELDS.map(([k]) => [k, 0])));
+	const COLOR_KEYS = ["brightness", "contrast", "gamma", "saturation", "vibrance", "temperature", "tint", "hue",
+		"highlights", "shadows", "bw", "sepia", "night"];
 
-	/** Any look slider above zero? */
+	/** Any look value away from zero? */
 	function lookActive(l) {
-		return !!l && (l.sharpen > 0 || l.clarity > 0 || l.hdr > 0 || l.bloom > 0 || l.sharpenPlus > 0);
+		return !!l && LOOK_FIELDS.some(([k]) => (Number(l[k]) || 0) !== 0);
+	}
+
+	/** Any colour-correction value away from zero (needs the colour pass)? */
+	function colorActive(l) {
+		return !!l && COLOR_KEYS.some((k) => (Number(l[k]) || 0) !== 0);
 	}
 
 	/** Clamped copy of a look from storage or a string (missing values = 0). */
 	function cleanLook(l) {
-		const v = (k) => clamp01(Number(l && l[k]) || 0);
-		return { sharpen: v("sharpen"), clarity: v("clarity"), hdr: v("hdr"), bloom: v("bloom"), sharpenPlus: v("sharpenPlus") };
+		const out = {};
+		for (const [k, , signed] of LOOK_FIELDS) {
+			const n = Number(l && l[k]) || 0;
+			out[k] = signed ? Math.max(-1, Math.min(1, n)) : clamp01(n);
+		}
+		return out;
+	}
+
+	/*
+	 * Look code: "※" + CJK characters (14 bits each, U+4E00..) carrying every look value, so a
+	 * title or chat line holds the whole look in about 11 characters. Bits: version (2), then 7 bits
+	 * per LOOK_FIELDS entry. Same format as color_math.py.
+	 */
+	const LOOK_MARK = "※";
+	function packLook(l) {
+		const c = cleanLook(l);
+		const qs = LOOK_FIELDS.map(([k, , signed]) => (signed ? Math.floor(c[k] * 63 + 0.5) + 64 : Math.floor(c[k] * 127 + 0.5)));
+		if (qs.every((q, i) => q === (LOOK_FIELDS[i][2] ? 64 : 0))) return "";
+		const bits = [0, 1];
+		for (const q of qs) for (let i = 6; i >= 0; i--) bits.push((q >> i) & 1);
+		while (bits.length % 14) bits.push(0);
+		let out = "";
+		for (let i = 0; i < bits.length; i += 14) {
+			let n = 0;
+			for (let j = 0; j < 14; j++) n = (n << 1) | bits[i + j];
+			out += String.fromCharCode(0x4e00 + n);
+		}
+		return LOOK_MARK + out;
+	}
+
+	/** Look from a code (the mark is optional), or null if it is not a valid code. */
+	function unpackLook(code) {
+		code = String(code || "");
+		if (code.startsWith(LOOK_MARK)) code = code.slice(1);
+		if (code.length * 14 < 2 + 7 * LOOK_FIELDS.length) return null;
+		const bits = [];
+		for (const ch of code) {
+			const n = ch.charCodeAt(0) - 0x4e00;
+			if (!(n >= 0 && n < 16384)) return null;
+			for (let i = 13; i >= 0; i--) bits.push((n >> i) & 1);
+		}
+		if (((bits[0] << 1) | bits[1]) !== 1) return null;
+		const look = {};
+		let pos = 2;
+		for (const [k, , signed] of LOOK_FIELDS) {
+			let q = 0;
+			for (let i = 0; i < 7; i++) q = (q << 1) | bits[pos + i];
+			pos += 7;
+			look[k] = signed ? (q - 64) / 63 : q / 127;
+		}
+		return look;
 	}
 
 	/** A config that leaves the picture as it is (forward(x) = x): for plain, non-squished videos. */
@@ -385,9 +458,58 @@ void main() {
 	gl_FragColor = vec4(clamp(o, 0.0, 1.0), e4.a);
 }`;
 
+	/*
+	 * Colour correction pass (before the Details and Sharpen+ passes). Math: research/foveation/color_math.py
+	 * (apply_color); u_a = brightness, contrast, gamma, saturation; u_b = vibrance, temperature, tint, hue;
+	 * u_c = highlights, shadows, bw, sepia; u_n = night.
+	 */
+	const LOOK_COLOR_SHADER = `
+precision highp float;
+uniform sampler2D u_img;
+uniform vec4 u_a;
+uniform vec4 u_b;
+uniform vec4 u_c;
+uniform float u_n;
+varying vec2 v_uv;
+const vec3 W = vec3(0.2126, 0.7152, 0.0722);
+void main() {
+	vec4 src = texture2D(u_img, v_uv);
+	vec3 c = src.rgb;
+	c.r += u_b.y * 0.10 + u_b.z * 0.04;
+	c.b += -u_b.y * 0.10 + u_b.z * 0.04;
+	c.g -= u_b.z * 0.08;
+	float l = clamp(dot(c, W), 0.0, 1.0);
+	c += u_c.x * 0.25 * smoothstep(0.5, 1.0, l) + u_c.y * 0.25 * (1.0 - smoothstep(0.0, 0.5, l));
+	c += u_a.x * 0.5;
+	c = (c - 0.5) * (1.0 + u_a.y) + 0.5;
+	c = clamp(c, 0.0, 1.0);
+	c = pow(c, vec3(exp2(-u_a.z)));
+	if (u_b.w != 0.0) {
+		float ang = u_b.w * 3.14159265358979;
+		float ca = cos(ang), sa = sin(ang);
+		float y = dot(c, vec3(0.299, 0.587, 0.114));
+		float i = dot(c, vec3(0.596, -0.274, -0.322));
+		float q = dot(c, vec3(0.211, -0.523, 0.312));
+		float i2 = i * ca - q * sa, q2 = i * sa + q * ca;
+		c = clamp(vec3(y + 0.956 * i2 + 0.621 * q2, y - 0.272 * i2 - 0.647 * q2, y - 1.106 * i2 + 1.703 * q2), 0.0, 1.0);
+	}
+	l = dot(c, W);
+	float sat = max(max(c.r, c.g), c.b) - min(min(c.r, c.g), c.b);
+	float f = max(1.0 + u_a.w + 1.5 * u_b.x * (1.0 - sat), 0.0);
+	c = clamp(vec3(l) + (c - vec3(l)) * f, 0.0, 1.0);
+	l = dot(c, W);
+	c += (vec3(l) - c) * u_c.z;
+	vec3 sep = clamp(vec3(dot(c, vec3(0.393, 0.769, 0.189)), dot(c, vec3(0.349, 0.686, 0.168)), dot(c, vec3(0.272, 0.534, 0.131))), 0.0, 1.0);
+	c += (sep - c) * u_c.w;
+	vec3 night = clamp(pow(c, vec3(0.8)) * vec3(0.7, 0.85, 1.15), 0.0, 1.0);
+	c += (night - c) * u_n;
+	gl_FragColor = vec4(clamp(c, 0.0, 1.0), src.a);
+}`;
+
 	const api = {
 		MIN_DENSITY, derive, forward, density, inverse, parse, uniforms, FRAGMENT_SHADER, atlasLayout,
-		NO_LOOK, lookActive, cleanLook, identity, LOOK_BLUR_SHADER, LOOK_DETAILS_SHADER, LOOK_CAS_SHADER,
+		NO_LOOK, lookActive, colorActive, cleanLook, identity, LOOK_BLUR_SHADER, LOOK_DETAILS_SHADER, LOOK_CAS_SHADER,
+		LOOK_COLOR_SHADER, LOOK_FIELDS, packLook, unpackLook,
 	};
 	if (typeof module !== "undefined" && module.exports) module.exports = api;
 	else root.FSQ = api;
@@ -439,13 +561,7 @@ void main() {
       <option value="off">Off</option>
     </select></label>
     <div id="lookHint" class="hint"></div>
-    <div id="sliders">
-      <div class="slider"><span>Sharpen</span><input type="range" id="sharpen" min="0" max="100" step="1"><output id="sharpenOut"></output></div>
-      <div class="slider"><span>Clarity</span><input type="range" id="clarity" min="0" max="100" step="1"><output id="clarityOut"></output></div>
-      <div class="slider"><span>HDR toning</span><input type="range" id="hdr" min="0" max="100" step="1"><output id="hdrOut"></output></div>
-      <div class="slider"><span>Bloom</span><input type="range" id="bloom" min="0" max="100" step="1"><output id="bloomOut"></output></div>
-      <div class="slider"><span>Sharpen+</span><input type="range" id="sharpenPlus" min="0" max="100" step="1"><output id="sharpenPlusOut"></output></div>
-    </div>
+    <div id="sliders"></div>
     <label><input type="checkbox" id="plainVideos"> Also use my look on normal videos</label>
   </fieldset>
   </div><button class="gear" id="gear" aria-label="DBpO Unsquish settings">◐</button>`;
@@ -456,14 +572,20 @@ void main() {
 
 {
 const $ = (id) => window.__dbpoPanel.getElementById(id);
-const NO_LOOK = { sharpen: 0, clarity: 0, hdr: 0, bloom: 0, sharpenPlus: 0 };
-const LOOK_KEYS = Object.keys(NO_LOOK);
+const NO_LOOK = FSQ.NO_LOOK;
+const LOOK_KEYS = FSQ.LOOK_FIELDS.map(([k]) => k);
+const LOOK_SIGNED = Object.fromEntries(FSQ.LOOK_FIELDS.map(([k, , signed]) => [k, signed]));
+// One slider per look value: 0..100 %, or -100..100 % for the signed colour values.
+$("sliders").innerHTML = FSQ.LOOK_FIELDS.map(
+	([k, label, signed]) =>
+		`<div class="slider"><span>${label}</span><input type="range" id="${k}" min="${signed ? -100 : 0}" max="100" step="1"><output id="${k}Out"></output></div>`
+).join("");
 const defaults = { enabled: true, autoDetect: true, config: "", lookMode: "streamer", myLook: NO_LOOK, plainVideos: false };
 let current = null; // the config in use (pasted or detected), for showing the streamer's look
 
 function lookText(l) {
-	const names = { sharpen: "Sharpen", clarity: "Clarity", hdr: "HDR toning", bloom: "Bloom", sharpenPlus: "Sharpen+" };
-	const on = LOOK_KEYS.filter((k) => l[k] > 0).map((k) => `${names[k]} ${Math.round(l[k] * 100)}%`);
+	const names = Object.fromEntries(FSQ.LOOK_FIELDS.map(([k, label]) => [k, label]));
+	const on = LOOK_KEYS.filter((k) => l[k] !== 0).map((k) => `${names[k]} ${Math.round(l[k] * 100)}%`);
 	return on.length ? on.join(", ") : "none";
 }
 
@@ -677,7 +799,7 @@ void main() { v_uv = a_pos * 0.5 + 0.5; gl_Position = vec4(a_pos, 0.0, 1.0); }`;
 		autoDetect: true,
 		config: "",
 		lookMode: "streamer",
-		myLook: { sharpen: 0, clarity: 0, hdr: 0, bloom: 0, sharpenPlus: 0 },
+		myLook: { sharpen: 0, clarity: 0, hdr: 0, bloom: 0, sharpenPlus: 0 }, // more fields are filled in by FSQ.cleanLook
 		plainVideos: false,
 	};
 	let detected = null; // config found in the page
@@ -756,7 +878,8 @@ void main() { v_uv = a_pos * 0.5 + 0.5; gl_Position = vec4(a_pos, 0.0, 1.0); }`;
 			blur: program(gl, VERT_POST, FSQ.LOOK_BLUR_SHADER, ["u_img", "u_step"]),
 			details: program(gl, VERT_POST, FSQ.LOOK_DETAILS_SHADER, ["u_img", "u_large", "u_px", "u_look"]),
 			cas: program(gl, VERT_POST, FSQ.LOOK_CAS_SHADER, ["u_img", "u_px", "u_sharp"]),
-			targets: [0, 1, 2, 3].map(() => ({ tex: makeTexture(gl), fb: gl.createFramebuffer(), w: 0, h: 0 })),
+			color: program(gl, VERT_POST, FSQ.LOOK_COLOR_SHADER, ["u_img", "u_a", "u_b", "u_c", "u_n"]),
+			targets: [0, 1, 2, 3, 4].map(() => ({ tex: makeTexture(gl), fb: gl.createFramebuffer(), w: 0, h: 0 })),
 		};
 		return s.look;
 	}
@@ -784,16 +907,18 @@ void main() { v_uv = a_pos * 0.5 + 0.5; gl_Position = vec4(a_pos, 0.0, 1.0); }`;
 
 	/*
 	 * Draws the unsquished picture through the look passes:
-	 * unsquish -> T0; T0 blur H -> T1 (half); T1 blur V -> T2 (half);
-	 * Details(T0, T2) -> screen or T3; Sharpen+(T3 or T0) -> screen.
+	 * unsquish -> T0; Colour(T0) -> T4; blur H (T0 or T4) -> T1 (half); blur V -> T2 (half);
+	 * Details(src, T2) -> screen or T3; Sharpen+(T3 or src) -> screen. The last pass draws to the screen.
 	 */
 	function drawWithLook(s, look, drawUnsquish) {
 		const gl = s.gl, L = lookSetup(s);
 		const w = s.canvas.width, h = s.canvas.height, hw = Math.max(1, (w + 1) >> 1), hh = Math.max(1, (h + 1) >> 1);
-		const [t0, t1, t2, t3] = L.targets;
+		const [t0, t1, t2, t3, t4] = L.targets;
 		const details = look.sharpen > 0 || look.clarity > 0 || look.hdr > 0 || look.bloom > 0;
 		const cas = look.sharpenPlus > 0;
+		const color = FSQ.colorActive(look);
 		sizeTarget(gl, t0, w, h);
+		if (color && (details || cas)) sizeTarget(gl, t4, w, h);
 		if (details) {
 			sizeTarget(gl, t1, hw, hh);
 			sizeTarget(gl, t2, hw, hh);
@@ -803,12 +928,25 @@ void main() { v_uv = a_pos * 0.5 + 0.5; gl_Position = vec4(a_pos, 0.0, 1.0); }`;
 		bindOutput(gl, t0, w, h);
 		drawUnsquish();
 		let last = t0;
+		if (color) {
+			gl.useProgram(L.color.prog);
+			gl.uniform1i(L.color.loc.u_img, 0);
+			gl.uniform4f(L.color.loc.u_a, look.brightness, look.contrast, look.gamma, look.saturation);
+			gl.uniform4f(L.color.loc.u_b, look.vibrance, look.temperature, look.tint, look.hue);
+			gl.uniform4f(L.color.loc.u_c, look.highlights, look.shadows, look.bw, look.sepia);
+			gl.uniform1f(L.color.loc.u_n, look.night);
+			useTex(gl, 0, t0.tex);
+			const toScreen = !details && !cas;
+			bindOutput(gl, toScreen ? null : t4, w, h);
+			gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
+			last = t4;
+		}
 		if (details) {
 			const scale = Math.max(h / 1080, 0.25); // blur size relative to a 1080p picture
 			gl.useProgram(L.blur.prog);
 			gl.uniform1i(L.blur.loc.u_img, 0);
 			bindOutput(gl, t1, hw, hh);
-			useTex(gl, 0, t0.tex);
+			useTex(gl, 0, last.tex);
 			gl.uniform2f(L.blur.loc.u_step, scale / w, 0);
 			gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
 			bindOutput(gl, t2, hw, hh);
@@ -820,7 +958,7 @@ void main() { v_uv = a_pos * 0.5 + 0.5; gl_Position = vec4(a_pos, 0.0, 1.0); }`;
 			gl.uniform1i(L.details.loc.u_large, 1);
 			gl.uniform2f(L.details.loc.u_px, 1 / w, -1 / h);
 			gl.uniform4f(L.details.loc.u_look, look.sharpen, look.clarity, look.hdr, look.bloom);
-			useTex(gl, 0, t0.tex);
+			useTex(gl, 0, last.tex);
 			useTex(gl, 1, t2.tex);
 			bindOutput(gl, cas ? t3 : null, w, h);
 			gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
@@ -994,7 +1132,7 @@ void main() { v_uv = a_pos * 0.5 + 0.5; gl_Position = vec4(a_pos, 0.0, 1.0); }`;
 				}
 				document.documentElement.dataset.dbpoUnsquish = plain ? "plain" : cfg.text || "custom";
 				document.documentElement.dataset.dbpoLook = lookOn
-					? [look.sharpen, look.clarity, look.hdr, look.bloom, look.sharpenPlus].map((v) => +v.toFixed(3)).join(",")
+					? FSQ.LOOK_FIELDS.map(([k]) => +look[k].toFixed(3)).join(",")
 					: "";
 			}
 		}

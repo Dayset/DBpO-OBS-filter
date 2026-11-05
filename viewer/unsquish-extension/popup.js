@@ -1,12 +1,18 @@
 const $ = (id) => document.getElementById(id);
-const NO_LOOK = { sharpen: 0, clarity: 0, hdr: 0, bloom: 0, sharpenPlus: 0 };
-const LOOK_KEYS = Object.keys(NO_LOOK);
+const NO_LOOK = FSQ.NO_LOOK;
+const LOOK_KEYS = FSQ.LOOK_FIELDS.map(([k]) => k);
+const LOOK_SIGNED = Object.fromEntries(FSQ.LOOK_FIELDS.map(([k, , signed]) => [k, signed]));
+// One slider per look value: 0..100 %, or -100..100 % for the signed colour values.
+$("sliders").innerHTML = FSQ.LOOK_FIELDS.map(
+	([k, label, signed]) =>
+		`<div class="slider"><span>${label}</span><input type="range" id="${k}" min="${signed ? -100 : 0}" max="100" step="1"><output id="${k}Out"></output></div>`
+).join("");
 const defaults = { enabled: true, autoDetect: true, config: "", lookMode: "streamer", myLook: NO_LOOK, plainVideos: false };
 let current = null; // the config in use (pasted or detected), for showing the streamer's look
 
 function lookText(l) {
-	const names = { sharpen: "Sharpen", clarity: "Clarity", hdr: "HDR toning", bloom: "Bloom", sharpenPlus: "Sharpen+" };
-	const on = LOOK_KEYS.filter((k) => l[k] > 0).map((k) => `${names[k]} ${Math.round(l[k] * 100)}%`);
+	const names = Object.fromEntries(FSQ.LOOK_FIELDS.map(([k, label]) => [k, label]));
+	const on = LOOK_KEYS.filter((k) => l[k] !== 0).map((k) => `${names[k]} ${Math.round(l[k] * 100)}%`);
 	return on.length ? on.join(", ") : "none";
 }
 
