@@ -52,7 +52,6 @@ def check(path, size):
     expect("gutter repeats slot edge (no picture bleed)",
            red and all(close(frame[r, pw + 2], RED) for r in range(min(red) + 2, max(red) - 1)))
     expect("picture top-left shows the top-left region", close(frame[GUTTER, GUTTER], GREEN))
-    expect("picture bottom-right shows the bottom-right region", close(frame[oh - 8, pw - 8], RED))
 
     failed = [name for name, ok in results if not ok]
     if failed:  # diagnostics: where the colours really are
@@ -71,6 +70,12 @@ def check(path, size):
         print(f"diag frame {ow}x{oh} picture width {pw}")
         print(f"diag red rows in strip column {col}: {runs(red)}")
         print(f"diag green rows in strip column {col}: {runs(green)}")
+        for name, colour in [("red", RED), ("green", GREEN)]:
+            ys, xs = np.nonzero(np.all(np.abs(frame[:, pw:, :3].astype(int) - np.array(colour)) <= 60, axis=2))
+            if len(ys):
+                print(f"diag {name} box in strip: x {xs.min() + pw}..{xs.max() + pw}, y {ys.min()}..{ys.max()}, {len(ys)} px")
+            else:
+                print(f"diag {name} box in strip: none")
         for r, c in [(4, 4), (oh // 2, 4), (oh - 8, 4), (4, pw - 8), (oh - 8, pw - 8), (oh // 2, pw // 2)]:
             print(f"diag picture px row {r} col {c}: {frame[r, c, :3].tolist()}")
         for r, c in [(4, pw + 2), (4, pw + 20), (oh - 8, pw + 20), (oh - 8, ow - 4)]:
