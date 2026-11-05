@@ -69,12 +69,18 @@ enum atlas_state {
 #define S_MAXCOMP "max_edge_compression"
 #define S_INFO "info"
 #define S_CONFIG "config"
-/* Sharp regions (atlas): how many, then per region a rectangle in percent of the source and a scale in percent. */
-#define S_ATLAS_COUNT "atlas_count"
-#define S_ATLAS_X0 "atlas_%d_x0"
-#define S_ATLAS_Y0 "atlas_%d_y0"
-#define S_ATLAS_X1 "atlas_%d_x1"
-#define S_ATLAS_Y1 "atlas_%d_y1"
+/* Sharp regions (atlas): master switch, "hide the duplicate", then per region an on/off switch,
+ * a name (only for the info line), a rectangle (left, top, width, height) in percent of the
+ * source and a scale in percent. */
+#define S_ATLAS_ON "atlas_on"
+#define S_ATLAS_BLANK "atlas_blank"
+#define S_ATLAS_REGION_ON "atlas_%d_on"
+#define S_ATLAS_NAME "atlas_%d_name"
+#define S_ATLAS_PRESET "atlas_%d_preset"
+#define S_ATLAS_X0 "atlas_%d_x"
+#define S_ATLAS_Y0 "atlas_%d_y"
+#define S_ATLAS_W "atlas_%d_w"
+#define S_ATLAS_H "atlas_%d_h"
 #define S_ATLAS_SCALE "atlas_%d_scale"
 #define S_IMPORT "import"
 /* Viewer look: sent to viewers in the config string, applied by the browser
@@ -110,6 +116,7 @@ struct layout {
 	enum fit_result fit;
 	struct atlas_slot slots[ATLAS_MAX_REGIONS]; /* sharp regions in the strip */
 	int nslots;
+	double floors[ATLAS_MAX_REGIONS]; /* lowest allowed scale of each region */
 	enum atlas_state atlas_state;
 };
 
@@ -163,6 +170,7 @@ struct squish_filter {
 	double floor; /* lowest density = 1 / max edge compression */
 	struct atlas_region regions[ATLAS_MAX_REGIONS];
 	int nregions;
+	bool blank_dup; /* hide the duplicate of each region in the squished picture */
 
 	/* What the properties view shows, so it only rebuilds when this changes
 	 * (rebuilding while a slider is dragged makes the sliders jump). */
@@ -282,7 +290,7 @@ static int read_target(obs_data_t *s)
 	return obs_data_get_int(s, S_LAYOUT) == LAYOUT_EXACT ? TARGET_CUSTOM : TARGET_CANVAS;
 }
 
-static int read_regions(obs_data_t *s, struct atlas_region *out);
+static int read_regions(obs_data_t *s, struct atlas_region *out, int *index);
 
 /* Sharp regions: the picture shrinks into a box on the left (ATLAS_BOX_W of the
  * stream width); the regions are packed into the strip on the right. L is left
@@ -317,6 +325,8 @@ static void atlas_place(const struct squish_filter *f, uint32_t w, uint32_t h, s
 	a.squish.bh = 1.0;
 	a.count = f->nregions;
 	memcpy(a.regions, f->regions, sizeof(a.regions));
+	for (int i = 0; i < a.count; i++)
+		L->floors[i] = atlas_region_floor(&a, &a.regions[i]);
 	if (!atlas_layout(&a, (int)L->tw, (int)L->th, (int)w, (int)h, L->slots)) {
 		L->atlas_state = ATLAS_NOFIT;
 		return;
@@ -395,7 +405,8 @@ static void fsq_update(void *data, obs_data_t *s)
 	f->view = (enum view_mode)obs_data_get_int(s, S_VIEW);
 	f->target = read_target(s);
 	f->layout = f->target == TARGET_CUSTOM ? LAYOUT_EXACT : LAYOUT_FILL;
-	f->nregions = read_regions(s, f->regions);
+	f->nregions = read_regions(s, f->regions, NULL);
+	f->blank_dup = obs_data_get_bool(s, S_ATLAS_BLANK);
 }
 
 /* ------------------------------------------------------------------ lifecycle */
@@ -853,9 +864,11 @@ static void fsq_render(void *data, gs_effect_t *unused)
 				f->display = f->squished;
 				f->output_valid = true;
 				if (L.nslots > 0) {
-					analyze_begin(f, STAGE_BLANK);
-					blank_duplicates(f, &L, raw, f->squished);
-					analyze_end(f, STAGE_BLANK);
+					if (f->blank_dup) {
+						analyze_begin(f, STAGE_BLANK);
+						blank_duplicates(f, &L, raw, f->squished);
+						analyze_end(f, STAGE_BLANK);
+					}
 					/* Sharp regions: every view shows the streamed frame (picture + strip). */
 					analyze_begin(f, STAGE_COMPOSE);
 					f->output_valid = compose_atlas(f, &L, raw, sq);
@@ -960,35 +973,49 @@ static void append_options(char *info, size_t info_size, uint32_t w, uint32_t h,
 /* Info line and (optionally) the config string for the given settings. */
 /* key: what decides whether the view must be rebuilt (never changes while a
  * slider is dragged, except when crossing into another state). */
-/* Regions from the settings, clamped to valid rectangles. */
-static int read_regions(obs_data_t *s, struct atlas_region *out)
+/* Regions the streamer switched on, in order. index (optional) gets the
+ * settings number of each, for names in the info line. Values are not clamped:
+ * a region outside the picture is reported, never silently moved. */
+static int read_regions(obs_data_t *s, struct atlas_region *out, int *index)
 {
-	int n = (int)obs_data_get_int(s, S_ATLAS_COUNT);
-	if (n < 0)
-		n = 0;
-	if (n > ATLAS_MAX_REGIONS)
-		n = ATLAS_MAX_REGIONS;
+	if (!obs_data_get_bool(s, S_ATLAS_ON))
+		return 0;
 	int count = 0;
 	char key[64];
-	for (int i = 0; i < n; i++) {
+	for (int i = 0; i < ATLAS_MAX_REGIONS; i++) {
+		snprintf(key, sizeof(key), S_ATLAS_REGION_ON, i);
+		if (!obs_data_get_bool(s, key))
+			continue;
 		struct atlas_region r;
 		snprintf(key, sizeof(key), S_ATLAS_X0, i);
 		r.x0 = obs_data_get_double(s, key) / 100.0;
 		snprintf(key, sizeof(key), S_ATLAS_Y0, i);
 		r.y0 = obs_data_get_double(s, key) / 100.0;
-		snprintf(key, sizeof(key), S_ATLAS_X1, i);
-		r.x1 = obs_data_get_double(s, key) / 100.0;
-		snprintf(key, sizeof(key), S_ATLAS_Y1, i);
-		r.y1 = obs_data_get_double(s, key) / 100.0;
+		snprintf(key, sizeof(key), S_ATLAS_W, i);
+		r.x1 = r.x0 + obs_data_get_double(s, key) / 100.0;
+		snprintf(key, sizeof(key), S_ATLAS_H, i);
+		r.y1 = r.y0 + obs_data_get_double(s, key) / 100.0;
 		snprintf(key, sizeof(key), S_ATLAS_SCALE, i);
 		r.s = obs_data_get_double(s, key) / 100.0;
-		if (r.x1 <= r.x0 || r.y1 <= r.y0)
-			continue; /* empty rectangle: ignored */
 		if (r.s <= 0.0 || r.s > 1.0)
 			r.s = 1.0;
+		if (index)
+			index[count] = i;
 		out[count++] = r;
 	}
 	return count;
+}
+
+/* Name the streamer gave region i, or "Region N". Only shown here, never streamed. */
+static void region_name(obs_data_t *s, int i, char *out, size_t size)
+{
+	char key[64];
+	snprintf(key, sizeof(key), S_ATLAS_NAME, i);
+	const char *name = obs_data_get_string(s, key);
+	if (name && *name)
+		snprintf(out, size, "%s", name);
+	else
+		snprintf(out, size, "Region %d", i + 1);
 }
 
 /* Appends the region keys (gx..gs, hx.., ix.., jx..) to a squish config string. */
@@ -1017,7 +1044,8 @@ static void describe(struct squish_filter *f, obs_data_t *s, char *info, size_t 
 	tmp.target = read_target(s);
 	tmp.layout = tmp.target == TARGET_CUSTOM ? LAYOUT_EXACT : LAYOUT_FILL;
 	tmp.view = VIEW_SQUISHED;
-	tmp.nregions = read_regions(s, tmp.regions);
+	int rindex[ATLAS_MAX_REGIONS] = {0};
+	tmp.nregions = read_regions(s, tmp.regions, rindex);
 
 	uint32_t w = 1920, h = 1080;
 	target_size(f, &w, &h);
@@ -1025,10 +1053,8 @@ static void describe(struct squish_filter *f, obs_data_t *s, char *info, size_t 
 	compute_layout(&tmp, w, h, &L);
 	if (cfg)
 		squish_config_format(&L.c, cfg, cfg_size);
-	struct atlas_region regions[ATLAS_MAX_REGIONS];
-	const int nregions = read_regions(s, regions);
-	if (cfg && nregions > 0 && L.atlas_state == ATLAS_OK)
-		append_regions(cfg, cfg_size, regions, nregions);
+	if (cfg && tmp.nregions > 0 && L.atlas_state == ATLAS_OK)
+		append_regions(cfg, cfg_size, tmp.regions, tmp.nregions);
 
 	char note[160] = "";
 	if (L.fit == FIT_LIMITED)
@@ -1037,8 +1063,9 @@ static void describe(struct squish_filter *f, obs_data_t *s, char *info, size_t 
 		snprintf(note, sizeof(note), "%s", T("Reduced"));
 	const double pixels = 100.0 * (double)L.ow * L.oh / ((double)w * h);
 	if (key)
-		snprintf(key, key_size, "%d %d %d %ux%u %ux%u %ux%u %.4g", tmp.target, (int)L.fit,
-			 L.ow >= w && L.oh >= h, w, h, L.cw, L.ch, L.vw, L.vh, tmp.floor);
+		snprintf(key, key_size, "%d %d %d %ux%u %ux%u %ux%u %.4g %d %d", tmp.target, (int)L.fit,
+			 L.ow >= w && L.oh >= h, w, h, L.cw, L.ch, L.vw, L.vh, tmp.floor, (int)L.atlas_state,
+			 tmp.nregions);
 	switch (tmp.layout) {
 	case LAYOUT_FILL: {
 		/* Checklist for the chosen resolution, checked against OBS. */
@@ -1095,6 +1122,26 @@ static void describe(struct squish_filter *f, obs_data_t *s, char *info, size_t 
 		if (n < info_size)
 			snprintf(info + n, info_size - n, "\n\n%s", msg);
 	}
+	if (L.atlas_state == ATLAS_OK && L.nslots > 0) {
+		size_t n = strlen(info);
+		if (n < info_size)
+			n += (size_t)snprintf(info + n, info_size - n, "%s", T("AtlasHeader"));
+		for (int i = 0; i < L.nslots && n < info_size; i++) {
+			char name[64];
+			region_name(s, rindex[i], name, sizeof(name));
+			const double want = tmp.regions[i].s, got = L.slots[i].scale;
+			if (got < want - 0.005)
+				n += (size_t)snprintf(info + n, info_size - n, T("AtlasRegionReduced"), name,
+						      100.0 * want, 100.0 * got, 100.0 * L.floors[i], L.slots[i].w,
+						      L.slots[i].h);
+			else if (got > 0.995)
+				n += (size_t)snprintf(info + n, info_size - n, T("AtlasRegionFull"), name,
+						      L.slots[i].w, L.slots[i].h);
+			else
+				n += (size_t)snprintf(info + n, info_size - n, T("AtlasRegionScaled"), name,
+						      100.0 * got, L.slots[i].w, L.slots[i].h);
+		}
+	}
 }
 
 /* Sliders stop where the chosen resolution stops: the center can't exceed
@@ -1141,6 +1188,17 @@ static void set_slider_limits(struct squish_filter *f, obs_properties_t *props, 
 	}
 }
 
+/* Region groups are only shown while the master switch "Keep sharp" is on. */
+static void show_region_groups(obs_properties_t *props, bool visible)
+{
+	char key[64];
+	for (int i = 0; i < ATLAS_MAX_REGIONS; i++) {
+		snprintf(key, sizeof(key), S_ATLAS_REGION_ON, i);
+		plugin_ui_show(props, key, visible);
+	}
+	plugin_ui_show(props, S_ATLAS_BLANK, visible);
+}
+
 static bool cfg_modified(obs_properties_t *props, obs_property_t *p, obs_data_t *s)
 {
 	UNUSED_PARAMETER(p);
@@ -1153,19 +1211,44 @@ static bool cfg_modified(obs_properties_t *props, obs_property_t *p, obs_data_t 
 	obs_property_set_visible(obs_properties_get(props, S_RY), manual && !link);
 	obs_property_set_visible(obs_properties_get(props, S_CY), !link);
 	obs_property_set_visible(obs_properties_get(props, S_PY), !link);
+	const bool atlas_on = obs_data_get_bool(s, S_ATLAS_ON);
+	show_region_groups(props, atlas_on);
 	char info[2048], cfg[256], key[64];
 	describe(f, s, info, sizeof(info), cfg, sizeof(cfg), key, sizeof(key));
 	obs_data_set_string(s, S_CONFIG, cfg);
 	/* Rebuild the view only when its state changes: rebuilding on every
 	 * slider tick detaches the slider being dragged. Live numbers (Exact
 	 * size) refresh on the next state change or when Copy is pressed. */
-	const int vis = (link ? 1 : 0) | (manual ? 2 : 0);
+	const int vis = (link ? 1 : 0) | (manual ? 2 : 0) | (atlas_on ? 4 : 0);
 	if (vis == f->shown_vis && strcmp(key, f->shown_key) == 0)
 		return false;
 	f->shown_vis = vis;
 	snprintf(f->shown_key, sizeof(f->shown_key), "%s", key);
 	obs_property_set_description(obs_properties_get(props, S_INFO), info);
 	set_slider_limits(f, props, s, manual);
+	return true;
+}
+
+/* Quick placement: a 20% corner of the picture. Applies once, then the list goes back to "Pick one". */
+static bool preset_modified(obs_properties_t *props, obs_property_t *p, obs_data_t *s)
+{
+	int i = -1;
+	if (sscanf(obs_property_name(p), "atlas_%d_preset", &i) != 1 || i < 0 || i >= ATLAS_MAX_REGIONS)
+		return false;
+	const long v = (long)obs_data_get_int(s, obs_property_name(p));
+	if (v < 1 || v > 4)
+		return false;
+	char key[64];
+	snprintf(key, sizeof(key), S_ATLAS_X0, i);
+	obs_data_set_double(s, key, (v == 2 || v == 4) ? 80.0 : 0.0);
+	snprintf(key, sizeof(key), S_ATLAS_Y0, i);
+	obs_data_set_double(s, key, (v == 3 || v == 4) ? 80.0 : 0.0);
+	snprintf(key, sizeof(key), S_ATLAS_W, i);
+	obs_data_set_double(s, key, 20.0);
+	snprintf(key, sizeof(key), S_ATLAS_H, i);
+	obs_data_set_double(s, key, 20.0);
+	obs_data_set_int(s, obs_property_name(p), 0);
+	cfg_modified(props, NULL, s);
 	return true;
 }
 
@@ -1312,29 +1395,46 @@ static obs_properties_t *fsq_properties(void *data)
 		obs_property_set_modified_callback(pr, cfg_modified);
 	}
 	obs_properties_add_group(props, "look", T("Look"), OBS_GROUP_NORMAL, look);
-	/* Sharp regions (atlas): rectangles of the source kept at about 1:1 in a side strip. */
+	/* Keep sharp (HUD areas): rectangles of the source kept at about 1:1 in a side strip.
+	 * One master switch, then one switch-group per region; they stay hidden until the master is on. */
 	obs_properties_t *atlas = obs_properties_create();
-	obs_property_t *cnt = obs_properties_add_int_slider(atlas, S_ATLAS_COUNT, "Regions", 0, ATLAS_MAX_REGIONS, 1);
-	obs_property_set_modified_callback(cnt, cfg_modified);
 	obs_properties_add_text(atlas, "atlas_info", T("AtlasInfo"), OBS_TEXT_INFO);
-	static const char *labels[4] = {"Left", "Top", "Right", "Bottom"};
-	static const char *keys[4] = {S_ATLAS_X0, S_ATLAS_Y0, S_ATLAS_X1, S_ATLAS_Y1};
+	pr = obs_properties_add_bool(atlas, S_ATLAS_BLANK, T("AtlasBlank"));
+	obs_property_set_modified_callback(pr, cfg_modified);
+	pr = obs_properties_add_group(props, S_ATLAS_ON, T("Atlas"), OBS_GROUP_CHECKABLE, atlas);
+	obs_property_set_modified_callback(pr, cfg_modified);
+	static const char *field_keys[4] = {S_ATLAS_X0, S_ATLAS_Y0, S_ATLAS_W, S_ATLAS_H};
+	static const char *field_labels[4] = {"AtlasLeft", "AtlasTop", "AtlasWidth", "AtlasHeight"};
 	for (int i = 0; i < ATLAS_MAX_REGIONS; i++) {
 		/* OBS copies names and labels, so these buffers can be local. */
+		char key[64], label[96];
+		obs_properties_t *rg = obs_properties_create();
+		snprintf(key, sizeof(key), S_ATLAS_NAME, i);
+		pr = obs_properties_add_text(rg, key, T("AtlasName"), OBS_TEXT_DEFAULT);
+		snprintf(key, sizeof(key), S_ATLAS_PRESET, i);
+		pr = obs_properties_add_list(rg, key, T("AtlasPreset"), OBS_COMBO_TYPE_LIST, OBS_COMBO_FORMAT_INT);
+		obs_property_list_add_int(pr, T("AtlasPreset.Pick"), 0);
+		obs_property_list_add_int(pr, T("AtlasPreset.TopLeft"), 1);
+		obs_property_list_add_int(pr, T("AtlasPreset.TopRight"), 2);
+		obs_property_list_add_int(pr, T("AtlasPreset.BottomLeft"), 3);
+		obs_property_list_add_int(pr, T("AtlasPreset.BottomRight"), 4);
+		obs_property_set_modified_callback(pr, preset_modified);
 		for (int k = 0; k < 4; k++) {
-			char key[64], name[64];
-			snprintf(key, sizeof(key), keys[k], i);
-			snprintf(name, sizeof(name), "Region %d %s", i + 1, labels[k]);
-			pr = obs_properties_add_float_slider(atlas, key, name, 0.0, 100.0, 0.5);
+			snprintf(key, sizeof(key), field_keys[k], i);
+			pr = obs_properties_add_float_slider(rg, key, T(field_labels[k]), 0.0, k < 2 ? 100.0 : 50.0,
+							     0.5);
+			obs_property_float_set_suffix(pr, " %");
 			obs_property_set_modified_callback(pr, cfg_modified);
 		}
-		char key[64], name[64];
 		snprintf(key, sizeof(key), S_ATLAS_SCALE, i);
-		snprintf(name, sizeof(name), "Region %d scale", i + 1);
-		pr = obs_properties_add_float_slider(atlas, key, name, 50.0, 100.0, 1.0);
+		pr = obs_properties_add_float_slider(rg, key, T("AtlasScale"), 50.0, 100.0, 1.0);
+		obs_property_float_set_suffix(pr, " %");
+		obs_property_set_modified_callback(pr, cfg_modified);
+		snprintf(key, sizeof(key), S_ATLAS_REGION_ON, i);
+		snprintf(label, sizeof(label), T("AtlasRegion"), i + 1);
+		pr = obs_properties_add_group(props, key, label, OBS_GROUP_CHECKABLE, rg);
 		obs_property_set_modified_callback(pr, cfg_modified);
 	}
-	obs_properties_add_group(props, "atlas", "Sharp regions", OBS_GROUP_NORMAL, atlas);
 
 	obs_properties_t *share = obs_properties_create();
 	obs_properties_add_text(share, S_CONFIG, T("Config"), OBS_TEXT_DEFAULT);
@@ -1344,7 +1444,22 @@ static obs_properties_t *fsq_properties(void *data)
 	obs_properties_add_group(props, "share", T("Share"), OBS_GROUP_NORMAL, share);
 
 	plugin_ui_decorate(props);
+	static const char *hint_names[] = {S_ATLAS_NAME, S_ATLAS_PRESET, S_ATLAS_X0, S_ATLAS_Y0,
+					   S_ATLAS_W,    S_ATLAS_H,      S_ATLAS_SCALE};
+	static const char *hint_keys[] = {"Hint.atlas_name", "Hint.atlas_preset", "Hint.atlas_x", "Hint.atlas_y",
+					  "Hint.atlas_w",    "Hint.atlas_h",      "Hint.atlas_scale"};
+	for (int i = 0; i < ATLAS_MAX_REGIONS; i++) {
+		for (size_t k = 0; k < sizeof(hint_names) / sizeof(hint_names[0]); k++) {
+			char key[64];
+			snprintf(key, sizeof(key), hint_names[k], i);
+			obs_property_t *hp = obs_properties_get(props, key);
+			if (!hp) /* inside a group: search the region's group */
+				continue;
+			obs_property_set_long_description(hp, plugin_text(hint_keys[k]));
+		}
+	}
 	obs_data_t *cur = obs_source_get_settings(f->context);
+	show_region_groups(props, obs_data_get_bool(cur, S_ATLAS_ON));
 	plugin_ui_show(props, "view_warning", obs_data_get_int(cur, S_VIEW) != VIEW_SQUISHED);
 	obs_data_release(cur);
 	return props;
@@ -1365,17 +1480,27 @@ static void fsq_defaults(obs_data_t *s)
 	obs_data_set_default_bool(s, S_PREFILTER, true);
 	obs_data_set_default_double(s, S_CLEAN, 50.0);
 	obs_data_set_default_int(s, S_VIEW, VIEW_SQUISHED);
-	obs_data_set_default_int(s, S_ATLAS_COUNT, 0);
+	obs_data_set_default_bool(s, S_ATLAS_ON, false);
+	obs_data_set_default_bool(s, S_ATLAS_BLANK, true);
+	/* Regions start as the four 20% corners (bottom-left, top-right, bottom-right, top-left),
+	 * so switching one on gives a valid, non-overlapping rectangle. */
+	static const double start[ATLAS_MAX_REGIONS][2] = {{0.0, 80.0}, {80.0, 0.0}, {80.0, 80.0}, {0.0, 0.0}};
 	for (int i = 0; i < ATLAS_MAX_REGIONS; i++) {
 		char key[64];
+		snprintf(key, sizeof(key), S_ATLAS_REGION_ON, i);
+		obs_data_set_default_bool(s, key, false);
+		snprintf(key, sizeof(key), S_ATLAS_NAME, i);
+		obs_data_set_default_string(s, key, "");
+		snprintf(key, sizeof(key), S_ATLAS_PRESET, i);
+		obs_data_set_default_int(s, key, 0);
 		snprintf(key, sizeof(key), S_ATLAS_X0, i);
-		obs_data_set_default_double(s, key, 0.0);
+		obs_data_set_default_double(s, key, start[i][0]);
 		snprintf(key, sizeof(key), S_ATLAS_Y0, i);
-		obs_data_set_default_double(s, key, 0.0);
-		snprintf(key, sizeof(key), S_ATLAS_X1, i);
+		obs_data_set_default_double(s, key, start[i][1]);
+		snprintf(key, sizeof(key), S_ATLAS_W, i);
 		obs_data_set_default_double(s, key, 20.0);
-		snprintf(key, sizeof(key), S_ATLAS_Y1, i);
-		obs_data_set_default_double(s, key, 40.0);
+		snprintf(key, sizeof(key), S_ATLAS_H, i);
+		obs_data_set_default_double(s, key, 20.0);
 		snprintf(key, sizeof(key), S_ATLAS_SCALE, i);
 		obs_data_set_default_double(s, key, 100.0);
 	}

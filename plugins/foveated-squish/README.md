@@ -65,7 +65,20 @@ Up to four rectangles of the source (a minimap, a webcam, a crosshair area) can 
 - Specification: `docs/atlas-spec.md`. Python reference and golden vectors: `research/foveation/atlas_math.py`, `atlas_golden.json`. Measurements: `research/foveation/atlas_measurements.md`.
 - Tests: `tests/run-tests.sh` runs the C layout test against the golden vectors, and `viewer/unsquish-extension/tests/atlas.js` runs the viewer's layout.
 
-Status: the streamer's OBS filter does not render the atlas yet (issue #6), and its settings page has no region controls yet (issue #7). Only the viewer side and the reference math are built.
+Settings (group **Keep sharp (HUD areas)**, off by default; with it off nothing changes, same frame size and same config string):
+
+| Setting | What it does |
+|---|---|
+| Master switch (group checkbox) | Turns the feature on. Region groups appear below it. |
+| Hide the duplicate in the squeezed picture | Paints the region's spot in the squeezed picture flat so it costs almost no bits. On by default. Viewers without the extension see a flat patch there. |
+| Region 1-4 (group checkbox) | Switches one region on. |
+| Name | Label for the info text only; never streamed. |
+| Quick placement | Fills in a 20% corner (top-left, top-right, bottom-left, bottom-right). |
+| Left / Top / Width / Height | The rectangle in % of the game picture. Width and height 2-50%. Left + width and top + height must stay inside 100%; a region outside the picture is reported, not moved. |
+| Size in the strip | 50-100%. The filter lowers it automatically when the regions do not fit, never below the density floor. |
+
+The info text lists every region as streamed: full size, scaled, or "does not fit at X%, shown at Y% (lowest allowed Z%)". Use **View > Squeezed zone** to check placement, **View > Unsquished preview** to see what extension viewers get. The strip is on the right only (80% of the stream width is the squished picture); a bottom strip is not built.
+
 
 ## Motion gate and chat signal (experimental)
 
