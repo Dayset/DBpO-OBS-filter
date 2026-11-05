@@ -20,7 +20,8 @@ from atlas_math import Atlas, layout, set_source  # noqa: E402
 W, H, N = 320, 180, 12          # input frame size and count (same as smoke-test.sh)
 SQUISH = "FSQ1:rx=0.75,ry=0.75,cx=0.3,cy=0.3,fx=0.5,fy=0.5,px=1,py=1,ar={ar:.4f},ox=0,oy=0,bw=0.8,bh=1"
 REGION = "gx=0.800,gy=0.850,gz=1.000,gv=1.000,gs=1.000"
-SETTINGS = "atlas_count=1 atlas_0_x0=80 atlas_0_y0=85 atlas_0_x1=100 atlas_0_y1=100 atlas_0_scale=100"
+# Values need a decimal point: the harness stores plain numbers as ints and the filter reads doubles.
+SETTINGS = "atlas_count=1 atlas_0_x0=80.0 atlas_0_y0=85.0 atlas_0_x1=100.0 atlas_0_y1=100.0 atlas_0_scale=100.0"
 GREY, RED = (128, 128, 128), (255, 0, 0)
 GUTTER = 4                      # ATLAS_GUTTER in atlas-math.h
 TOL = 2                         # pixels of slack on the slot edges
