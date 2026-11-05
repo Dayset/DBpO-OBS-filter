@@ -208,6 +208,19 @@ float4 PSAtlas(VertData v_in) : TARGET
 	return image.SampleLevel(linearClamp, uv, 0.0);
 }
 
+// Mean: average colour of the atlas rectangle (8x8 taps), for the blank duplicate.
+float4 PSMean(VertData v_in) : TARGET
+{
+	float4 sum = float4(0.0, 0.0, 0.0, 0.0);
+	for (int j = 0; j < 8; j++) {
+		for (int i = 0; i < 8; i++) {
+			float2 t = (float2(i, j) + 0.5) / 8.0;
+			sum += image.SampleLevel(linearClamp, lerp(atlas_uv0, atlas_uv1, t), 0.0);
+		}
+	}
+	return sum / 64.0;
+}
+
 // ---------------------------------------------------------------- viewer look
 // Details, after NVIDIA Freestyle (details.yfx as ported to ReShade): one
 // Gaussian (15 linear-sampled steps per side, taps 2i - 0.5 apart) feeds
@@ -368,5 +381,14 @@ technique Atlas
 	{
 		vertex_shader = VSDefault(v_in);
 		pixel_shader  = PSAtlas(v_in);
+	}
+}
+
+technique Mean
+{
+	pass
+	{
+		vertex_shader = VSDefault(v_in);
+		pixel_shader  = PSMean(v_in);
 	}
 }

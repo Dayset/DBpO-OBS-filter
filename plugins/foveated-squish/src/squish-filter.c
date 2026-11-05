@@ -137,6 +137,7 @@ struct squish_filter {
 	gs_texrender_t *look_out2; /* look: Sharpen+ result */
 	gs_texrender_t *display;
 	gs_texrender_t *composed; /* streamed frame: picture + atlas strip */
+	gs_texrender_t *mean;     /* 1x1: average colour of one region */
 	bool needs_update;
 	bool output_valid;
 
@@ -418,6 +419,7 @@ static void *fsq_create(obs_data_t *settings, obs_source_t *context)
 	f->look_out = gs_texrender_create(GS_RGBA, GS_ZS_NONE);
 	f->look_out2 = gs_texrender_create(GS_RGBA, GS_ZS_NONE);
 	f->composed = gs_texrender_create(GS_RGBA, GS_ZS_NONE);
+	f->mean = gs_texrender_create(GS_RGBA, GS_ZS_NONE);
 	obs_leave_graphics();
 	bfree(path);
 
@@ -432,6 +434,7 @@ static void *fsq_create(obs_data_t *settings, obs_source_t *context)
 		gs_texrender_destroy(f->look_out);
 		gs_texrender_destroy(f->look_out2);
 		gs_texrender_destroy(f->composed);
+		gs_texrender_destroy(f->mean);
 		obs_leave_graphics();
 		bfree(f);
 		return NULL;
@@ -453,6 +456,7 @@ static void fsq_destroy(void *data)
 	gs_texrender_destroy(f->look_out);
 	gs_texrender_destroy(f->look_out2);
 	gs_texrender_destroy(f->composed);
+	gs_texrender_destroy(f->mean);
 	gs_effect_destroy(f->effect);
 	obs_leave_graphics();
 	bfree(f);
@@ -704,6 +708,56 @@ static bool paste_regions(struct squish_filter *f, const struct layout *L, uint3
 	return true;
 }
 
+/* Blank duplicate: the region also sits in the squished picture, where it costs
+ * bits twice. Paint its footprint there with the region's average colour, so the
+ * encoder spends almost nothing on it. The sharp copy in the strip is unchanged. */
+static void blank_duplicates(struct squish_filter *f, const struct layout *L, gs_texture_t *raw,
+			     gs_texrender_t *picture)
+{
+	gs_effect_t *e = f->effect;
+	for (int i = 0; i < L->nslots; i++) {
+		const struct atlas_region *r = &f->regions[i];
+		const float uv[4] = {(float)r->x0, (float)r->y0, (float)r->x1, (float)r->y1};
+
+		/* Average colour of the region: 8x8 taps into a 1x1 target. */
+		gs_texrender_reset(f->mean);
+		if (!gs_texrender_begin(f->mean, 1, 1))
+			continue;
+		struct vec4 clear;
+		vec4_zero(&clear);
+		gs_clear(GS_CLEAR_COLOR, &clear, 0.0f, 0);
+		gs_ortho(0.0f, 1.0f, 0.0f, 1.0f, -100.0f, 100.0f);
+		gs_effect_set_texture(gs_effect_get_param_by_name(e, "image"), raw);
+		struct vec2 v;
+		vec2_set(&v, uv[0], uv[1]);
+		gs_effect_set_vec2(gs_effect_get_param_by_name(e, "atlas_uv0"), &v);
+		vec2_set(&v, uv[2], uv[3]);
+		gs_effect_set_vec2(gs_effect_get_param_by_name(e, "atlas_uv1"), &v);
+		while (gs_effect_loop(e, "Mean"))
+			gs_draw_sprite(NULL, 0, 1, 1);
+		gs_texrender_end(f->mean);
+		gs_texture_t *mean = gs_texrender_get_texture(f->mean);
+
+		/* Footprint of the region in the squished picture (picture pixels). */
+		const int x0 = (int)floor(squish_forward(&L->c.x, r->x0) * L->ow);
+		const int x1 = (int)ceil(squish_forward(&L->c.x, r->x1) * L->ow);
+		const int y0 = (int)floor(squish_forward(&L->c.y, r->y0) * L->oh);
+		const int y1 = (int)ceil(squish_forward(&L->c.y, r->y1) * L->oh);
+		const int fx0 = x0 < 0 ? 0 : x0, fy0 = y0 < 0 ? 0 : y0;
+		const int fx1 = x1 > (int)L->ow ? (int)L->ow : x1, fy1 = y1 > (int)L->oh ? (int)L->oh : y1;
+		if (fx1 <= fx0 || fy1 <= fy0)
+			continue;
+
+		if (!gs_texrender_begin(picture, L->ow, L->oh))
+			continue;
+		gs_ortho(0.0f, (float)L->ow, 0.0f, (float)L->oh, -100.0f, 100.0f);
+		const float full[4] = {0.0f, 0.0f, 1.0f, 1.0f};
+		atlas_quad(e, mean, full, (float)(fx1 - fx0), (float)(fy1 - fy0), (float)(fx1 - fx0),
+			   (float)(fy1 - fy0), 0.0f, (float)fx0, (float)fy0);
+		gs_texrender_end(picture);
+	}
+}
+
 static void fsq_render(void *data, gs_effect_t *unused)
 {
 	UNUSED_PARAMETER(unused);
@@ -741,6 +795,7 @@ static void fsq_render(void *data, gs_effect_t *unused)
 				f->display = f->squished;
 				f->output_valid = true;
 				if (L.nslots > 0) {
+					blank_duplicates(f, &L, raw, f->squished);
 					/* Sharp regions: every view shows the streamed frame (picture + strip). */
 					f->output_valid = compose_atlas(f, &L, raw, sq);
 					f->display = f->composed;
