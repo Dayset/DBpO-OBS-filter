@@ -98,6 +98,7 @@ EOF
 		if env OBS_HEADLESS_CANVAS="$canvas" DISPLAY="$display" timeout 300 "$work/obs-headless" "$so" "$data" "$id" "$W" "$H" \
 			"${place_args[@]}" <"$work/pin.rgba" >"$work/pout.rgba" 2>"$work/plog.txt"; then
 			# The output is the canvas the check asked for (the log's "output" line is the input size).
+			grep 'obs-headless:' "$work/plog.txt" | sed 's/^/\tlog: /' || true
 			if result="$(python3 "$dir/tests/placement.py" check "$work/pout.rgba" "$canvas")"; then
 				echo "$name / $id placement:"; echo "$result" | sed 's/^/\t/'
 			else
