@@ -55,6 +55,26 @@ def check(path, size):
     expect("picture bottom-right shows the bottom-right region", close(frame[oh - 8, pw - 8], RED))
 
     failed = [name for name, ok in results if not ok]
+    if failed:  # diagnostics: where the colours really are
+        def runs(rows):
+            out, start, prev = [], None, None
+            for r in rows:
+                if start is None:
+                    start = prev = r
+                elif r == prev + 1:
+                    prev = r
+                else:
+                    out.append((start, prev)); start = prev = r
+            if start is not None:
+                out.append((start, prev))
+            return out
+        print(f"diag frame {ow}x{oh} picture width {pw}")
+        print(f"diag red rows in strip column {col}: {runs(red)}")
+        print(f"diag green rows in strip column {col}: {runs(green)}")
+        for r, c in [(4, 4), (oh // 2, 4), (oh - 8, 4), (4, pw - 8), (oh - 8, pw - 8), (oh // 2, pw // 2)]:
+            print(f"diag picture px row {r} col {c}: {frame[r, c, :3].tolist()}")
+        for r, c in [(4, pw + 2), (4, pw + 20), (oh - 8, pw + 20), (oh - 8, ow - 4)]:
+            print(f"diag strip px row {r} col {c}: {frame[r, c, :3].tolist()}")
     for name, ok in results:
         print(("ok   " if ok else "FAIL ") + name)
     if failed:
