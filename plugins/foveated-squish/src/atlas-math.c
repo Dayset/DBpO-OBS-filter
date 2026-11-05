@@ -81,19 +81,15 @@ static bool shelf(const struct atlas *a, int sx, int sy, int sw, int sh, double 
 		if (h < ATLAS_SNAP)
 			h = ATLAS_SNAP;
 		int cw = w + 2 * ATLAS_GUTTER, ch = h + 2 * ATLAS_GUTTER;
-		if (cw > sw || ch > sh) {
-			fprintf(stderr, "obs-headless: atlas shelf too big region %d s=%.3f fl=%.3f cw=%d ch=%d sw=%d sh=%d\n", i, s, fl, cw, ch, sw, sh);
+		if (cw > sw || ch > sh)
 			return false;
-		}
 		if (cx + cw > sx + sw) { /* new row */
 			cx = sx;
 			cy += row_h;
 			row_h = 0;
 		}
-		if (cy + ch > sy + sh) {
-			fprintf(stderr, "obs-headless: atlas shelf no room region %d s=%.3f cx=%d cy=%d cw=%d ch=%d\n", i, s, cx, cy, cw, ch);
+		if (cy + ch > sy + sh)
 			return false;
-		}
 		slots[i] = (struct atlas_slot){cx + ATLAS_GUTTER, cy + ATLAS_GUTTER, w, h, s};
 		cx += cw;
 		if (ch > row_h)
@@ -129,9 +125,7 @@ bool atlas_layout(const struct atlas *a, int out_w, int out_h, int src_w, int sr
 			return true;
 		factor *= 0.95;
 		for (int i = 0; i < a->count; i++)
-			if (factor * a->regions[i].s < atlas_region_floor(a, &a->regions[i])) {
-				fprintf(stderr, "obs-headless: atlas floor region %d factor=%.3f s=%.3f floor=%.3f\n", i, factor, a->regions[i].s, atlas_region_floor(a, &a->regions[i]));
+			if (factor * a->regions[i].s < atlas_region_floor(a, &a->regions[i]))
 				return false;
-			}
 	}
 }

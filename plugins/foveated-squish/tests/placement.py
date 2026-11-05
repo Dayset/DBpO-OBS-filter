@@ -19,7 +19,7 @@ import numpy as np
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", "..", "research", "foveation"))
 from atlas_math import Atlas, layout, set_source  # noqa: E402
 
-W, H, N = 320, 180, 12          # input frame size and count (same as smoke-test.sh)
+N = 2                           # frames (the check reads the first)
 CANVAS = (1920, 1080)           # output size the check needs: HUD (0.9) + minimap fit here (native source size)
 SOURCE = (1920, 1080)           # the source the region coordinates refer to
 SQUISH = "FSQ1:rx=0.75,ry=0.75,cx=0.3,cy=0.3,fx=0.5,fy=0.5,px=0.5,py=0.5,ar={ar:.4f},ox=0,oy=0,bw=0.8,bh=1"
@@ -75,6 +75,8 @@ def close(px, colour):
 
 
 def make():
+    # The input is the canvas size: a real source is the canvas size, and a smaller input would be upscaled.
+    W, H = CANVAS
     img = np.zeros((H, W, 4), np.uint8)
     img[..., :3] = GREY
     img[..., 3] = 255
