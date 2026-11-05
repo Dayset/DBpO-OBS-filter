@@ -32,6 +32,15 @@ with this program. If not, see <https://www.gnu.org/licenses/>
 /* Width of the squished picture when sharp regions are on; the strip uses the rest. */
 #define ATLAS_BOX_W 0.8
 
+/* Why sharp regions are or are not streamed (shown in the settings info). */
+enum atlas_state {
+	ATLAS_OK = 0,
+	ATLAS_NOFIT,   /* do not fit the strip above their density floor */
+	ATLAS_OVERLAP, /* two regions share pixels */
+	ATLAS_SIZE,    /* outside the source, or too small / large */
+	ATLAS_CUSTOM,  /* Custom squeeze has no strip */
+};
+
 #ifdef _WIN32
 #define WIN32_LEAN_AND_MEAN
 #include <windows.h>
@@ -95,6 +104,7 @@ struct layout {
 	enum fit_result fit;
 	struct atlas_slot slots[ATLAS_MAX_REGIONS]; /* sharp regions in the strip */
 	int nslots;
+	enum atlas_state atlas_state;
 };
 
 /* Stream resolution list: 0 = match the canvas, 1 = custom squeeze, else a
@@ -264,9 +274,26 @@ static int read_regions(obs_data_t *s, struct atlas_region *out);
 /* Sharp regions: the picture shrinks into a box on the left (ATLAS_BOX_W of the
  * stream width); the regions are packed into the strip on the right. L is left
  * unchanged when they do not fit (the regions are then not streamed). */
+static enum atlas_state atlas_check(const struct atlas_region *r, int n)
+{
+	for (int i = 0; i < n; i++) {
+		const double w = r[i].x1 - r[i].x0, h = r[i].y1 - r[i].y0;
+		if (r[i].x0 < 0.0 || r[i].y0 < 0.0 || r[i].x1 > 1.0 || r[i].y1 > 1.0 || w < ATLAS_REGION_MIN ||
+		    h < ATLAS_REGION_MIN || w > ATLAS_REGION_MAX || h > ATLAS_REGION_MAX)
+			return ATLAS_SIZE;
+		for (int k = i + 1; k < n; k++)
+			if (r[i].x0 < r[k].x1 && r[k].x0 < r[i].x1 && r[i].y0 < r[k].y1 && r[k].y0 < r[i].y1)
+				return ATLAS_OVERLAP;
+	}
+	return ATLAS_OK;
+}
+
 static void atlas_place(const struct squish_filter *f, uint32_t w, uint32_t h, struct layout *L,
 			struct squish_config *c)
 {
+	L->atlas_state = atlas_check(f->regions, f->nregions);
+	if (L->atlas_state != ATLAS_OK)
+		return;
 	struct atlas a;
 	memset(&a, 0, sizeof(a));
 	a.squish = *c;
@@ -277,8 +304,10 @@ static void atlas_place(const struct squish_filter *f, uint32_t w, uint32_t h, s
 	a.squish.bh = 1.0;
 	a.count = f->nregions;
 	memcpy(a.regions, f->regions, sizeof(a.regions));
-	if (!atlas_layout(&a, (int)L->tw, (int)L->th, (int)w, (int)h, L->slots))
+	if (!atlas_layout(&a, (int)L->tw, (int)L->th, (int)w, (int)h, L->slots)) {
+		L->atlas_state = ATLAS_NOFIT;
 		return;
+	}
 	const uint32_t pw = ((uint32_t)lround(ATLAS_BOX_W * L->tw)) & ~1u;
 	L->nslots = a.count;
 	L->ow = pw;
@@ -333,8 +362,12 @@ static void compute_layout(const struct squish_filter *f, uint32_t w, uint32_t h
 	c.y.r = (double)L->oh / h;
 	c.ar = (double)w / h;
 	c.boxed = false;
-	if (f->nregions > 0 && f->layout == LAYOUT_FILL)
-		atlas_place(f, w, h, L, &c);
+	if (f->nregions > 0) {
+		if (f->layout == LAYOUT_FILL)
+			atlas_place(f, w, h, L, &c);
+		else
+			L->atlas_state = ATLAS_CUSTOM;
+	}
 	L->c = c;
 }
 
@@ -845,7 +878,7 @@ static void describe(struct squish_filter *f, obs_data_t *s, char *info, size_t 
 		squish_config_format(&L.c, cfg, cfg_size);
 	struct atlas_region regions[ATLAS_MAX_REGIONS];
 	const int nregions = read_regions(s, regions);
-	if (cfg && nregions > 0)
+	if (cfg && nregions > 0 && L.atlas_state == ATLAS_OK)
 		append_regions(cfg, cfg_size, regions, nregions);
 
 	char note[160] = "";
@@ -889,6 +922,29 @@ static void describe(struct squish_filter *f, obs_data_t *s, char *info, size_t 
 			 100.0 * lo, 100.0 * hi, L.ow, L.oh, note);
 		break;
 	}
+	}
+	/* Sharp regions: say why they are not streamed, if they are not. */
+	const char *msg = NULL;
+	switch (L.atlas_state) {
+	case ATLAS_NOFIT:
+		msg = T("AtlasNoFit");
+		break;
+	case ATLAS_OVERLAP:
+		msg = T("AtlasOverlap");
+		break;
+	case ATLAS_SIZE:
+		msg = T("AtlasSize");
+		break;
+	case ATLAS_CUSTOM:
+		msg = T("AtlasCustom");
+		break;
+	default:
+		break;
+	}
+	if (msg) {
+		const size_t n = strlen(info);
+		if (n < info_size)
+			snprintf(info + n, info_size - n, "\n\n%s", msg);
 	}
 }
 
@@ -1111,10 +1167,7 @@ static obs_properties_t *fsq_properties(void *data)
 	obs_properties_t *atlas = obs_properties_create();
 	obs_property_t *cnt = obs_properties_add_int_slider(atlas, S_ATLAS_COUNT, "Regions", 0, ATLAS_MAX_REGIONS, 1);
 	obs_property_set_modified_callback(cnt, cfg_modified);
-	obs_properties_add_text(
-		atlas, "atlas_info",
-		"Sharp regions are placed in a strip beside the squished picture (standard output size only).",
-		OBS_TEXT_INFO);
+	obs_properties_add_text(atlas, "atlas_info", T("AtlasInfo"), OBS_TEXT_INFO);
 	static const char *labels[4] = {"Left", "Top", "Right", "Bottom"};
 	static const char *keys[4] = {S_ATLAS_X0, S_ATLAS_Y0, S_ATLAS_X1, S_ATLAS_Y1};
 	for (int i = 0; i < ATLAS_MAX_REGIONS; i++) {
