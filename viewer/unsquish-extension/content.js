@@ -45,6 +45,8 @@ void main() { v_uv = a_pos * 0.5 + 0.5; gl_Position = vec4(a_pos, 0.0, 1.0); }`;
 
 	function activeConfig() {
 		if (!settings.enabled) return null;
+		// Chat signal from the streamer (chatsignal.js): "off" means show the picture as sent.
+		if (document.documentElement.dataset.dbpoFsq === "off") return null;
 		return FSQ.parse(settings.config) || (settings.autoDetect ? detected : null);
 	}
 
