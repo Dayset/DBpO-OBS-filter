@@ -1099,7 +1099,7 @@ static obs_properties_t *fsq_properties(void *data)
 		obs_properties_add_list(props, S_TARGET, T("Target"), OBS_COMBO_TYPE_LIST, OBS_COMBO_FORMAT_INT);
 	obs_property_list_add_int(tgt, T("Target.Canvas"), TARGET_CANVAS);
 	obs_property_list_add_int(tgt, "1920x1080 (1080p)", 1080);
-	obs_property_list_add_int(tgt, "1664x936 (16:9)", 936);
+	obs_property_list_add_int(tgt, "1664x936 (recommended)", 936);
 	obs_property_list_add_int(tgt, "1280x720 (720p)", 720);
 	obs_property_list_add_int(tgt, "854x480 (480p)", 480);
 	obs_property_list_add_int(tgt, "640x360 (360p)", 360);
@@ -1211,8 +1211,8 @@ static void fsq_defaults(obs_data_t *s)
 	obs_data_set_default_double(s, S_CY, 30.0);
 	obs_data_set_default_double(s, S_FX, 50.0);
 	obs_data_set_default_double(s, S_FY, 50.0);
-	obs_data_set_default_double(s, S_PX, 1.0);
-	obs_data_set_default_double(s, S_PY, 1.0);
+	obs_data_set_default_double(s, S_PX, 0.5);
+	obs_data_set_default_double(s, S_PY, 0.5);
 	obs_data_set_default_bool(s, S_PREFILTER, true);
 	obs_data_set_default_double(s, S_CLEAN, 50.0);
 	obs_data_set_default_int(s, S_VIEW, VIEW_SQUISHED);
