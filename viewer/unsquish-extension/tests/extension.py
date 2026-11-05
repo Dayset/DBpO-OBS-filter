@@ -76,6 +76,10 @@ with sync_playwright() as p:
     if has(): fails.append("overlay on a plain video with the option off")
     pop.bring_to_front(); pop.check("#plainVideos"); pop.wait_for_timeout(200); pop.close()
     page.bring_to_front(); page.wait_for_timeout(800)
+    try:
+        page.wait_for_function("document.documentElement.dataset.dbpoUnsquish === 'plain'", timeout=6000)  # slow CI machines
+    except Exception:
+        pass
     tag = page.evaluate("document.documentElement.dataset.dbpoUnsquish")
     print("plain video with my look, overlay:", has(), "tag:", tag)
     if not has() or tag != "plain": fails.append("look not on the plain video")
