@@ -97,7 +97,77 @@
 			if (!(derive(a).dmin > 0.001)) return null;
 		}
 		if (!(cfg.ar > 0)) return null;
+		cfg.regions = parseRegions(m[1]);
+		if (!cfg.regions) return null;
 		return cfg;
+	}
+
+	/* Sharp regions (atlas): keys g|h|i|j + x|y|z|v|s, see plugins/foveated-squish/docs/atlas-spec.md. */
+	function parseRegions(body) {
+		const out = [];
+		for (let i = 0; i < 4; i++) {
+			const p = "ghij"[i];
+			const get = (f) => {
+				const mm = new RegExp("(?:^|,)" + p + f + "=([-0-9.eE]+)").exec(body);
+				return mm ? Number(mm[1]) : null;
+			};
+			const v = ["x", "y", "z", "v", "s"].map(get);
+			if (v.every((n) => n === null)) break;
+			if (v.some((n) => n === null || !Number.isFinite(n))) return null;
+			const [x0, y0, x1, y1, sc] = v;
+			if (!(x0 >= 0 && y0 >= 0 && x1 <= 1 && y1 <= 1 && x0 < x1 && y0 < y1 && sc > 0 && sc <= 1)) return null;
+			out.push({ x0, y0, x1, y1, s: sc });
+		}
+		if (out.length && !/(^|,)[ghij]x=/.test(body)) return null;
+		return out;
+	}
+
+	/*
+	 * Atlas layout (same packing as research/foveation/atlas_math.py, spec section 3).
+	 * Returns slots in stream pixels: { x, y, w, h } of each region's slot (after the
+	 * 4 px gutter), or null if the regions do not fit above the density floor.
+	 * Slot size depends only on the output size, since the source size cancels.
+	 */
+	function atlasLayout(cfg, outW, outH) {
+		if (!cfg.regions || !cfg.regions.length) return [];
+		if (!(outW > 0 && outH > 0)) return null;
+		const GUTTER = 4, SNAP = 8;
+		const [ox, oy, bw, bh] = cfg.box;
+		if (!(bw < 1) === !(bh < 1)) return null; // exactly one axis must be boxed
+		const pw = Math.round(bw * outW) & ~1, ph = Math.round(bh * outH) & ~1;
+		let sx, sy, sw, sh;
+		if (bw < 1) { sx = pw; sy = 0; sw = outW - pw; sh = outH; }
+		else { sx = 0; sy = ph; sw = outW; sh = outH - ph; }
+		const floorOf = (r) => {
+			const dx = density(cfg.x, (r.x0 + r.x1) / 2), dy = density(cfg.y, (r.y0 + r.y1) / 2);
+			return Math.max((dx + 1) / 2, (dy + 1) / 2);
+		};
+		const shelf = (factor) => {
+			let cx = sx, cy = sy, rowH = 0;
+			const slots = [];
+			for (const r of cfg.regions) {
+				let s = Math.max(Math.min(r.s * factor, 1), floorOf(r));
+				let w = Math.floor((r.x1 - r.x0) * outW * s);
+				let h = Math.floor((r.y1 - r.y0) * outH * s);
+				w = Math.max(SNAP, Math.ceil(w / SNAP) * SNAP);
+				h = Math.max(SNAP, Math.ceil(h / SNAP) * SNAP);
+				const cw = w + 2 * GUTTER, ch = h + 2 * GUTTER;
+				if (cw > sw || ch > sh) return null;
+				if (cx + cw > sx + sw) { cx = sx; cy += rowH; rowH = 0; }
+				if (cy + ch > sy + sh) return null;
+				slots.push({ x: cx + GUTTER, y: cy + GUTTER, w, h });
+				cx += cw;
+				rowH = Math.max(rowH, ch);
+			}
+			return slots;
+		};
+		let factor = 1;
+		for (;;) {
+			const slots = shelf(factor);
+			if (slots) return slots;
+			factor *= 0.95;
+			if (cfg.regions.some((r) => factor * r.s < floorOf(r))) return null;
+		}
 	}
 
 	const NO_LOOK = Object.freeze({ sharpen: 0, clarity: 0, hdr: 0, bloom: 0, sharpenPlus: 0 });
@@ -132,6 +202,9 @@ uniform vec4 u_ax_a; uniform vec4 u_ax_b;
 uniform vec4 u_ay_a; uniform vec4 u_ay_b;
 uniform vec4 u_box;   // squished picture rectangle in the video frame (x, y, w, h)
 uniform vec2 u_texel; // 1 / video size
+uniform int u_nrgn;
+uniform vec4 u_rgn[4];  // sharp region in view uv: x0, y0, x1, y1
+uniform vec4 u_slot[4]; // its slot in the video frame uv: x, y, w, h
 varying vec2 v_uv;
 float periph(float t, float len, float k, float p) { return len * (t - k * pow(t, p + 1.0)); }
 float sq_forward(float x, vec4 A, vec4 B) {
@@ -143,6 +216,17 @@ float sq_forward(float x, vec4 A, vec4 B) {
 	return u / B.z;
 }
 void main() {
+	for (int i = 0; i < 4; i++) {
+		if (i >= u_nrgn) break;
+		vec4 r = u_rgn[i];
+		if (v_uv.x >= r.x && v_uv.x <= r.z && v_uv.y >= r.y && v_uv.y <= r.w) {
+			// Sharp region: read it from its slot, at full detail, instead of the squished picture.
+			vec2 t = (v_uv - r.xy) / max(r.zw - r.xy, vec2(1e-6));
+			vec4 sl = u_slot[i];
+			gl_FragColor = texture2D(u_video, sl.xy + t * sl.zw);
+			return;
+		}
+	}
 	vec2 u = vec2(sq_forward(v_uv.x, u_ax_a, u_ax_b), sq_forward(v_uv.y, u_ay_a, u_ay_b));
 	u = u_box.xy + u * u_box.zw;
 	// Stay half a pixel inside the picture so bilinear filtering never pulls in the bars.
@@ -239,7 +323,7 @@ void main() {
 }`;
 
 	const api = {
-		MIN_DENSITY, derive, forward, density, inverse, parse, uniforms, FRAGMENT_SHADER,
+		MIN_DENSITY, derive, forward, density, inverse, parse, uniforms, FRAGMENT_SHADER, atlasLayout,
 		NO_LOOK, lookActive, cleanLook, identity, LOOK_BLUR_SHADER, LOOK_DETAILS_SHADER, LOOK_CAS_SHADER,
 	};
 	if (typeof module !== "undefined" && module.exports) module.exports = api;

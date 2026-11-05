@@ -236,7 +236,7 @@ void main() { v_uv = a_pos * 0.5 + 0.5; gl_Position = vec4(a_pos, 0.0, 1.0); }`;
 		gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
 		gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
 		const loc = {};
-		for (const n of ["u_video", "u_ax_a", "u_ax_b", "u_ay_a", "u_ay_b", "u_box", "u_texel"]) loc[n] = gl.getUniformLocation(prog, n);
+		for (const n of ["u_video", "u_ax_a", "u_ax_b", "u_ay_a", "u_ay_b", "u_box", "u_texel", "u_nrgn", "u_rgn", "u_slot"]) loc[n] = gl.getUniformLocation(prog, n);
 		const parent = video.parentElement;
 		if (getComputedStyle(parent).position === "static") parent.style.position = "relative";
 		video.insertAdjacentElement("afterend", canvas);
@@ -323,6 +323,20 @@ void main() { v_uv = a_pos * 0.5 + 0.5; gl_Position = vec4(a_pos, 0.0, 1.0); }`;
 				gl.uniform4fv(loc.u_ay_b, uy.B);
 				gl.uniform4fv(loc.u_box, cfg.box);
 				gl.uniform2f(loc.u_texel, 1 / Math.max(video.videoWidth, 1), 1 / Math.max(video.videoHeight, 1));
+				// Sharp regions (atlas): paste each one from its slot in the frame.
+				{
+					const vw = Math.max(video.videoWidth, 1), vh = Math.max(video.videoHeight, 1);
+					const slots = cfg.regions && cfg.regions.length ? FSQ.atlasLayout(cfg, vw, vh) || [] : [];
+					const rgn = new Float32Array(16), slot = new Float32Array(16);
+					slots.forEach((sl, i) => {
+						const r = cfg.regions[i];
+						rgn.set([r.x0, r.y0, r.x1, r.y1], i * 4);
+						slot.set([sl.x / vw, sl.y / vh, sl.w / vw, sl.h / vh], i * 4);
+					});
+					gl.uniform1i(loc.u_nrgn, slots.length);
+					gl.uniform4fv(loc.u_rgn, rgn);
+					gl.uniform4fv(loc.u_slot, slot);
+				}
 				let lookOn = FSQ.lookActive(look) && !state.lookFailed;
 				if (lookOn) {
 					try {
