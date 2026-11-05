@@ -67,6 +67,7 @@ def check(path, size):
     frame = np.fromfile(path, np.uint8)[: ow * oh * 4].reshape(oh, ow, 4)
     pw = round(0.8 * ow) & ~1
     results = []
+    print(f"diag output {ow}x{oh}, strip starts at x {pw}, file {frame.shape}")
 
     def expect(name, ok):
         results.append((name, bool(ok)))
@@ -75,12 +76,17 @@ def check(path, size):
         strip = frame[:, pw:, :3].astype(int)
         ys, xs = np.nonzero(np.all(np.abs(strip - np.array(colour)) <= 60, axis=2))
         xs = xs + pw
+        print(f"diag {name}: {len(ys)} pixels of this colour in the strip"
+              + (f", x {xs.min()}..{xs.max()}, y {ys.min()}..{ys.max()}" if len(ys) else ""))
         if len(ys) == 0:
             expect(f"{name}: found in the strip", False)
             continue
         # Only count pixels near this slot: the reference says where it is.
         gx0, gy0, gx1, gy1 = x - GUTTER, y - GUTTER, x + w - 1 + GUTTER, y + h - 1 + GUTTER
         near = (xs >= gx0 - TOL) & (xs <= gx1 + TOL) & (ys >= gy0 - TOL) & (ys <= gy1 + TOL)
+        if not near.any():
+            expect(f"{name}: colour found near the reference slot", False)
+            continue
         bx0, bx1, by0, by1 = xs[near].min(), xs[near].max(), ys[near].min(), ys[near].max()
         ring = (gx1 - gx0 + 1) * (gy1 - gy0 + 1)
         print(f"diag {name}: expected slot+gutter x {gx0}..{gx1}, y {gy0}..{gy1}; "
