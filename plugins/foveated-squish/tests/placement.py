@@ -1,7 +1,7 @@
 """Placement check for sharp regions (atlas), run by smoke-test.sh.
 
 A known input goes through the real filter. Each region has its own colour
-(a corner HUD in red, a square webcam in green, on grey). The Python reference
+(a corner HUD in red, the minimap in green, on grey). The Python reference
 (research/foveation/atlas_math.py) gives each slot in the streamed frame; the
 output must show each colour in its slot, with its gutter repeating the slot
 edge and nothing else in the strip.
@@ -20,13 +20,24 @@ sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), ".."
 from atlas_math import Atlas, layout, set_source  # noqa: E402
 
 W, H, N = 320, 180, 12          # input frame size and count (same as smoke-test.sh)
-CANVAS = (640, 360)             # two regions fit this canvas with the default squish
+CANVAS = (1664, 936)            # output size the check needs: HUD + minimap fit here with the default squish
+SOURCE = (1920, 1080)           # the source the region coordinates refer to
 SQUISH = "FSQ1:rx=0.75,ry=0.75,cx=0.3,cy=0.3,fx=0.5,fy=0.5,px=0.5,py=0.5,ar={ar:.4f},ox=0,oy=0,bw=0.8,bh=1"
-# (name, colour, region in percent of the source: x0 y0 x1 y1, scale in percent, python key)
+
+
+def pct(px, py, pw, ph):
+    """Source pixel rect (x, y, w, h) as the percentages the filter's settings use."""
+    return (100.0 * px / SOURCE[0], 100.0 * py / SOURCE[1],
+            100.0 * (px + pw) / SOURCE[0], 100.0 * (py + ph) / SOURCE[1])
+
+
+# (name, colour, region in percent of the source: x0 y0 x1 y1, scale in percent, key string for the config)
+# The minimap is the user's demo spin: source x 23, y 680, 368 x 368 px.
+MINIMAP = pct(23, 680, 368, 368)
 REGIONS = [
-    ("hud", (255, 0, 0), (80.0, 85.0, 100.0, 100.0), 100.0, "gx=0.800,gy=0.850,gz=1.000,gv=1.000,gs=1.000"),
-    ("webcam", (0, 255, 0), (0.0, 0.0, 12.0, 100.0 * 0.12 * CANVAS[0] / CANVAS[1]), 100.0,
-     "hx=0.000,hy=0.000,hz=0.120,hv={v:.4f},hs=1.000".format(v=0.12 * CANVAS[0] / CANVAS[1])),
+    ("hud", (255, 0, 0), (80.0, 85.0, 100.0, 100.0), 90.0, "gx=0.800,gy=0.850,gz=1.000,gv=1.000,gs=0.900"),
+    ("minimap", (0, 255, 0), MINIMAP, 100.0,
+     "hx={:.6f},hy={:.6f},hz={:.6f},hv={:.6f},hs=1.000".format(*(v / 100 for v in MINIMAP))),
 ]
 GREY = (128, 128, 128)
 GUTTER = 4                      # ATLAS_GUTTER in atlas-math.h
@@ -51,7 +62,8 @@ def make():
     img[..., 3] = 255
     # Each colour covers its region and a little more, so the edges are solid colour.
     img[int(0.70 * H):, int(0.60 * W):, :3] = REGIONS[0][1]
-    img[:int(0.30 * H), :int(0.20 * W), :3] = REGIONS[1][1]
+    x0, y0, x1, y1 = MINIMAP
+    img[int(y0 / 100 * H):int(y1 / 100 * H) + 1, int(x0 / 100 * W):int(x1 / 100 * W) + 1, :3] = REGIONS[1][1]
     sys.stdout.buffer.write(np.tile(img, (N, 1, 1, 1)).tobytes())
 
 

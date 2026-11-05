@@ -97,8 +97,8 @@ EOF
 		canvas="$(python3 "$dir/tests/placement.py" canvas)"
 		if env "${extra_env[@]}" OBS_HEADLESS_CANVAS="$canvas" DISPLAY="$display" timeout 300 "$work/obs-headless" "$so" "$data" "$id" "$W" "$H" \
 			"${place_args[@]}" <"$work/pin.rgba" >"$work/pout.rgba" 2>"$work/plog.txt"; then
-			size="$(grep -o 'output [0-9]*x[0-9]*' "$work/plog.txt" | head -1 | cut -d' ' -f2)"
-			if result="$(python3 "$dir/tests/placement.py" check "$work/pout.rgba" "$size")"; then
+			# The output is the canvas the check asked for (the log's "output" line is the input size).
+			if result="$(python3 "$dir/tests/placement.py" check "$work/pout.rgba" "$canvas")"; then
 				echo "$name / $id placement:"; echo "$result" | sed 's/^/\t/'
 			else
 				echo "$name / $id placement:"; echo "$result" | sed 's/^/\t/'; status=1
