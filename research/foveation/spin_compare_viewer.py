@@ -83,6 +83,9 @@ def main():
     from playwright.sync_api import sync_playwright
     balanced = {"kernel": "lanczos", "area": "periphery", "deblock": 0.5, "sharpen": 0.4, "snap": 0.5, "vibrance": 0.2,
                 "posterize": 0, "dither": 0, "grain": 0}
+    if os.environ.get("SPIN_PRESET") == "crisp":
+        balanced = {"kernel": "lanczos", "area": "periphery", "deblock": 0.5, "sharpen": 0.3, "snap": 1, "vibrance": 0.4,
+                    "posterize": 0.6, "dither": 0.3, "grain": 0}
     off = {"kernel": "bilinear", "area": "periphery", "deblock": 0, "sharpen": 0, "snap": 0, "vibrance": 0,
            "posterize": 0, "dither": 0, "grain": 0}
     flags = ["--autoplay-policy=no-user-gesture-required", "--use-gl=angle", "--use-angle=swiftshader",
