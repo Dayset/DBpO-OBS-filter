@@ -227,9 +227,11 @@ void main() { v_uv = a_pos * 0.5 + 0.5; gl_Position = vec4(a_pos, 0.0, 1.0); }`;
 	function attach(video) {
 		const canvas = document.createElement("canvas");
 		canvas.dataset.dbpoUnsquish = "1";
-		// Directly above the video and below everything the player draws after it
-		// (controls, overlays); clicks go through to the player.
-		Object.assign(canvas.style, { position: "absolute", pointerEvents: "none" });
+		// Behind everything the player draws (controls, overlays, positioned or not): the
+		// parent becomes its own stacking context and the canvas sits at its very bottom,
+		// above only the parent's background. The hidden video itself is invisible. Clicks
+		// go through to the player.
+		Object.assign(canvas.style, { position: "absolute", pointerEvents: "none", zIndex: "-1" });
 		const gl = canvas.getContext("webgl", { premultipliedAlpha: false, preserveDrawingBuffer: true });
 		if (!gl) return null;
 		const prog = gl.createProgram();
@@ -255,6 +257,8 @@ void main() { v_uv = a_pos * 0.5 + 0.5; gl_Position = vec4(a_pos, 0.0, 1.0); }`;
 		for (const n of ["u_video", "u_ax_a", "u_ax_b", "u_ay_a", "u_ay_b", "u_box", "u_texel", "u_nrgn", "u_rgn", "u_slot"]) loc[n] = gl.getUniformLocation(prog, n);
 		const parent = video.parentElement;
 		if (getComputedStyle(parent).position === "static") parent.style.position = "relative";
+		parent.dataset.dbpoIsolation = parent.style.isolation;
+		parent.style.isolation = "isolate";
 		video.insertAdjacentElement("afterend", canvas);
 		video.dataset.dbpoOpacity = video.style.opacity;
 		video.style.opacity = "0";
@@ -264,6 +268,11 @@ void main() { v_uv = a_pos * 0.5 + 0.5; gl_Position = vec4(a_pos, 0.0, 1.0); }`;
 	function detach() {
 		if (!state) return;
 		state.canvas.remove();
+		const par = state.video.parentElement;
+		if (par && "dbpoIsolation" in par.dataset) {
+			par.style.isolation = par.dataset.dbpoIsolation;
+			delete par.dataset.dbpoIsolation;
+		}
 		state.video.style.opacity = state.video.dataset.dbpoOpacity || "";
 		state = null;
 	}

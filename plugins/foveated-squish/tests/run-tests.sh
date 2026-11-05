@@ -32,6 +32,7 @@ fi
 if [[ "${1:-}" == "--e2e" ]]; then
 	python3 "$root/viewer/unsquish-extension/tests/e2e.py"
 	python3 "$root/viewer/unsquish-extension/tests/e2e_atlas.py"
+	python3 "$root/viewer/unsquish-extension/tests/e2e_controls.py"
 	python3 "$root/viewer/unsquish-extension/tests/e2e_userscript.py"
 	python3 "$root/viewer/unsquish-extension/tests/color.py"
 	(cd "$root" && python3 viewer/unsquish-extension/tests/extension.py)
