@@ -639,10 +639,11 @@ static bool compose_atlas(struct squish_filter *f, const struct layout *L, gs_te
 	for (int i = 0; i < L->nslots; i++) {
 		const struct atlas_slot *s = &L->slots[i];
 		const struct atlas_region *r = &f->regions[i];
-		/* Texture v runs bottom-up in OBS, region y is measured from the top. */
-		const float uv[4] = {(float)r->x0, (float)(1.0 - r->y1), (float)r->x1, (float)(1.0 - r->y0)};
+		/* Same orientation as the Squish pass: uv y runs with the top-based
+		 * region y, and the slot's top-based y is its ortho y. */
+		const float uv[4] = {(float)r->x0, (float)r->y0, (float)r->x1, (float)r->y1};
 		atlas_quad(e, raw, uv, (float)s->w + 2.0f * g, (float)s->h + 2.0f * g, (float)s->w, (float)s->h, g,
-			   (float)s->x - g, (float)L->fh - (float)s->y - (float)s->h - g);
+			   (float)s->x - g, (float)s->y - g);
 	}
 	gs_texrender_end(f->composed);
 	return true;
@@ -662,13 +663,6 @@ static void fsq_render(void *data, gs_effect_t *unused)
 	struct layout L;
 	compute_layout(f, w, h, &L);
 	const struct squish_config *c = &L.c;
-	static int diag_done = 0;
-	if (!diag_done) {
-		diag_done = 1;
-		blog(LOG_INFO,
-		     "fsq diag: source %ux%u regions %d layout %d target %d tw %u th %u nslots %d ow %u oh %u", w, h,
-		     f->nregions, (int)f->layout, f->target, L.tw, L.th, L.nslots, L.ow, L.oh);
-	}
 	uint32_t pw = L.fw, ph = L.fh; /* preview size */
 	if (f->layout == LAYOUT_EXACT) {
 		pw = w;
