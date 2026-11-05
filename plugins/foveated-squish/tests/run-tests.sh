@@ -13,6 +13,8 @@ out="$(mktemp -d)"
 trap 'rm -rf "$out"' EXIT
 
 gcc -O2 -Wall -Wextra -std=c17 -I"$src" "$src/squish-math.c" "$here/test_squish_math.c" -lm -o "$out/test_squish_math"
+gcc -O2 -Wall -Wextra -std=c17 -I"$src" -I"$here" "$src/atlas-math.c" "$src/squish-math.c" "$here/test_atlas_math.c" -lm -o "$out/test_atlas_math"
+"$out/test_atlas_math"
 "$out/test_squish_math" >"$out/c.txt"
 python3 "$here/compare_reference.py" "C plugin" <"$out/c.txt"
 
