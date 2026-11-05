@@ -7,8 +7,8 @@
 
 static bool region_fields_ok(const struct atlas_region *r)
 {
-	return r->x0 >= 0 && r->y0 >= 0 && r->x1 <= 1 && r->y1 <= 1 && r->x0 < r->x1 && r->y0 < r->y1 &&
-	       r->s > 0 && r->s <= 1;
+	return r->x0 >= 0 && r->y0 >= 0 && r->x1 <= 1 && r->y1 <= 1 && r->x0 < r->x1 && r->y0 < r->y1 && r->s > 0 &&
+	       r->s <= 1;
 }
 
 bool atlas_parse(const char *s, struct atlas *a)
@@ -60,8 +60,8 @@ double atlas_region_floor(const struct atlas *a, const struct atlas_region *r)
 	return fx > fy ? fx : fy;
 }
 
-static bool shelf(const struct atlas *a, int sx, int sy, int sw, int sh, double kw, double kh,
-		  double factor, int src_w, int src_h, struct atlas_slot *slots)
+static bool shelf(const struct atlas *a, int sx, int sy, int sw, int sh, double kw, double kh, double factor, int src_w,
+		  int src_h, struct atlas_slot *slots)
 {
 	int cx = sx, cy = sy, row_h = 0;
 	for (int i = 0; i < a->count; i++) {
@@ -98,8 +98,7 @@ static bool shelf(const struct atlas *a, int sx, int sy, int sw, int sh, double 
 	return true;
 }
 
-bool atlas_layout(const struct atlas *a, int out_w, int out_h, int src_w, int src_h,
-		  struct atlas_slot *slots)
+bool atlas_layout(const struct atlas *a, int out_w, int out_h, int src_w, int src_h, struct atlas_slot *slots)
 {
 	if (a->count == 0)
 		return true;
