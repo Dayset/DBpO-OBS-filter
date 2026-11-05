@@ -51,16 +51,26 @@ struct squish_config {
 	 * bw, bh) of the streamed frame (fractions); the rest is black bars. */
 	bool boxed;
 	double ox, oy, bw, bh;
-	/* Viewer look, applied only in the viewer's browser (never streamed), each
-	 * 0..1, 0 = off. Same effects as NVIDIA Freestyle "Details" (sharpen,
-	 * clarity, HDR toning, bloom) and "Sharpen+". Written only when non-zero
-	 * (keys ls, lc, lh, lb, lp), so older extensions just ignore them. */
+	/* Viewer look, applied only in the viewer's browser (never streamed). Details
+	 * (sharpen, clarity, HDR toning, bloom) and Sharpen+ are 0..1; the colour
+	 * values are signed -1..1 (brightness .. shadows) or 0..1 (bw, sepia, night).
+	 * 0 = off. Sent as a look code ("※" + CJK characters, see squish_look_pack)
+	 * after the numbers, only when something is set; the old keys ls, lc, lh, lb,
+	 * lp are still read. Math: research/foveation/color_math.py. */
 	struct squish_look {
 		double sharpen, clarity, hdr, bloom, sharpen_plus;
+		double brightness, contrast, gamma, saturation, vibrance, temperature, tint, hue, highlights, shadows;
+		double bw, sepia, night;
 	} look;
 };
 
 bool squish_look_active(const struct squish_look *l);
+bool squish_color_active(const struct squish_look *l);
+#define SQUISH_LOOK_CODE_MAX 40 /* bytes incl. the terminator: mark (3) + 10 characters (3 each) + 1 */
+/* Writes the look code ("" when no value is set); returns its length in bytes. */
+size_t squish_look_pack(const struct squish_look *l, char *buf, size_t size);
+/* Reads a look code (UTF-8, the "※" mark optional). False if it is not a valid code. */
+bool squish_look_unpack(const char *s, struct squish_look *l);
 
 /* "FSQ1:rx=..,ry=..,cx=..,cy=..,fx=..,fy=..,px=..,py=..,ar=..[,ox=..,oy=..,bw=..,bh=..][,ls=..,lc=..,lh=..,lb=..,lp=..]" */
 void squish_config_format(const struct squish_config *cfg, char *buf, size_t size);

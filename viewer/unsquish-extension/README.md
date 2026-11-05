@@ -20,6 +20,8 @@ The status line in the popup says which config is in use, or why a pasted string
 
 ## Look (like NVIDIA Freestyle)
 
+Besides sharpening, the look has colour correction: Brightness, Contrast, Gamma, Saturation, Vibrance, Temperature, Tint, Hue, Highlights, Shadows, Black & white, Sepia and Night mode (all in the popup; the streamer's values arrive as a short look code in the title and you can switch to your own). The colour pass runs first, before Details and Sharpen+; its math is `research/foveation/color_math.py`. Inspired by NVIDIA Freestyle, not a copy.
+
 The popup's **Look** box adds the NVIDIA Freestyle "Details" and "Sharpen+" look on top of the video, in your browser. It costs the streamer no bitrate (the stream itself is untouched).
 
 - **Look**: *Streamer's look* (default: whatever the streamer set in OBS, sent inside the `FSQ1:` string; nothing if they set none), *My look* (your own sliders), or *Off*.

@@ -90,6 +90,20 @@ enum atlas_state {
 #define S_LOOK_HDR "look_hdr_toning"
 #define S_LOOK_BLOOM "look_bloom"
 #define S_LOOK_SHARPEN_PLUS "look_sharpen_plus"
+/* Colour correction (same names as the viewer): signed -100..100 % except bw, sepia, night (0..100 %). */
+static const struct {
+	const char *key, *label;
+	bool is_signed;
+} color_settings[] = {
+	{"look_brightness", "LookBrightness", true}, {"look_contrast", "LookContrast", true},
+	{"look_gamma", "LookGamma", true},           {"look_saturation", "LookSaturation", true},
+	{"look_vibrance", "LookVibrance", true},     {"look_temperature", "LookTemperature", true},
+	{"look_tint", "LookTint", true},             {"look_hue", "LookHue", true},
+	{"look_highlights", "LookHighlights", true}, {"look_shadows", "LookShadows", true},
+	{"look_bw", "LookBw", false},                {"look_sepia", "LookSepia", false},
+	{"look_night", "LookNight", false},
+};
+#define N_COLOR_SETTINGS 13
 
 enum layout_mode {
 	LAYOUT_FILL = 0, /* squeeze = canvas / source: the picture fills a standard canvas */
@@ -148,6 +162,7 @@ struct squish_filter {
 	gs_texrender_t *look_v;    /* look: vertical blur, half size */
 	gs_texrender_t *look_out;  /* look: Details result */
 	gs_texrender_t *look_out2; /* look: Sharpen+ result */
+	gs_texrender_t *look_col;  /* look: colour correction result */
 	gs_texrender_t *display;
 	gs_texrender_t *composed; /* streamed frame: picture + atlas strip */
 	gs_texrender_t *mean;     /* 1x1: average colour of one region */
@@ -208,6 +223,13 @@ static void read_config(obs_data_t *s, struct squish_config *cfg)
 	cfg->look.hdr = obs_data_get_double(s, S_LOOK_HDR) / 100.0;
 	cfg->look.bloom = obs_data_get_double(s, S_LOOK_BLOOM) / 100.0;
 	cfg->look.sharpen_plus = obs_data_get_double(s, S_LOOK_SHARPEN_PLUS) / 100.0;
+	double *cv[N_COLOR_SETTINGS] = {&cfg->look.brightness, &cfg->look.contrast,   &cfg->look.gamma,
+					&cfg->look.saturation, &cfg->look.vibrance,   &cfg->look.temperature,
+					&cfg->look.tint,       &cfg->look.hue,        &cfg->look.highlights,
+					&cfg->look.shadows,    &cfg->look.bw,         &cfg->look.sepia,
+					&cfg->look.night};
+	for (int i = 0; i < N_COLOR_SETTINGS; i++)
+		*cv[i] = obs_data_get_double(s, color_settings[i].key) / 100.0;
 }
 
 /* Keep each axis within what the curve can deliver (density >= 8%). */
@@ -441,6 +463,7 @@ static void *fsq_create(obs_data_t *settings, obs_source_t *context)
 	f->look_v = gs_texrender_create(GS_RGBA, GS_ZS_NONE);
 	f->look_out = gs_texrender_create(GS_RGBA, GS_ZS_NONE);
 	f->look_out2 = gs_texrender_create(GS_RGBA, GS_ZS_NONE);
+	f->look_col = gs_texrender_create(GS_RGBA, GS_ZS_NONE);
 	f->composed = gs_texrender_create(GS_RGBA, GS_ZS_NONE);
 	f->mean = gs_texrender_create(GS_RGBA, GS_ZS_NONE);
 	const char *an = getenv("DBPO_FSQ_ANALYZE");
@@ -461,6 +484,7 @@ static void *fsq_create(obs_data_t *settings, obs_source_t *context)
 		gs_texrender_destroy(f->look_v);
 		gs_texrender_destroy(f->look_out);
 		gs_texrender_destroy(f->look_out2);
+		gs_texrender_destroy(f->look_col);
 		gs_texrender_destroy(f->composed);
 		gs_texrender_destroy(f->mean);
 		obs_leave_graphics();
@@ -483,6 +507,7 @@ static void fsq_destroy(void *data)
 	gs_texrender_destroy(f->look_v);
 	gs_texrender_destroy(f->look_out);
 	gs_texrender_destroy(f->look_out2);
+	gs_texrender_destroy(f->look_col);
 	gs_texrender_destroy(f->composed);
 	gs_texrender_destroy(f->mean);
 	for (int k = 0; k < ANALYZE_STAGES; k++)
@@ -608,6 +633,13 @@ static bool look_pass(struct squish_filter *f, gs_texrender_t *target, const cha
 	vec4_set(&v4, (float)l->sharpen, (float)l->clarity, (float)l->hdr, (float)l->bloom);
 	gs_effect_set_vec4(gs_effect_get_param_by_name(e, "look"), &v4);
 	gs_effect_set_float(gs_effect_get_param_by_name(e, "sharp_plus"), (float)l->sharpen_plus);
+	vec4_set(&v4, (float)l->brightness, (float)l->contrast, (float)l->gamma, (float)l->saturation);
+	gs_effect_set_vec4(gs_effect_get_param_by_name(e, "color_a"), &v4);
+	vec4_set(&v4, (float)l->vibrance, (float)l->temperature, (float)l->tint, (float)l->hue);
+	gs_effect_set_vec4(gs_effect_get_param_by_name(e, "color_b"), &v4);
+	vec4_set(&v4, (float)l->highlights, (float)l->shadows, (float)l->bw, (float)l->sepia);
+	gs_effect_set_vec4(gs_effect_get_param_by_name(e, "color_c"), &v4);
+	gs_effect_set_float(gs_effect_get_param_by_name(e, "color_n"), (float)l->night);
 	while (gs_effect_loop(e, tech))
 		gs_draw_sprite(NULL, 0, ow, oh);
 	gs_texrender_end(target);
@@ -623,20 +655,23 @@ static gs_texrender_t *apply_look(struct squish_filter *f, gs_texrender_t *in, u
 	if (!squish_look_active(l))
 		return in;
 	gs_texrender_t *cur = in;
+	if (squish_color_active(l) && look_pass(f, f->look_col, "LookColor", gs_texrender_get_texture(in), NULL, w, h, w, h,
+						0.0f, 0.0f))
+		cur = f->look_col;
 	if (l->sharpen > 0.0 || l->clarity > 0.0 || l->hdr > 0.0 || l->bloom > 0.0) {
 		const uint32_t hw = (w + 1) / 2, hh = (h + 1) / 2;
 		double scale = h / 1080.0;
 		if (scale < 0.25)
 			scale = 0.25;
-		gs_texture_t *src = gs_texrender_get_texture(in);
+		gs_texture_t *src = gs_texrender_get_texture(cur);
 		if (!look_pass(f, f->look_h, "LookBlur", src, NULL, w, h, hw, hh, (float)(scale / w), 0.0f))
-			return in;
+			return cur;
 		if (!look_pass(f, f->look_v, "LookBlur", gs_texrender_get_texture(f->look_h), NULL, hw, hh, hw, hh,
 			       0.0f, (float)(scale / h)))
-			return in;
+			return cur;
 		if (!look_pass(f, f->look_out, "LookDetails", src, gs_texrender_get_texture(f->look_v), w, h, w, h,
 			       0.0f, 0.0f))
-			return in;
+			return cur;
 		cur = f->look_out;
 	}
 	if (l->sharpen_plus > 0.0 &&
@@ -1307,6 +1342,13 @@ static bool import_clicked(obs_properties_t *props, obs_property_t *p, void *dat
 		obs_data_set_double(s, S_LOOK_HDR, c.look.hdr * 100.0);
 		obs_data_set_double(s, S_LOOK_BLOOM, c.look.bloom * 100.0);
 		obs_data_set_double(s, S_LOOK_SHARPEN_PLUS, c.look.sharpen_plus * 100.0);
+		const double cvals[N_COLOR_SETTINGS] = {c.look.brightness, c.look.contrast,   c.look.gamma,
+							c.look.saturation, c.look.vibrance,   c.look.temperature,
+							c.look.tint,       c.look.hue,        c.look.highlights,
+							c.look.shadows,    c.look.bw,         c.look.sepia,
+							c.look.night};
+		for (int i = 0; i < N_COLOR_SETTINGS; i++)
+			obs_data_set_double(s, color_settings[i].key, cvals[i] * 100.0);
 		obs_data_set_string(s, S_IMPORT, "");
 		obs_source_update(f->context, s);
 		f->shown_key[0] = 0; /* force one refresh */
@@ -1392,6 +1434,11 @@ static obs_properties_t *fsq_properties(void *data)
 					 {S_LOOK_SHARPEN_PLUS, "LookSharpenPlus"}};
 	for (int i = 0; i < 5; i++) {
 		pr = obs_properties_add_float_slider(look, look_sliders[i][0], T(look_sliders[i][1]), 0.0, 100.0, 1.0);
+		obs_property_set_modified_callback(pr, cfg_modified);
+	}
+	for (int i = 0; i < N_COLOR_SETTINGS; i++) {
+		pr = obs_properties_add_float_slider(look, color_settings[i].key, T(color_settings[i].label),
+						     color_settings[i].is_signed ? -100.0 : 0.0, 100.0, 1.0);
 		obs_property_set_modified_callback(pr, cfg_modified);
 	}
 	obs_properties_add_group(props, "look", T("Look"), OBS_GROUP_NORMAL, look);
@@ -1480,6 +1527,8 @@ static void fsq_defaults(obs_data_t *s)
 	obs_data_set_default_bool(s, S_PREFILTER, true);
 	obs_data_set_default_double(s, S_CLEAN, 50.0);
 	obs_data_set_default_int(s, S_VIEW, VIEW_SQUISHED);
+	for (int i = 0; i < N_COLOR_SETTINGS; i++)
+		obs_data_set_default_double(s, color_settings[i].key, 0.0);
 	obs_data_set_default_bool(s, S_ATLAS_ON, false);
 	obs_data_set_default_bool(s, S_ATLAS_BLANK, true);
 	/* Regions start as the four 20% corners (bottom-left, top-right, bottom-right, top-left),

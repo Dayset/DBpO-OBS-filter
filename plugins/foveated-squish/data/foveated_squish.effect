@@ -19,6 +19,7 @@
 //             LookBlurH/V: NVIDIA Freestyle Details' large Gaussian, at half
 //             resolution. LookDetails: HDR toning, sharpen, clarity, bloom.
 //             LookCAS: Sharpen+ (approximated with AMD FidelityFX CAS).
+//             LookColor: colour correction (research/foveation/color_math.py).
 
 uniform float4x4 ViewProj;
 uniform texture2d image;
@@ -35,6 +36,10 @@ uniform texture2d large;  // look: large blur (half resolution)
 uniform float2 blur_step; // look: one blur step in uv (axis * scale / full size)
 uniform float4 look;      // look: sharpen, clarity, HDR toning, bloom (0..1)
 uniform float  sharp_plus; // look: Sharpen+ (0..1)
+uniform float4 color_a;    // look colour: brightness, contrast, gamma, saturation (-1..1)
+uniform float4 color_b;    // look colour: vibrance, temperature, tint, hue (-1..1)
+uniform float4 color_c;    // look colour: highlights, shadows (-1..1), black & white, sepia (0..1)
+uniform float  color_n;    // look colour: night mode (0..1)
 uniform float2 atlas_uv0;  // atlas: source rectangle (uv) to copy from
 uniform float2 atlas_uv1;
 uniform float2 atlas_quad; // atlas: quad size in pixels, including the gutter
@@ -312,6 +317,46 @@ float4 PSLookCAS(VertData v_in) : TARGET
 	return float4(saturate(o), e4.a);
 }
 
+// Colour correction (the same math as the viewer's LOOK_COLOR_SHADER and color_math.py apply_color).
+float4 PSLookColor(VertData v_in) : TARGET
+{
+	float4 src = image.SampleLevel(linearClamp, v_in.uv, 0.0);
+	float3 col = src.rgb;
+	float3 w709 = float3(0.2126, 0.7152, 0.0722);
+	col.r += color_b.y * 0.10 + color_b.z * 0.04;
+	col.b += -color_b.y * 0.10 + color_b.z * 0.04;
+	col.g -= color_b.z * 0.08;
+	float lum = saturate(dot(col, w709));
+	col += color_c.x * 0.25 * smoothstep(0.5, 1.0, lum) + color_c.y * 0.25 * (1.0 - smoothstep(0.0, 0.5, lum));
+	col += color_a.x * 0.5;
+	col = (col - 0.5) * (1.0 + color_a.y) + 0.5;
+	col = saturate(col);
+	col = pow(col, exp2(-color_a.z));
+	if (color_b.w != 0.0) {
+		float ang = color_b.w * 3.14159265358979;
+		float ca = cos(ang);
+		float sa = sin(ang);
+		float yy = dot(col, float3(0.299, 0.587, 0.114));
+		float ii = dot(col, float3(0.596, -0.274, -0.322));
+		float qq = dot(col, float3(0.211, -0.523, 0.312));
+		float i2 = ii * ca - qq * sa;
+		float q2 = ii * sa + qq * ca;
+		col = saturate(float3(yy + 0.956 * i2 + 0.621 * q2, yy - 0.272 * i2 - 0.647 * q2, yy - 1.106 * i2 + 1.703 * q2));
+	}
+	lum = dot(col, w709);
+	float sat = max(max(col.r, col.g), col.b) - min(min(col.r, col.g), col.b);
+	float fac = max(1.0 + color_a.w + 1.5 * color_b.x * (1.0 - sat), 0.0);
+	col = saturate(lum + (col - lum) * fac);
+	lum = dot(col, w709);
+	col += (lum - col) * color_c.z;
+	float3 sep = saturate(float3(dot(col, float3(0.393, 0.769, 0.189)), dot(col, float3(0.349, 0.686, 0.168)),
+				     dot(col, float3(0.272, 0.534, 0.131))));
+	col += (sep - col) * color_c.w;
+	float3 night = saturate(pow(col, 0.8) * float3(0.7, 0.85, 1.15));
+	col += (night - col) * color_n;
+	return float4(saturate(col), src.a);
+}
+
 technique LookBlur
 {
 	pass
@@ -327,6 +372,15 @@ technique LookDetails
 	{
 		vertex_shader = VSDefault(v_in);
 		pixel_shader  = PSLookDetails(v_in);
+	}
+}
+
+technique LookColor
+{
+	pass
+	{
+		vertex_shader = VSDefault(v_in);
+		pixel_shader  = PSLookColor(v_in);
 	}
 }
 

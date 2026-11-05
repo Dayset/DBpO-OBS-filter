@@ -146,24 +146,124 @@ void squish_config_format(const struct squish_config *cfg, char *buf, size_t siz
 			snprintf(buf + n, size - n, ",ox=%.6g,oy=%.6g,bw=%.6g,bh=%.6g", cfg->ox, cfg->oy, cfg->bw,
 				 cfg->bh);
 	}
-	const struct {
-		const char *key;
-		double v;
-	} look[] = {{"ls", cfg->look.sharpen},
-		    {"lc", cfg->look.clarity},
-		    {"lh", cfg->look.hdr},
-		    {"lb", cfg->look.bloom},
-		    {"lp", cfg->look.sharpen_plus}};
-	for (size_t i = 0; i < sizeof(look) / sizeof(look[0]); i++) {
+	if (squish_look_active(&cfg->look)) {
 		const size_t n = strlen(buf);
-		if (look[i].v > 0.0 && n < size)
-			snprintf(buf + n, size - n, ",%s=%.3g", look[i].key, look[i].v);
+		if (n < size)
+			squish_look_pack(&cfg->look, buf + n, size - n);
 	}
+}
+
+/* Look values in code order (same as color_math.py FIELDS). */
+static double *look_field(struct squish_look *l, int i)
+{
+	double *f[] = {&l->sharpen,    &l->clarity,    &l->hdr,        &l->bloom,   &l->sharpen_plus, &l->brightness,
+		       &l->contrast,   &l->gamma,      &l->saturation, &l->vibrance, &l->temperature, &l->tint,
+		       &l->hue,        &l->highlights, &l->shadows,    &l->bw,      &l->sepia,        &l->night};
+	return f[i];
+}
+#define LOOK_FIELDS 18
+static bool look_signed(int i)
+{
+	return i >= 5 && i <= 14;
 }
 
 bool squish_look_active(const struct squish_look *l)
 {
-	return l->sharpen > 0.0 || l->clarity > 0.0 || l->hdr > 0.0 || l->bloom > 0.0 || l->sharpen_plus > 0.0;
+	struct squish_look t = *l;
+	for (int i = 0; i < LOOK_FIELDS; i++)
+		if (*look_field(&t, i) != 0.0)
+			return true;
+	return false;
+}
+
+bool squish_color_active(const struct squish_look *l)
+{
+	struct squish_look t = *l;
+	for (int i = 5; i < LOOK_FIELDS; i++)
+		if (*look_field(&t, i) != 0.0)
+			return true;
+	return false;
+}
+
+static int look_quantize(double v, bool is_signed)
+{
+	if (!isfinite(v))
+		v = 0.0;
+	if (is_signed)
+		return (int)floor(fmax(-1.0, fmin(1.0, v)) * 63.0 + 0.5) + 64;
+	return (int)floor(clamp01(v) * 127.0 + 0.5);
+}
+
+size_t squish_look_pack(const struct squish_look *l, char *buf, size_t size)
+{
+	if (size == 0)
+		return 0;
+	buf[0] = 0;
+	struct squish_look t = *l;
+	int q[LOOK_FIELDS];
+	bool any = false;
+	for (int i = 0; i < LOOK_FIELDS; i++) {
+		q[i] = look_quantize(*look_field(&t, i), look_signed(i));
+		if (q[i] != (look_signed(i) ? 64 : 0))
+			any = true;
+	}
+	if (!any || size < SQUISH_LOOK_CODE_MAX)
+		return 0;
+	unsigned char bits[2 + 7 * LOOK_FIELDS + 14];
+	int nb = 0;
+	bits[nb++] = 0;
+	bits[nb++] = 1; /* version 1 */
+	for (int i = 0; i < LOOK_FIELDS; i++)
+		for (int b = 6; b >= 0; b--)
+			bits[nb++] = (unsigned char)((q[i] >> b) & 1);
+	while (nb % 14)
+		bits[nb++] = 0;
+	size_t n = 0;
+	buf[n++] = (char)0xE2; /* "※" U+203B */
+	buf[n++] = (char)0x80;
+	buf[n++] = (char)0xBB;
+	for (int i = 0; i < nb; i += 14) {
+		unsigned cp = 0;
+		for (int j = 0; j < 14; j++)
+			cp = (cp << 1) | bits[i + j];
+		cp += 0x4E00;
+		buf[n++] = (char)(0xE0 | (cp >> 12));
+		buf[n++] = (char)(0x80 | ((cp >> 6) & 0x3F));
+		buf[n++] = (char)(0x80 | (cp & 0x3F));
+	}
+	buf[n] = 0;
+	return n;
+}
+
+bool squish_look_unpack(const char *s, struct squish_look *l)
+{
+	const unsigned char *p = (const unsigned char *)s;
+	if (p[0] == 0xE2 && p[1] == 0x80 && p[2] == 0xBB)
+		p += 3;
+	unsigned char bits[14 * 16];
+	int nb = 0;
+	while (nb + 14 <= (int)sizeof(bits) && (p[0] & 0xF0) == 0xE0 && (p[1] & 0xC0) == 0x80 && (p[2] & 0xC0) == 0x80) {
+		const unsigned cp = ((unsigned)(p[0] & 0x0F) << 12) | ((unsigned)(p[1] & 0x3F) << 6) | (p[2] & 0x3F);
+		if (cp < 0x4E00 || cp >= 0x4E00 + 16384)
+			return false;
+		for (int b = 13; b >= 0; b--)
+			bits[nb++] = (unsigned char)(((cp - 0x4E00) >> b) & 1);
+		p += 3;
+	}
+	if (nb < 2 + 7 * LOOK_FIELDS || ((bits[0] << 1) | bits[1]) != 1)
+		return false;
+	struct squish_look out;
+	memset(&out, 0, sizeof(out));
+	int pos = 2;
+	for (int i = 0; i < LOOK_FIELDS; i++) {
+		int q = 0;
+		for (int b = 0; b < 7; b++)
+			q = (q << 1) | bits[pos + b];
+		pos += 7;
+		*look_field(&out, i) = look_signed(i) ? (q - 64) / 63.0 : q / 127.0;
+	}
+	*l = out;
+	return true;
 }
 
 bool squish_config_parse(const char *s, struct squish_config *cfg)
@@ -174,7 +274,7 @@ bool squish_config_parse(const char *s, struct squish_config *cfg)
 		return false;
 	struct squish_config c = {
 		{0.75, 0.15, 0.5, 1.0},   {0.75, 0.15, 0.5, 1.0}, 16.0 / 9.0, false, 0.0, 0.0, 1.0, 1.0,
-		{0.0, 0.0, 0.0, 0.0, 0.0}};
+		{0.0}};
 	const char *p = s + 5;
 	while (*p) {
 		char key[8] = {0};
@@ -225,12 +325,18 @@ bool squish_config_parse(const char *s, struct squish_config *cfg)
 			c.look.bloom = clamp01(v);
 		else if (!strcmp(key, "lp"))
 			c.look.sharpen_plus = clamp01(v);
-		if (*p == ',')
+		if (*p == ',') {
 			p++;
-		else if (*p && *p != ' ' && *p != '\n' && *p != '\r')
-			return false;
-		else
+		} else if ((unsigned char)p[0] == 0xE2 && (unsigned char)p[1] == 0x80 && (unsigned char)p[2] == 0xBB) {
+			struct squish_look packed;
+			if (squish_look_unpack(p, &packed))
+				c.look = packed;
 			break;
+		} else if (*p && *p != ' ' && *p != '\n' && *p != '\r') {
+			return false;
+		} else {
+			break;
+		}
 	}
 	if (c.x.r <= 0 || c.x.r > 1 || c.y.r <= 0 || c.y.r > 1 || c.x.p <= 0 || c.y.p <= 0 || c.ar <= 0)
 		return false;
