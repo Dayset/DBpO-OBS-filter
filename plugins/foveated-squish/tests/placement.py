@@ -35,7 +35,7 @@ def pct(px, py, pw, ph):
 # The minimap is the user's demo spin: source x 23, y 680, 368 x 368 px.
 MINIMAP = pct(23, 680, 368, 368)
 ALL_REGIONS = [
-    ("hud", (255, 0, 0), (80.0, 85.0, 100.0, 100.0), 90.0, "gx=0.800,gy=0.850,gz=1.000,gv=1.000,gs=0.900"),
+    ("hud", (255, 0, 0), (80.0, 85.0, 100.0, 100.0), 50.0, "gx=0.800,gy=0.850,gz=1.000,gv=1.000,gs=0.900"),
     ("minimap", (0, 255, 0), MINIMAP, 100.0,
      "hx={:.6f},hy={:.6f},hz={:.6f},hv={:.6f},hs=1.000".format(*(v / 100 for v in MINIMAP))),
 ]
