@@ -37,6 +37,8 @@ def main(out):
         center = (np.abs(y[:, None] - 0.5) < CY) & (np.abs(x[None, :] - 0.5) < CX)
         for name, path in (("baseline", f"frame_{i:03d}_baseline.png"), ("unsquish only", f"extras/frame_{i:03d}_unsquish_only.png"),
                            ("pipeline", f"frame_{i:03d}_pipeline.png")):
+            if not os.path.exists(os.path.join(out, path)):
+                continue
             test = luma(os.path.join(out, path))
             c = metrics(ref, test, center)
             p = metrics(ref, test, ~center)
@@ -44,6 +46,8 @@ def main(out):
     names = ["baseline", "unsquish only", "pipeline"]
     lines = [f"{'variant':<15}{'center PSNR':>12}{'center SSIM':>12}{'periph PSNR':>12}{'periph SSIM':>12}"]
     for n in names:
+        if not any(x[1] == n for x in rows):
+            continue
         r = np.array([x[2:] for x in rows if x[1] == n])
         lines.append(f"{n:<15}{r[:, 0].mean():12.2f}{r[:, 1].mean():12.4f}{r[:, 2].mean():12.2f}{r[:, 3].mean():12.4f}")
     text = "\n".join(lines)

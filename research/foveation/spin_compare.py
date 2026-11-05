@@ -28,11 +28,11 @@ import atlas_math as am  # noqa: E402
 import bitrate_harness as bh  # noqa: E402
 
 SW, SH = 2560, 1440  # game
-OW, OH = 1920, 1080  # stream
+OW, OH = int(os.environ.get("SPIN_OW", 1920)), int(os.environ.get("SPIN_OH", 1080))  # stream (963p: 1712x964, 4:2:0 needs even rows)
 CFG = "FSQ1:rx=0.75,ry=0.75,cx=0.15,cy=0.15,fx=0.5,fy=0.5,px=1,py=1,ar=1.7778"
 SPEED = 80  # px per frame, turning left
 COLOR = "colorspace=bt709:color_primaries=bt709:color_trc=bt709:color_range=tv"
-X264 = ["-c:v", "libx264", "-preset", "veryfast", "-profile:v", "high", "-bf", "2", "-g", "120", "-keyint_min", "120",
+X264 = ["-r", "60", "-c:v", "libx264", "-preset", "veryfast", "-profile:v", "high", "-bf", "2", "-g", "120", "-keyint_min", "120",
         "-x264-params", "nal-hrd=cbr:force-cfr=1", "-pix_fmt", "yuv420p", "-colorspace", "bt709",
         "-color_primaries", "bt709", "-color_trc", "bt709", "-color_range", "tv"]
 
@@ -86,7 +86,7 @@ def ffmpeg_in(args, size, pix="rgb24"):
 
 
 def read_frames(path, w, h, vf=None):
-    cmd = ["ffmpeg", "-loglevel", "error", "-i", path] + (["-vf", vf] if vf else []) + ["-f", "rawvideo", "-pix_fmt", "rgb24", "-"]
+    cmd = ["ffmpeg", "-loglevel", "error", "-i", path] + (["-vf", vf] if vf else []) + ["-fps_mode", "passthrough", "-f", "rawvideo", "-pix_fmt", "rgb24", "-"]
     p = subprocess.Popen(cmd, stdout=subprocess.PIPE)
     n = w * h * 3
     while True:
@@ -132,7 +132,7 @@ def stage_streams(work, kbps):
     base = os.path.join(work, "base.mp4")
     if not os.path.exists(base + ".ok"):
         subprocess.run(["ffmpeg", "-loglevel", "error", "-y", "-i", ref, "-vf",
-                        f"scale={OW}:{OH}:flags=bicubic:out_color_matrix=bt709:out_range=tv,format=yuv420p"] + X264 + rc + [base], check=True)
+                        f"setpts=N/(60*TB),scale={OW}:{OH}:flags=bicubic:out_color_matrix=bt709:out_range=tv,format=yuv420p"] + X264 + rc + [base], check=True)
         open(base + ".ok", "w").close()
     sq = os.path.join(work, "squish.mp4")
     if not os.path.exists(sq + ".ok"):

@@ -106,7 +106,8 @@ def main():
         page.goto(f"{base_url}/p.html")
         page.wait_for_function("document.getElementById('v').readyState >= 2", timeout=30000)
         page.wait_for_function("document.querySelector('canvas[data-dbpo-unsquish]') !== null", timeout=30000)
-        for label, enh, path in (("unsquish_only", off, "extras"), ("pipeline", balanced, "")):
+        passes = (("unsquish_only", off, "extras"), ("pipeline", balanced, ""))
+        for label, enh, path in (passes if os.environ.get("SPIN_EXTRAS", "1") == "1" else passes[1:]):
             page.evaluate("(e) => window.__set({ enhance: e })", enh)
             last = None
             for k, i in enumerate(idx):
