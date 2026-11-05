@@ -156,7 +156,7 @@ def stage_pick(work, n):
         src = os.path.join(work, f"{name}.mp4")
         # exact decoded frames (YUV) as a 1 fps lossless webm the browser can play and seek
         subprocess.run(["ffmpeg", "-loglevel", "error", "-y", "-i", src, "-vf", f"select='{sel}',setpts=N/TB",
-                        "-fps_mode", "passthrough", "-r", "1", "-c:v", "libvpx-vp9", "-lossless", "1", "-pix_fmt", "yuv420p",
+                        "-fps_mode", "passthrough", "-c:v", "libvpx-vp9", "-lossless", "1", "-pix_fmt", "yuv420p",
                         "-colorspace", "bt709", "-color_primaries", "bt709", "-color_trc", "bt709", "-color_range", "tv",
                         os.path.join(work, f"{name}_sel.webm")], check=True)
     info = {"frames": idx, "kbps": {}}
