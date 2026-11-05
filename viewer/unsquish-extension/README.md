@@ -55,6 +55,14 @@ Limits: videos served cross-origin without CORS can't be read by WebGL; the exte
 
 On twitch.tv the extension listens to the channel owner's chat for `fsq:on:<n>` and `fsq:off:<n>`, and switches the unsquish on or off with a delay (`chatDelayMs` in extension storage, default 1500 ms). Only the channel owner's account counts. Before the first signal nothing changes. `<n>` must increase each time.
 
-## Atlas
+## Sharp areas (atlas)
 
-The viewer pastes sharp regions from their slots when the config has region keys (`gx`…`gs` and the other prefixes). See `plugins/foveated-squish/README.md`.
+When the streamer marks HUD areas (a minimap, ammo, a webcam) as "Keep sharp", the config string carries region keys (`gx`…`gs`, then `h`, `i`, `j`). The stream then has the squished picture on the left and a strip on the right holding each area at about full size. The extension unfolds the picture as usual and, in the same shader pass, draws each area from its slot over its place in the picture, so the minimap is crisp while the rest of the edges stay squeezed. The popup status says how many sharp areas the config has, e.g. "…, 2 sharp areas".
+
+- The look (sharpen, clarity, ...) runs once over the finished picture, so areas and surroundings match.
+- Works at any player size and on lower-resolution transcodes: slots are in normalized coordinates.
+- Without the extension a viewer sees the strip on the right and, if the streamer hides the duplicate, a flat patch where the area is.
+- Older extension versions ignore the region keys and show the strip as part of the picture.
+- Tests: `tests/atlas.js` (layout vs the golden vectors), `tests/e2e_atlas.py` (plays an atlas frame in headless Chromium and compares with the reference viewer).
+
+See `plugins/foveated-squish/README.md` for the streamer's side.

@@ -140,3 +140,19 @@ DLDSR makes the game render above your monitor's resolution. The GPU does more w
 | Info line says the curve/center was lowered | The center + curve can't absorb this much squeeze | Lower the curve, make the center smaller, or raise Max edge compression |
 | Filter reports a size that isn't your game's (e.g. 2763×1554) | Filter is on a group/nested scene (its size is the box around everything inside), or another filter above it resizes | Put the filter on the Game Capture source itself, at the bottom of its filter list |
 | Viewers see a squeezed picture | Extension missing, or config not pasted | Share the `FSQ1:…` string again; copy it after any settings change |
+
+## Keep a minimap (or other HUD) sharp
+
+Edges get squeezed, so a minimap in a corner turns to mush. Mark it and it travels in a small strip at almost full size; viewers with the extension see it back in its place.
+
+1. In the filter, open **Keep sharp (HUD areas)** and tick its checkbox. The region groups appear.
+2. Tick **Region 1**. Pick **Quick placement** for the corner closest to your minimap, or type its **Left / Top / Width / Height** in % of the game picture (e.g. a minimap in the bottom-left: Left 1, Top 61, Width 20, Height 37). Name it "Minimap" if you like; the name only appears in the info text.
+3. Read the info text under the settings: it says if the region is "full size" or had to be shrunk ("shown at 74%"), or why it does not fit. If it does not fit, make the region smaller or switch another one off.
+4. Set **View > Squeezed zone** to see the region outlined, then **View > Unsquished preview** to see what extension viewers get. Switch back to **Squished** before going live.
+5. Press **Copy config** again and put the new string in your title: it now contains the region.
+
+What it costs: the squished picture shrinks to 80% of the stream width (the strip takes the rest), so the sharp center is a bit smaller than without regions. Use as few and as small regions as you need. Leave **Hide the duplicate** on: the minimap is also inside the squeezed picture, and hiding that copy saves bits (viewers without the extension then see a flat patch there).
+
+The strip is on the right only. Regions need one of the standard stream sizes, not Custom squeeze.
+
+> Screenshots of this panel are still to be added (they need a real OBS window).

@@ -32,6 +32,12 @@ function renderLook(s) {
 				: "No look: you see the stream exactly as sent.";
 }
 
+/* ", 2 sharp areas" when the config keeps HUD regions sharp (atlas), else "". */
+function regionsText(cfg) {
+	const n = cfg && cfg.regions ? cfg.regions.length : 0;
+	return n ? `, ${n} sharp area${n > 1 ? "s" : ""}` : "";
+}
+
 function render(s, detected) {
 	$("enabled").checked = s.enabled;
 	$("autoDetect").checked = s.autoDetect;
@@ -45,9 +51,9 @@ function render(s, detected) {
 		st.textContent = "That config string isn't valid (or asks for a squeeze the curve can't do).";
 		st.classList.add("bad");
 	} else if (pasted) {
-		st.textContent = `Using pasted config: ${Math.round(pasted.x.r * 100)}% x ${Math.round(pasted.y.r * 100)}% streamed, sharp center ${Math.round(pasted.x.c * 200)}% x ${Math.round(pasted.y.c * 200)}%.`;
+		st.textContent = `Using pasted config: ${Math.round(pasted.x.r * 100)}% x ${Math.round(pasted.y.r * 100)}% streamed, sharp center ${Math.round(pasted.x.c * 200)}% x ${Math.round(pasted.y.c * 200)}%${regionsText(pasted)}.`;
 	} else if (s.autoDetect && detected) {
-		st.textContent = `Using config from the page: ${detected}`;
+		st.textContent = `Using config from the page: ${detected}${regionsText(current)}`;
 	} else {
 		st.textContent = "No config yet: paste the streamer's FSQ1 string, or turn on auto-detect.";
 	}
