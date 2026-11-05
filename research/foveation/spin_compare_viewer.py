@@ -40,9 +40,9 @@ PLAIN = """<!doctype html><html><body style="margin:0;background:#000">
 <video id="v" src="base_sel.webm" muted playsinline style="width:2560px;height:1440px;object-fit:fill;display:block"></video></body></html>"""
 
 SEEK = """(t) => new Promise((res) => { const v = document.getElementById('v'); v.pause();
-  const done = () => v.requestVideoFrameCallback ? v.requestVideoFrameCallback(() => res(true)) : setTimeout(() => res(true), 300);
+  const done = () => setTimeout(() => res(true), 500);
   if (Math.abs(v.currentTime - t) < 1e-3 && v.readyState >= 2) return done();
-  v.addEventListener('seeked', done, { once: true }); v.currentTime = t; })"""
+  v.addEventListener('seeked', done, { once: true }); v.currentTime = t; setTimeout(() => res(false), 15000); })"""
 GRAB = """() => document.querySelector('canvas[data-dbpo-unsquish]').toDataURL('image/png')"""
 
 
@@ -73,11 +73,11 @@ def main():
     base_url = f"http://127.0.0.1:{srv.server_port}"
 
     # originals (1440p source frames)
-    want = set(idx)
-    for i, f in enumerate(sc.read_frames(os.path.join(work, "ref.mkv"), sc.SW, sc.SH)):
+    want = {i for i in idx if not os.path.exists(os.path.join(out, f'frame_{i:03d}_original.png'))}
+    for i, f in enumerate(sc.read_frames(os.path.join(work, "ref.mkv"), sc.SW, sc.SH) if want else []):
         if i in want:
             Image.fromarray(f).save(os.path.join(out, f"frame_{i:03d}_original.png"), compress_level=3)
-        if i > max(idx):
+        if i > max(want):
             break
 
     from playwright.sync_api import sync_playwright
