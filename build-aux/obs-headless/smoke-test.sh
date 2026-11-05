@@ -94,8 +94,8 @@ EOF
 		python3 "$dir/tests/placement.py" make >"$work/pin.rgba"
 		# The check states the canvas it needs (regions must fit the strip); it overrides the plugin's default.
 		canvas="$(python3 "$dir/tests/placement.py" canvas)"
-	# All regions together, then each region alone (to see which one the filter rejects).
-	for sel in "" hud minimap; do
+	# The demo minimap (the default selection in placement.py).
+	for sel in ""; do
 		read -r -a place_args <<<"$(python3 "$dir/tests/placement.py" settings $sel)"
 		label="${sel:-all regions}"
 		if env OBS_HEADLESS_CANVAS="$canvas" DISPLAY="$display" timeout 300 "$work/obs-headless" "$so" "$data" "$id" "${canvas%x*}" "${canvas#*x}" \

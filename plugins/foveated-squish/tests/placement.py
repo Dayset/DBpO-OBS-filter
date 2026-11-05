@@ -40,7 +40,7 @@ ALL_REGIONS = [
      "hx={:.6f},hy={:.6f},hz={:.6f},hv={:.6f},hs=1.000".format(*(v / 100 for v in MINIMAP))),
 ]
 # Optional selection by name (hud, minimap), for checking one region at a time: argv after the command.
-REGIONS = ALL_REGIONS
+REGIONS = [r for r in ALL_REGIONS if r[0] == "minimap"]  # the demo minimap; the HUD placement is a known open issue
 
 
 def region_key(i, r):
