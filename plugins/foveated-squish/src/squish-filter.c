@@ -1001,7 +1001,10 @@ static obs_properties_t *fsq_properties(void *data)
 	obs_properties_t *atlas = obs_properties_create();
 	obs_property_t *cnt = obs_properties_add_int_slider(atlas, S_ATLAS_COUNT, "Regions", 0, ATLAS_MAX_REGIONS, 1);
 	obs_property_set_modified_callback(cnt, cfg_modified);
-	obs_properties_add_text(atlas, "atlas_info", "Sharp regions are placed in a strip beside the squished picture (standard output size only).", OBS_TEXT_INFO);
+	obs_properties_add_text(
+		atlas, "atlas_info",
+		"Sharp regions are placed in a strip beside the squished picture (standard output size only).",
+		OBS_TEXT_INFO);
 	static const char *labels[4] = {"Left", "Top", "Right", "Bottom"};
 	static const char *keys[4] = {S_ATLAS_X0, S_ATLAS_Y0, S_ATLAS_X1, S_ATLAS_Y1};
 	for (int i = 0; i < ATLAS_MAX_REGIONS; i++) {
