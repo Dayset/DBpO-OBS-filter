@@ -272,12 +272,28 @@ def unsquish_with_atlas(frame, cfg_text, view_w, view_h, src_w, src_h):
     rows = bilinear_matrix(sq.y, view_h, ph)
     cols = bilinear_matrix(sq.x, view_w, pw)
     view = warp2(rows, picture, cols).copy()
+    fh, fw = frame.shape[:2]
     for r, (x, y, w, h, _) in zip(atlas.regions, slots):
-        vx0, vx1 = int(round(r.x0 * view_w)), int(round(r.x1 * view_w))
-        vy0, vy1 = int(round(r.y0 * view_h)), int(round(r.y1 * view_h))
-        ys = np.clip((np.arange(vy0, vy1) - vy0 + 0.5) * h / max(vy1 - vy0, 1), 0, h - 1).astype(int)
-        xs = np.clip((np.arange(vx0, vx1) - vx0 + 0.5) * w / max(vx1 - vx0, 1), 0, w - 1).astype(int)
-        view[vy0:vy1, vx0:vx1] = frame[y + ys][:, x + xs]
+        # Same as the viewer's shader: view pixel centres inside the region read the slot with
+        # bilinear filtering (region-local position mapped onto the slot; the gutter is an
+        # edge copy, so reading past the slot edge gives the edge colour).
+        cx = (np.arange(view_w) + 0.5) / view_w
+        cy = (np.arange(view_h) + 0.5) / view_h
+        ix = np.nonzero((cx >= r.x0) & (cx <= r.x1))[0]
+        iy = np.nonzero((cy >= r.y0) & (cy <= r.y1))[0]
+        if not len(ix) or not len(iy):
+            continue
+        tx = x + (cx[ix] - r.x0) / (r.x1 - r.x0) * w - 0.5
+        ty = y + (cy[iy] - r.y0) / (r.y1 - r.y0) * h - 0.5
+        tx0 = np.floor(tx).astype(int)
+        ty0 = np.floor(ty).astype(int)
+        fx = (tx - tx0)[None, :, None]
+        fy = (ty - ty0)[:, None, None]
+        xa, xb = np.clip(tx0, 0, fw - 1), np.clip(tx0 + 1, 0, fw - 1)
+        ya, yb = np.clip(ty0, 0, fh - 1), np.clip(ty0 + 1, 0, fh - 1)
+        top = frame[ya][:, xa] * (1 - fx) + frame[ya][:, xb] * fx
+        bottom = frame[yb][:, xa] * (1 - fx) + frame[yb][:, xb] * fx
+        view[np.ix_(iy, ix)] = top * (1 - fy) + bottom * fy
     return view
 
 
