@@ -662,6 +662,13 @@ static void fsq_render(void *data, gs_effect_t *unused)
 	struct layout L;
 	compute_layout(f, w, h, &L);
 	const struct squish_config *c = &L.c;
+	static int diag_done = 0;
+	if (!diag_done) {
+		diag_done = 1;
+		blog(LOG_INFO,
+		     "fsq diag: source %ux%u regions %d layout %d target %d tw %u th %u nslots %d ow %u oh %u", w, h,
+		     f->nregions, (int)f->layout, f->target, L.tw, L.th, L.nslots, L.ow, L.oh);
+	}
 	uint32_t pw = L.fw, ph = L.fh; /* preview size */
 	if (f->layout == LAYOUT_EXACT) {
 		pw = w;
