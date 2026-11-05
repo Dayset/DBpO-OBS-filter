@@ -35,7 +35,9 @@ def make():
     img = np.zeros((H, W, 4), np.uint8)
     img[..., :3] = GREY
     img[..., 3] = 255
-    img[int(0.85 * H):, int(0.8 * W):, :3] = RED      # the region: bottom-right corner
+    # The region: bottom-right corner. Red extends past it, so its left and top
+    # edges are solid red, not a grey/red blend (the gutter repeats those pixels).
+    img[int(0.7 * H):, int(0.6 * W):, :3] = RED
     sys.stdout.buffer.write(np.tile(img, (N, 1, 1, 1)).tobytes())
 
 
