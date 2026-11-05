@@ -43,6 +43,32 @@
     <div id="sliders"></div>
     <label><input type="checkbox" id="plainVideos"> Also use my look on normal videos</label>
   </fieldset>
+  <fieldset>
+    <legend>Edge enhance (viewer side)</legend>
+    <div class="hint">Rebuilds crisper edges in the squeezed periphery after unsquishing. Costs the streamer no bitrate; the sharp center is never touched.</div>
+    <label>Preset: <select id="enhPreset">
+      <option value="custom">Custom</option>
+      <option value="off">Off</option>
+      <option value="light">Light (Lanczos + sharpen)</option>
+      <option value="balanced">Balanced</option>
+      <option value="crisp">Crisp (edge snap + dither)</option>
+    </select></label>
+    <label>Scaling: <select id="enhKernel">
+      <option value="bilinear">Bilinear (default)</option>
+      <option value="lanczos">Lanczos3 (sharper, ~35 reads/px)</option>
+    </select></label>
+    <label>Area: <select id="enhArea">
+      <option value="periphery">Squeezed edges only</option>
+      <option value="all">Whole picture</option>
+    </select></label>
+    <div id="enhSliders"></div>
+    <label><input type="checkbox" id="debug"> Debug overlay (fps, CPU/GPU time, benchmark)</label>
+    <label>Compare: <select id="compare">
+      <option value="off">Off</option>
+      <option value="split">Split: left plain, right enhanced</option>
+    </select></label>
+    <div class="hint">Alt+Shift+U switches the enhancement off and on while watching.</div>
+  </fieldset>
   <script src="squish.js"></script>
   <script src="popup.js"></script>
 </body>

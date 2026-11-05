@@ -47,6 +47,25 @@ The page's `<html>` element gets `data-dbpo-look="sharpen,clarity,hdr,bloom,shar
 
 After installing or updating the extension, open tabs are switched to the new version automatically.
 
+## Edge enhance and debug overlay (viewer side)
+
+The squeezed periphery is stretched back out, so its edges come back soft. **Edge enhance** (popup, off by default) rebuilds crisper edges after unsquishing, only there and never in the sharp center or in atlas sharp areas. It costs the streamer no bitrate. Measured on synthetic clips (`research/foveation/viewer_restoration.py`, `viewer_snap_preview.py`): edge sharpness 0.59x of the original with bilinear, 0.69x with Lanczos + sharpen, 0.84x with the full snap; the snap trades about 0.4 dB PSNR (edges differ from the original but are not blurred).
+
+- **Scaling**: Bilinear (default) or Lanczos3 for the squeezed edges (about 35 texture reads per pixel; the center stays bilinear and 1:1).
+- **Deblock**: 5x5 edge-preserving smoothing against block and noise.
+- **Edge sharpen**, **Edge snap** (steepens edges, merges flat areas with their 3x3 median), **Edge vibrance** (low-saturation pixels gain most), **Posterize** (255 down to 31 levels) with ordered **Dither**, **Grain**.
+- **Area**: squeezed edges only (default) or the whole picture. Presets: Light, Balanced, Crisp.
+
+The GPU versions are cheaper approximations of the numpy models (one steepening pass, bilateral weights in sqrt-encoded RGB). Dither is a static ordered pattern and can show as fine dots on flat areas: keep it low. Grain changes every frame.
+
+**Debug overlay** (popup: *Debug overlay*): render fps, video fps and dropped frames, CPU submit time, GPU time per draw (`EXT_disjoint_timer_query` when the browser offers it, otherwise a sparse `gl.finish()` estimate that is labeled as such), the pass list and a rough texture-reads-per-pixel figure. Buttons and keys:
+
+- **A/B bypass** or **Alt+Shift+U** turns the enhancement off and on while watching.
+- **Split view** (or *Compare: Split* in the popup) draws plain bilinear on the left and the enhanced picture on the right (doubles the cost while on).
+- **Benchmark** steps through baseline, each option, the presets and your current settings (about 3.5 s each, with the current look included) and shows GPU ms, CPU ms, fps and reads/px; **Copy results** puts the table on the clipboard. Run it on the machine you care about: timings inside a headless test browser (software GL) mean nothing.
+
+`tests/e2e_enhance.py` checks that every pass compiles, the 1:1 center is untouched, the periphery changes, the overlay reports metrics, split view and the benchmark work.
+
 ## How it works
 
 `content.js` finds the largest playing `<video>`, sets it to `opacity: 0` (it keeps playing, with sound intact) and puts a canvas directly above it, below the player's own controls (they stay visible and clickable), sized to the source aspect ratio. Every animation frame the video is uploaded as a texture and drawn with `squish.js`'s fragment shader, which maps each screen pixel to its position in the squished frame. The math is identical to the OBS shader; `tests/compare.js` checks it against the Python reference (worst difference 5e-13), and `tests/e2e.py` plays a squished VP9 video in headless Chromium and checks the canvas against the reference viewer (0.5/255 mean difference, landmarks within 0.02 px). `tests/look.py` checks the look against a numpy model of the same passes (0/255 difference) for the streamer's look, your own look, look off and plain videos; `tests/extension.py` loads the real extension, sets the look through the popup and checks that player controls stay on top and clickable. CI runs all of them (`run-tests.sh --e2e`).

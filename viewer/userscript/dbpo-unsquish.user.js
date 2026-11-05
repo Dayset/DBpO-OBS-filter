@@ -341,7 +341,31 @@ uniform vec2 u_texel; // 1 / video size
 uniform int u_nrgn;
 uniform vec4 u_rgn[4];  // sharp region in view uv: x0, y0, x1, y1
 uniform vec4 u_slot[4]; // its slot in the video frame uv: x, y, w, h
+uniform int u_kernel;   // 0 bilinear, 1 Lanczos3 (squeezed periphery only; the 1:1 center stays bilinear)
 varying vec2 v_uv;
+float lz3(float x) {
+	x = abs(x);
+	if (x < 1e-4) return 1.0;
+	if (x >= 3.0) return 0.0;
+	float px = 3.14159265 * x;
+	return 3.0 * sin(px) * sin(px / 3.0) / (px * px);
+}
+vec4 sample_lanczos(vec2 u) {
+	vec2 p = u / u_texel - 0.5, f = floor(p);
+	vec2 lo = u_box.xy + 0.5 * u_texel, hi = u_box.xy + u_box.zw - 0.5 * u_texel;
+	vec4 acc = vec4(0.0);
+	float wsum = 0.0;
+	for (int j = -2; j <= 3; j++) {
+		float wy = lz3(p.y - (f.y + float(j)));
+		for (int i = -2; i <= 3; i++) {
+			float w = lz3(p.x - (f.x + float(i))) * wy;
+			vec2 q = clamp((f + vec2(float(i), float(j)) + 0.5) * u_texel, lo, hi);
+			acc += texture2D(u_video, q) * w;
+			wsum += w;
+		}
+	}
+	return clamp(acc / wsum, 0.0, 1.0);
+}
 float periph(float t, float len, float k, float p) { return len * (t - k * pow(t, p + 1.0)); }
 float sq_forward(float x, vec4 A, vec4 B) {
 	float leftFull = periph(1.0, A.z, B.x, B.y);
@@ -367,7 +391,9 @@ void main() {
 	u = u_box.xy + u * u_box.zw;
 	// Stay half a pixel inside the picture so bilinear filtering never pulls in the bars.
 	u = clamp(u, u_box.xy + 0.5 * u_texel, u_box.xy + u_box.zw - 0.5 * u_texel);
-	gl_FragColor = texture2D(u_video, u);
+	bool center = v_uv.x >= u_ax_a.x && v_uv.x <= u_ax_a.y && v_uv.y >= u_ay_a.x && v_uv.y <= u_ay_a.y;
+	if (u_kernel == 1 && !center) gl_FragColor = vec4(sample_lanczos(u).rgb, 1.0);
+	else gl_FragColor = texture2D(u_video, u);
 }`;
 
 	/*
@@ -506,6 +532,169 @@ void main() {
 	gl_FragColor = vec4(clamp(c, 0.0, 1.0), src.a);
 }`;
 
+	/*
+	 * Viewer-side edge enhancement ("reconstruction"): extra passes after unsquishing that make the
+	 * stretched periphery look crisper. They cost the streamer no bitrate and change nothing in the
+	 * center. Models: research/foveation/viewer_restoration.py and viewer_snap_preview.py (the GPU
+	 * versions are cheaper approximations: 5x5 bilateral deblock in sqrt-encoded RGB, one steepening
+	 * iteration, 3x3 median flat merge).
+	 */
+	const PERIPH_GLSL = `
+precision highp float;
+uniform vec4 u_ax_a; uniform vec4 u_ax_b; uniform vec4 u_ay_a; uniform vec4 u_ay_b;
+uniform float u_area;   // 0 = squeezed periphery only, 1 = whole picture
+uniform int u_nrgn;
+uniform vec4 u_rgn[4];  // sharp regions (atlas) are left alone
+float dens(float x, vec4 A, vec4 B) {
+	float t = 0.0;
+	if (x < A.x) t = (A.x - x) / max(A.z, 1e-6);
+	else if (x > A.y) t = (x - A.y) / max(A.w, 1e-6);
+	return 1.0 - (1.0 - B.w) * pow(clamp(t, 0.0, 1.0), B.y);
+}
+// uv: picture position, top-down. 0 in the sharp center, up to 1 at the squeezed edges.
+float weight_at(vec2 uv) {
+	for (int i = 0; i < 4; i++) {
+		if (i >= u_nrgn) break;
+		vec4 r = u_rgn[i];
+		if (uv.x >= r.x && uv.x <= r.z && uv.y >= r.y && uv.y <= r.w) return 0.0;
+	}
+	if (u_area > 0.5) return 1.0;
+	float wx = (1.0 - dens(uv.x, u_ax_a, u_ax_b)) / max(1.0 - u_ax_b.w, 1e-3);
+	float wy = (1.0 - dens(uv.y, u_ay_a, u_ay_b)) / max(1.0 - u_ay_b.w, 1e-3);
+	return clamp(max(wx, wy) * 1.5, 0.0, 1.0);
+}
+varying vec2 v_uv;
+uniform sampler2D u_img;
+uniform vec2 u_px;
+`;
+
+	// Deblock / denoise: 5x5 edge-preserving (bilateral) smoothing, strength = range sigma.
+	const ENH_DEBLOCK_SHADER = PERIPH_GLSL + `
+uniform float u_amt;
+vec3 enc(vec3 c) { return sqrt(max(c, 0.0)); }
+void main() {
+	vec4 c4 = texture2D(u_img, v_uv);
+	float w = weight_at(vec2(v_uv.x, 1.0 - v_uv.y));
+	if (w <= 0.0) { gl_FragColor = c4; return; }
+	float sig = mix(0.012, 0.05, u_amt);
+	vec3 base = enc(c4.rgb), acc = vec3(0.0);
+	float ws = 0.0;
+	for (int j = -2; j <= 2; j++) {
+		for (int i = -2; i <= 2; i++) {
+			vec3 s = texture2D(u_img, v_uv + vec2(float(i), float(j)) * u_px).rgb;
+			vec3 d = enc(s) - base;
+			float wt = exp(-dot(d, d) / (2.0 * sig * sig) - float(i * i + j * j) / 4.5);
+			acc += s * wt;
+			ws += wt;
+		}
+	}
+	gl_FragColor = vec4(mix(c4.rgb, acc / ws, w), c4.a);
+}`;
+
+	// Edge pass: sharpen, edge snap (steepen edges + median-merge flat areas), vibrance,
+	// posterize + ordered dither, grain. u_a = sharpen, snap, vibrance, posterize; u_b = dither, grain.
+	const ENH_EDGE_SHADER = PERIPH_GLSL + `
+uniform vec4 u_a;
+uniform vec2 u_b;
+uniform float u_frame;
+float luma(vec3 c) { return dot(c, vec3(0.2126, 0.7152, 0.0722)); }
+vec3 tap(float x, float y) { return texture2D(u_img, v_uv + vec2(x, y) * u_px).rgb; }
+#define SORT(a, b) { vec3 t_ = min(a, b); b = max(a, b); a = t_; }
+float bayer2(vec2 a) { a = floor(a); return fract(a.x * 0.5 + a.y * a.y * 0.75); }
+float bayer4(vec2 a) { return bayer2(0.5 * a) * 0.25 + bayer2(a); }
+void main() {
+	vec4 c4 = texture2D(u_img, v_uv);
+	float w = weight_at(vec2(v_uv.x, 1.0 - v_uv.y));
+	if (w <= 0.0) { gl_FragColor = c4; return; }
+	vec3 c = c4.rgb;
+	vec3 p0 = tap(-1.0, -1.0), p1 = tap(0.0, -1.0), p2 = tap(1.0, -1.0);
+	vec3 p3 = tap(-1.0, 0.0), p4 = c, p5 = tap(1.0, 0.0);
+	vec3 p6 = tap(-1.0, 1.0), p7 = tap(0.0, 1.0), p8 = tap(1.0, 1.0);
+	vec3 blur = (p0 + p2 + p6 + p8 + 2.0 * (p1 + p3 + p5 + p7) + 4.0 * p4) / 16.0;
+	vec3 o = c + u_a.x * 0.8 * (c - blur); // sharpen
+	if (u_a.y > 0.0) {
+		float y0 = luma(p0), y1 = luma(p1), y2 = luma(p2), y3 = luma(p3), y5 = luma(p5), y6 = luma(p6), y7 = luma(p7), y8 = luma(p8);
+		float g = length(vec2((y2 + 2.0 * y5 + y8) - (y0 + 2.0 * y3 + y6), (y6 + 2.0 * y7 + y8) - (y0 + 2.0 * y1 + y2)));
+		vec3 lo = min(min(min(p0, p1), min(p2, p3)), min(min(p4, p5), min(p6, min(p7, p8))));
+		vec3 hi = max(max(max(p0, p1), max(p2, p3)), max(max(p4, p5), max(p6, max(p7, p8))));
+		vec3 target = (luma(blur) - luma(p4)) > 0.0 ? lo : hi; // steepen: pull toward the nearer extreme
+		float a = clamp(g * 6.0, 0.0, 1.0) * u_a.y * 0.8;
+		o = o * (1.0 - 0.5 * a) + target * 0.5 * a;
+		// flat areas take the 3x3 median (Pixel Snapper "merge")
+		vec3 v0 = p0, v1 = p1, v2 = p2, v3 = p3, v4 = p4, v5 = p5, v6 = p6, v7 = p7, v8 = p8;
+		SORT(v1, v2) SORT(v4, v5) SORT(v7, v8) SORT(v0, v1) SORT(v3, v4) SORT(v6, v7)
+		SORT(v1, v2) SORT(v4, v5) SORT(v7, v8) SORT(v0, v3) SORT(v5, v8) SORT(v4, v7)
+		SORT(v3, v6) SORT(v1, v4) SORT(v2, v5) SORT(v4, v7) SORT(v4, v2) SORT(v6, v4) SORT(v4, v2)
+		float flatness = 1.0 - smoothstep(0.1, 0.2, clamp(g * 4.0, 0.0, 1.0));
+		o = mix(o, v4, flatness * clamp(u_a.y * 2.0, 0.0, 1.0));
+	}
+	if (u_a.z > 0.0) { // vibrance: low-saturation pixels gain most
+		float y = luma(o), sat = max(max(o.r, o.g), o.b) - min(min(o.r, o.g), o.b);
+		o = vec3(y) + (o - vec3(y)) * (1.0 + u_a.z * 0.5 * (1.0 - sat));
+	}
+	if (u_a.w > 0.0 || u_b.x > 0.0) { // posterize (255 -> 31 levels) with ordered dither
+		float levels = mix(255.0, 31.0, u_a.w);
+		float m = bayer4(gl_FragCoord.xy) - 0.46875;
+		o = floor(o * levels + m * u_b.x * 2.0 + 0.5) / levels;
+	}
+	if (u_b.y > 0.0) {
+		float n = fract(sin(dot(gl_FragCoord.xy + u_frame, vec2(12.9898, 78.233))) * 43758.5453);
+		o += (n - 0.5) * u_b.y * (8.0 / 255.0);
+	}
+	gl_FragColor = vec4(clamp(mix(c, o, w), 0.0, 1.0), c4.a);
+}`;
+
+	/* Enhancement settings: [name, label]; all 0..1, 0 = off. */
+	const ENHANCE_FIELDS = [
+		["deblock", "Deblock"], ["sharpen", "Edge sharpen"], ["snap", "Edge snap"], ["vibrance", "Edge vibrance"],
+		["posterize", "Posterize"], ["dither", "Dither"], ["grain", "Grain"],
+	];
+	const NO_ENHANCE = Object.freeze({
+		kernel: "bilinear", area: "periphery", ...Object.fromEntries(ENHANCE_FIELDS.map(([k]) => [k, 0])),
+	});
+	const ENHANCE_PRESETS = {
+		off: { ...NO_ENHANCE },
+		light: { ...NO_ENHANCE, kernel: "lanczos", deblock: 0.3, sharpen: 0.5 },
+		balanced: { ...NO_ENHANCE, kernel: "lanczos", deblock: 0.5, sharpen: 0.4, snap: 0.5, vibrance: 0.2 },
+		crisp: { ...NO_ENHANCE, kernel: "lanczos", deblock: 0.5, snap: 1, vibrance: 0.4, posterize: 0.6, dither: 0.3 },
+	};
+
+	/** Clamped copy of enhancement settings from storage (missing values = off). */
+	function cleanEnhance(e) {
+		const out = { kernel: e && e.kernel === "lanczos" ? "lanczos" : "bilinear", area: e && e.area === "all" ? "all" : "periphery" };
+		for (const [k] of ENHANCE_FIELDS) out[k] = clamp01(Number(e && e[k]) || 0);
+		return out;
+	}
+
+	/** Which render stages an enhancement needs. */
+	function enhanceStages(e) {
+		return {
+			lanczos: e.kernel === "lanczos",
+			deblock: e.deblock > 0,
+			edge: e.sharpen > 0 || e.snap > 0 || e.vibrance > 0 || e.posterize > 0 || e.dither > 0 || e.grain > 0,
+		};
+	}
+
+	function enhanceActive(e) {
+		if (!e) return false;
+		const st = enhanceStages(e);
+		return st.lanczos || st.deblock || st.edge;
+	}
+
+	/** Rough texture reads per pixel of the whole draw (periphery pixels), for the debug overlay. */
+	function readsPerPixel(e, look) {
+		let n = 1; // unwarp
+		const parts = ["unwarp"];
+		if (e && e.kernel === "lanczos") { n += 35; parts[0] = "unwarp lanczos3"; }
+		if (e && e.deblock > 0) { n += 26; parts.push("deblock"); }
+		const st = e ? enhanceStages(e) : {};
+		if (st.edge) { n += 10; parts.push("edge"); }
+		if (colorActive(look)) { n += 1; parts.push("colour"); }
+		if (look && (look.sharpen > 0 || look.clarity > 0 || look.hdr > 0 || look.bloom > 0)) { n += 36; parts.push("details"); }
+		if (look && look.sharpenPlus > 0) { n += 10; parts.push("sharpen+"); }
+		return { reads: n, parts };
+	}
+
 	/** The page a pasted config belongs to: host + first path segment ("www.twitch.tv/somechannel"). */
 	function pageKey(href) {
 		try {
@@ -520,6 +709,8 @@ void main() {
 		MIN_DENSITY, derive, forward, density, inverse, parse, uniforms, FRAGMENT_SHADER, atlasLayout,
 		NO_LOOK, lookActive, colorActive, cleanLook, identity, pageKey, LOOK_BLUR_SHADER, LOOK_DETAILS_SHADER, LOOK_CAS_SHADER,
 		LOOK_COLOR_SHADER, LOOK_FIELDS, packLook, unpackLook,
+		ENH_DEBLOCK_SHADER, ENH_EDGE_SHADER, ENHANCE_FIELDS, NO_ENHANCE, ENHANCE_PRESETS, cleanEnhance, enhanceStages,
+		enhanceActive, readsPerPixel,
 	};
 	if (typeof module !== "undefined" && module.exports) module.exports = api;
 	else root.FSQ = api;
@@ -579,6 +770,32 @@ void main() {
     <div id="sliders"></div>
     <label><input type="checkbox" id="plainVideos"> Also use my look on normal videos</label>
   </fieldset>
+  <fieldset>
+    <legend>Edge enhance (viewer side)</legend>
+    <div class="hint">Rebuilds crisper edges in the squeezed periphery after unsquishing. Costs the streamer no bitrate; the sharp center is never touched.</div>
+    <label>Preset: <select id="enhPreset">
+      <option value="custom">Custom</option>
+      <option value="off">Off</option>
+      <option value="light">Light (Lanczos + sharpen)</option>
+      <option value="balanced">Balanced</option>
+      <option value="crisp">Crisp (edge snap + dither)</option>
+    </select></label>
+    <label>Scaling: <select id="enhKernel">
+      <option value="bilinear">Bilinear (default)</option>
+      <option value="lanczos">Lanczos3 (sharper, ~35 reads/px)</option>
+    </select></label>
+    <label>Area: <select id="enhArea">
+      <option value="periphery">Squeezed edges only</option>
+      <option value="all">Whole picture</option>
+    </select></label>
+    <div id="enhSliders"></div>
+    <label><input type="checkbox" id="debug"> Debug overlay (fps, CPU/GPU time, benchmark)</label>
+    <label>Compare: <select id="compare">
+      <option value="off">Off</option>
+      <option value="split">Split: left plain, right enhanced</option>
+    </select></label>
+    <div class="hint">Alt+Shift+U switches the enhancement off and on while watching.</div>
+  </fieldset>
   </div><button class="gear" id="gear" aria-label="DBpO Unsquish settings">◐</button>`;
 	root.getElementById("gear").onclick = () => root.getElementById("box").classList.toggle("open");
 	document.documentElement.appendChild(host);
@@ -595,7 +812,12 @@ $("sliders").innerHTML = FSQ.LOOK_FIELDS.map(
 	([k, label, signed]) =>
 		`<div class="slider"><span>${label}</span><input type="range" id="${k}" min="${signed ? -100 : 0}" max="100" step="1"><output id="${k}Out"></output></div>`
 ).join("");
-const defaults = { enabled: true, autoDetect: true, config: "", configPage: "", quality: "auto", lookMode: "streamer", myLook: NO_LOOK, plainVideos: false };
+$("enhSliders").innerHTML = FSQ.ENHANCE_FIELDS.map(
+	([k, label]) =>
+		`<div class="slider"><span>${label}</span><input type="range" id="e_${k}" min="0" max="100" step="1"><output id="e_${k}Out"></output></div>`
+).join("");
+const ENH_KEYS = FSQ.ENHANCE_FIELDS.map(([k]) => k);
+const defaults = { enabled: true, autoDetect: true, config: "", configPage: "", quality: "auto", lookMode: "streamer", myLook: NO_LOOK, plainVideos: false, enhance: FSQ.NO_ENHANCE, debug: false, compare: "off" };
 let tabKey = ""; // the page this popup was opened on (pasted configs belong to it)
 let current = null; // the config in use (pasted or detected), for showing the streamer's look
 
@@ -627,6 +849,21 @@ function renderLook(s) {
 				: "No look: you see the stream exactly as sent.";
 }
 
+/* Edge enhancement controls: the preset box shows which preset the current values equal, else "Custom". */
+function renderEnhance(s) {
+	const e = FSQ.cleanEnhance(s.enhance);
+	$("enhKernel").value = e.kernel;
+	$("enhArea").value = e.area;
+	for (const k of ENH_KEYS) {
+		$(`e_${k}`).value = Math.round(e[k] * 100);
+		$(`e_${k}Out`).textContent = `${Math.round(e[k] * 100)}%`;
+	}
+	const same = (a, b) => a.kernel === b.kernel && a.area === b.area && ENH_KEYS.every((k) => Math.abs(a[k] - b[k]) < 0.005);
+	$("enhPreset").value = Object.keys(FSQ.ENHANCE_PRESETS).find((n) => same(e, FSQ.ENHANCE_PRESETS[n])) || "custom";
+	$("debug").checked = !!s.debug;
+	$("compare").value = s.compare === "split" ? "split" : "off";
+}
+
 /* ", 2 sharp areas" when the config keeps HUD regions sharp (atlas), else "". */
 function regionsText(cfg) {
 	const n = cfg && cfg.regions ? cfg.regions.length : 0;
@@ -643,6 +880,7 @@ function render(s, detected) {
 	const pasted = here ? FSQ.parse(s.config) : null;
 	current = pasted || (s.autoDetect && detected ? FSQ.parse(detected) : null);
 	renderLook(s);
+	renderEnhance(s);
 	const st = $("status");
 	st.classList.remove("bad");
 	if (s.config && here && !pasted) {
@@ -699,6 +937,26 @@ for (const k of LOOK_KEYS) {
 		if (!pending) pending = setTimeout(() => ((pending = null), saveMyLook()), 700);
 	});
 	$(k).addEventListener("change", saveMyLook);
+}
+function readEnhance() {
+	const e = { kernel: $("enhKernel").value, area: $("enhArea").value };
+	for (const k of ENH_KEYS) e[k] = Number($(`e_${k}`).value) / 100;
+	return FSQ.cleanEnhance(e);
+}
+$("enhPreset").onchange = (e) => {
+	if (e.target.value !== "custom") chrome.storage.sync.set({ enhance: FSQ.ENHANCE_PRESETS[e.target.value] }, load);
+};
+$("enhKernel").onchange = () => chrome.storage.sync.set({ enhance: readEnhance() }, load);
+$("enhArea").onchange = () => chrome.storage.sync.set({ enhance: readEnhance() }, load);
+$("debug").onchange = (e) => chrome.storage.sync.set({ debug: e.target.checked }, load);
+$("compare").onchange = (e) => chrome.storage.sync.set({ compare: e.target.value }, load);
+let pendingEnh = null;
+for (const k of ENH_KEYS) {
+	$(`e_${k}`).addEventListener("input", () => {
+		$(`e_${k}Out`).textContent = `${$(`e_${k}`).value}%`;
+		if (!pendingEnh) pendingEnh = setTimeout(() => ((pendingEnh = null), chrome.storage.sync.set({ enhance: readEnhance() })), 700);
+	});
+	$(`e_${k}`).addEventListener("change", () => chrome.storage.sync.set({ enhance: readEnhance() }, load));
 }
 load();
 
@@ -835,12 +1093,16 @@ void main() { v_uv = a_pos * 0.5 + 0.5; gl_Position = vec4(a_pos, 0.0, 1.0); }`;
 		lookMode: "streamer",
 		myLook: { sharpen: 0, clarity: 0, hdr: 0, bloom: 0, sharpenPlus: 0 }, // more fields are filled in by FSQ.cleanLook
 		plainVideos: false,
+		enhance: { ...FSQ.NO_ENHANCE }, // viewer-side edge reconstruction of the squeezed periphery (see squish.js)
+		debug: false, // overlay with fps / CPU / GPU time, A/B and benchmark
+		compare: "off", // "split": left plain, right enhanced (doubles the cost)
 	};
 	const isLight = () =>
 		settings.quality === "light" ||
 		(settings.quality === "auto" && /Android|iPhone|iPad|iPod|Mobi/i.test(navigator.userAgent));
 	let detected = null; // config found in the page
 	let state = null; // { video, canvas, gl, prog, loc, tex, cfg }
+	let carry = {}; // debug state (benchmark, A/B bypass, timings) that survives a short detach, e.g. a looping video
 
 	function activeConfig() {
 		if (!settings.enabled) return null;
@@ -910,7 +1172,8 @@ void main() { v_uv = a_pos * 0.5 + 0.5; gl_Position = vec4(a_pos, 0.0, 1.0); }`;
 		return tex;
 	}
 
-	/* Look programs and framebuffers, made the first time a look is used. */
+	/* Look programs and framebuffers, made the first time a look or an enhancement is used. */
+	const AXES = ["u_ax_a", "u_ax_b", "u_ay_a", "u_ay_b", "u_area", "u_nrgn", "u_rgn"];
 	function lookSetup(s) {
 		if (s.look) return s.look;
 		const gl = s.gl;
@@ -919,7 +1182,9 @@ void main() { v_uv = a_pos * 0.5 + 0.5; gl_Position = vec4(a_pos, 0.0, 1.0); }`;
 			details: program(gl, VERT_POST, FSQ.LOOK_DETAILS_SHADER, ["u_img", "u_large", "u_px", "u_look"]),
 			cas: program(gl, VERT_POST, FSQ.LOOK_CAS_SHADER, ["u_img", "u_px", "u_sharp"]),
 			color: program(gl, VERT_POST, FSQ.LOOK_COLOR_SHADER, ["u_img", "u_a", "u_b", "u_c", "u_n"]),
-			targets: [0, 1, 2, 3, 4].map(() => ({ tex: makeTexture(gl), fb: gl.createFramebuffer(), w: 0, h: 0 })),
+			deblock: program(gl, VERT_POST, FSQ.ENH_DEBLOCK_SHADER, ["u_img", "u_px", "u_amt", ...AXES]),
+			edge: program(gl, VERT_POST, FSQ.ENH_EDGE_SHADER, ["u_img", "u_px", "u_a", "u_b", "u_frame", ...AXES]),
+			targets: [0, 1, 2, 3, 4, 5].map(() => ({ tex: makeTexture(gl), fb: gl.createFramebuffer(), w: 0, h: 0 })),
 		};
 		return s.look;
 	}
@@ -935,9 +1200,15 @@ void main() { v_uv = a_pos * 0.5 + 0.5; gl_Position = vec4(a_pos, 0.0, 1.0); }`;
 		gl.bindFramebuffer(gl.FRAMEBUFFER, null);
 	}
 
-	function bindOutput(gl, t, w, h) {
+	/* Output to a target, or to the screen (limited to s.rect when comparing side by side). */
+	function bindOutput(s, t, w, h) {
+		const gl = s.gl;
 		gl.bindFramebuffer(gl.FRAMEBUFFER, t ? t.fb : null);
 		gl.viewport(0, 0, w, h);
+		if (!t && s.rect) {
+			gl.enable(gl.SCISSOR_TEST);
+			gl.scissor(s.rect.x, s.rect.y, s.rect.w, s.rect.h);
+		} else gl.disable(gl.SCISSOR_TEST);
 	}
 
 	function useTex(gl, unit, tex) {
@@ -945,74 +1216,100 @@ void main() { v_uv = a_pos * 0.5 + 0.5; gl_Position = vec4(a_pos, 0.0, 1.0); }`;
 		gl.bindTexture(gl.TEXTURE_2D, tex);
 	}
 
+	function setAxes(s, p, enh) {
+		const gl = s.gl, u = s.u;
+		gl.uniform4fv(p.loc.u_ax_a, u.ux.A);
+		gl.uniform4fv(p.loc.u_ax_b, u.ux.B);
+		gl.uniform4fv(p.loc.u_ay_a, u.uy.A);
+		gl.uniform4fv(p.loc.u_ay_b, u.uy.B);
+		gl.uniform1f(p.loc.u_area, enh && enh.area === "all" ? 1 : 0);
+		gl.uniform1i(p.loc.u_nrgn, u.nrgn);
+		gl.uniform4fv(p.loc.u_rgn, u.rgn);
+	}
+
 	/*
-	 * Draws the unsquished picture through the look passes:
-	 * unsquish -> T0; Colour(T0) -> T4; blur H (T0 or T4) -> T1 (half); blur V -> T2 (half);
-	 * Details(src, T2) -> screen or T3; Sharpen+(T3 or src) -> screen. The last pass draws to the screen.
+	 * Draws the unsquished picture through the enhancement and look passes:
+	 * unsquish -> T0; then in order Deblock, Edge, Colour, Details, Sharpen+ (only those that are on),
+	 * ping-ponging through T3/T4/T5; Details also uses T1/T2 (half size) for its blur.
+	 * The last pass draws to the screen.
 	 */
-	function drawWithLook(s, look, drawUnsquish) {
+	function drawWithLook(s, look, enh, drawUnsquish) {
 		const gl = s.gl, L = lookSetup(s);
 		const w = s.canvas.width, h = s.canvas.height, hw = Math.max(1, (w + 1) >> 1), hh = Math.max(1, (h + 1) >> 1);
-		const [t0, t1, t2, t3, t4] = L.targets;
+		const [t0, t1, t2, t3, t4, t5] = L.targets;
+		const pool = [t3, t4, t5];
+		const st = enh ? FSQ.enhanceStages(enh) : {};
 		const details = look.sharpen > 0 || look.clarity > 0 || look.hdr > 0 || look.bloom > 0;
 		const cas = look.sharpenPlus > 0;
 		const color = FSQ.colorActive(look);
+		const stages = [];
+		if (st.deblock) stages.push("deblock");
+		if (st.edge) stages.push("edge");
+		if (color) stages.push("color");
+		if (details) stages.push("details");
+		if (cas) stages.push("cas");
 		sizeTarget(gl, t0, w, h);
-		if (color && (details || cas)) sizeTarget(gl, t4, w, h);
 		if (details) {
 			sizeTarget(gl, t1, hw, hh);
 			sizeTarget(gl, t2, hw, hh);
-			if (cas) sizeTarget(gl, t3, w, h);
 		}
 		useTex(gl, 0, s.tex); // sizing rebinds textures: the video goes back on unit 0
-		bindOutput(gl, t0, w, h);
+		bindOutput(s, t0, w, h);
 		drawUnsquish();
 		let last = t0;
-		if (color) {
-			gl.useProgram(L.color.prog);
-			gl.uniform1i(L.color.loc.u_img, 0);
-			gl.uniform4f(L.color.loc.u_a, look.brightness, look.contrast, look.gamma, look.saturation);
-			gl.uniform4f(L.color.loc.u_b, look.vibrance, look.temperature, look.tint, look.hue);
-			gl.uniform4f(L.color.loc.u_c, look.highlights, look.shadows, look.bw, look.sepia);
-			gl.uniform1f(L.color.loc.u_n, look.night);
-			useTex(gl, 0, t0.tex);
-			const toScreen = !details && !cas;
-			bindOutput(gl, toScreen ? null : t4, w, h);
-			gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
-			last = t4;
-		}
-		if (details) {
-			const scale = Math.max(h / 1080, 0.25); // blur size relative to a 1080p picture
-			gl.useProgram(L.blur.prog);
-			gl.uniform1i(L.blur.loc.u_img, 0);
-			bindOutput(gl, t1, hw, hh);
+		stages.forEach((stage, i) => {
+			const out = i === stages.length - 1 ? null : pool.find((t) => t !== last);
+			if (out) sizeTarget(gl, out, w, h);
+			if (stage === "deblock") {
+				gl.useProgram(L.deblock.prog);
+				gl.uniform1i(L.deblock.loc.u_img, 0);
+				gl.uniform2f(L.deblock.loc.u_px, 1 / w, 1 / h);
+				gl.uniform1f(L.deblock.loc.u_amt, enh.deblock);
+				setAxes(s, L.deblock, enh);
+			} else if (stage === "edge") {
+				gl.useProgram(L.edge.prog);
+				gl.uniform1i(L.edge.loc.u_img, 0);
+				gl.uniform2f(L.edge.loc.u_px, 1 / w, 1 / h);
+				gl.uniform4f(L.edge.loc.u_a, enh.sharpen, enh.snap, enh.vibrance, enh.posterize);
+				gl.uniform2f(L.edge.loc.u_b, enh.dither, enh.grain);
+				gl.uniform1f(L.edge.loc.u_frame, (s.frameNo % 997) * 1.0);
+				setAxes(s, L.edge, enh);
+			} else if (stage === "color") {
+				gl.useProgram(L.color.prog);
+				gl.uniform1i(L.color.loc.u_img, 0);
+				gl.uniform4f(L.color.loc.u_a, look.brightness, look.contrast, look.gamma, look.saturation);
+				gl.uniform4f(L.color.loc.u_b, look.vibrance, look.temperature, look.tint, look.hue);
+				gl.uniform4f(L.color.loc.u_c, look.highlights, look.shadows, look.bw, look.sepia);
+				gl.uniform1f(L.color.loc.u_n, look.night);
+			} else if (stage === "details") {
+				const scale = Math.max(h / 1080, 0.25); // blur size relative to a 1080p picture
+				gl.useProgram(L.blur.prog);
+				gl.uniform1i(L.blur.loc.u_img, 0);
+				bindOutput(s, t1, hw, hh);
+				useTex(gl, 0, last.tex);
+				gl.uniform2f(L.blur.loc.u_step, scale / w, 0);
+				gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
+				bindOutput(s, t2, hw, hh);
+				useTex(gl, 0, t1.tex);
+				gl.uniform2f(L.blur.loc.u_step, 0, scale / h);
+				gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
+				gl.useProgram(L.details.prog);
+				gl.uniform1i(L.details.loc.u_img, 0);
+				gl.uniform1i(L.details.loc.u_large, 1);
+				gl.uniform2f(L.details.loc.u_px, 1 / w, -1 / h);
+				gl.uniform4f(L.details.loc.u_look, look.sharpen, look.clarity, look.hdr, look.bloom);
+				useTex(gl, 1, t2.tex);
+			} else {
+				gl.useProgram(L.cas.prog);
+				gl.uniform1i(L.cas.loc.u_img, 0);
+				gl.uniform2f(L.cas.loc.u_px, 1 / w, 1 / h);
+				gl.uniform1f(L.cas.loc.u_sharp, look.sharpenPlus);
+			}
 			useTex(gl, 0, last.tex);
-			gl.uniform2f(L.blur.loc.u_step, scale / w, 0);
+			bindOutput(s, out, w, h);
 			gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
-			bindOutput(gl, t2, hw, hh);
-			useTex(gl, 0, t1.tex);
-			gl.uniform2f(L.blur.loc.u_step, 0, scale / h);
-			gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
-			gl.useProgram(L.details.prog);
-			gl.uniform1i(L.details.loc.u_img, 0);
-			gl.uniform1i(L.details.loc.u_large, 1);
-			gl.uniform2f(L.details.loc.u_px, 1 / w, -1 / h);
-			gl.uniform4f(L.details.loc.u_look, look.sharpen, look.clarity, look.hdr, look.bloom);
-			useTex(gl, 0, last.tex);
-			useTex(gl, 1, t2.tex);
-			bindOutput(gl, cas ? t3 : null, w, h);
-			gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
-			last = t3;
-		}
-		if (cas) {
-			gl.useProgram(L.cas.prog);
-			gl.uniform1i(L.cas.loc.u_img, 0);
-			gl.uniform2f(L.cas.loc.u_px, 1 / w, 1 / h);
-			gl.uniform1f(L.cas.loc.u_sharp, look.sharpenPlus);
-			useTex(gl, 0, last.tex);
-			bindOutput(gl, null, w, h);
-			gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
-		}
+			last = out;
+		});
 		// Back to the state the single-pass path expects.
 		useTex(gl, 1, null);
 		useTex(gl, 0, s.tex);
@@ -1024,6 +1321,189 @@ void main() { v_uv = a_pos * 0.5 + 0.5; gl_Position = vec4(a_pos, 0.0, 1.0); }`;
 		gl.viewport(0, 0, s.canvas.width, s.canvas.height);
 		useTex(gl, 0, s.tex);
 		gl.useProgram(s.prog);
+	}
+
+	/*
+	 * Debug overlay: render fps, video fps, CPU submit time and GPU time per draw (EXT_disjoint_timer_query when the
+	 * browser offers it, otherwise a sparse gl.finish() estimate), pass list and texture reads per pixel, an A/B
+	 * bypass (Alt+Shift+U), a split view (left: plain bilinear, right: enhanced) and a benchmark over the options.
+	 */
+	const BENCH_STEPS = [
+		["baseline (bilinear)", {}],
+		["lanczos3 unwarp", { kernel: "lanczos" }],
+		["lanczos3 + deblock 0.5", { kernel: "lanczos", deblock: 0.5 }],
+		["lanczos3 + sharpen 0.5", { kernel: "lanczos", sharpen: 0.5 }],
+		["lanczos3 + edge snap 0.8", { kernel: "lanczos", snap: 0.8 }],
+		["snap + vibrance + dither", { kernel: "lanczos", snap: 1, vibrance: 0.4, posterize: 0.6, dither: 0.3 }],
+		["lanczos3 + grain 0.5", { kernel: "lanczos", grain: 0.5 }],
+		["preset light", FSQ.ENHANCE_PRESETS.light],
+		["preset balanced", FSQ.ENHANCE_PRESETS.balanced],
+		["preset crisp", FSQ.ENHANCE_PRESETS.crisp],
+		["your current settings", null],
+	];
+	const BENCH_WARMUP_MS = 600, BENCH_STEP_MS = 3000;
+
+	const avg = (a) => (a.length ? a.reduce((x, y) => x + y, 0) / a.length : NaN);
+	const p95 = (a) => (a.length ? [...a].sort((x, y) => x - y)[Math.min(a.length - 1, Math.floor(a.length * 0.95))] : NaN);
+	const fmt = (v, d = 2) => (Number.isFinite(v) ? v.toFixed(d) : "n/a");
+
+	function metrics(s) {
+		if (!s.m) s.m = { cpu: [], gpu: [], draws: [], pending: [], timer: undefined, syncMs: NaN, lastVideo: null, videoFps: NaN };
+		return s.m;
+	}
+
+	function gpuBegin(s) {
+		const m = metrics(s), gl = s.gl;
+		if (m.timer === undefined) m.timer = gl.getExtension("EXT_disjoint_timer_query") || null;
+		if (!m.timer || m.pending.length >= 6) return null;
+		const q = m.timer.createQueryEXT();
+		m.timer.beginQueryEXT(m.timer.TIME_ELAPSED_EXT, q);
+		return q;
+	}
+
+	function gpuEnd(s, q) {
+		const m = metrics(s);
+		if (q) m.timer.endQueryEXT(m.timer.TIME_ELAPSED_EXT);
+		if (q) m.pending.push(q);
+		if (!m.timer) return;
+		const gl = s.gl;
+		while (m.pending.length && m.timer.getQueryObjectEXT(m.pending[0], m.timer.QUERY_RESULT_AVAILABLE_EXT)) {
+			const ok = !gl.getParameter(m.timer.GPU_DISJOINT_EXT);
+			const ns = m.timer.getQueryObjectEXT(m.pending[0], m.timer.QUERY_RESULT_EXT);
+			m.timer.deleteQueryEXT(m.pending.shift());
+			if (ok) {
+				m.gpu.push(ns / 1e6);
+				if (m.gpu.length > 240) m.gpu.shift();
+			}
+		}
+	}
+
+	function record(s, cpuMs, now) {
+		const m = metrics(s);
+		m.cpu.push(cpuMs);
+		if (m.cpu.length > 240) m.cpu.shift();
+		m.draws.push(now);
+		while (m.draws.length && now - m.draws[0] > 2000) m.draws.shift();
+	}
+
+	function describe(s, enh, look) {
+		const e = enh || FSQ.NO_ENHANCE;
+		const r = FSQ.readsPerPixel(enh, look);
+		const mode = s.bench && s.bench.running ? `benchmark: ${s.bench.steps[s.bench.idx][0]}`
+			: s.bypass ? "BYPASS (plain bilinear)" : settings.compare === "split" && enh ? "SPLIT: left plain | right enhanced"
+			: enh ? "enhanced" : "plain";
+		return { mode, reads: r.reads, parts: r.parts.join(" > "), kernel: e.kernel };
+	}
+
+	function overlayText(s) {
+		const m = metrics(s), v = s.video, q = v.getVideoPlaybackQuality ? v.getVideoPlaybackQuality() : null;
+		const now = performance.now();
+		if (q) {
+			if (m.lastVideo && now - m.lastVideo.t >= 1000) {
+				m.videoFps = ((q.totalVideoFrames - m.lastVideo.n) * 1000) / (now - m.lastVideo.t);
+				m.lastVideo = { t: now, n: q.totalVideoFrames };
+			} else if (!m.lastVideo) m.lastVideo = { t: now, n: q.totalVideoFrames };
+		}
+		const fps = m.draws.length > 1 ? ((m.draws.length - 1) * 1000) / (m.draws[m.draws.length - 1] - m.draws[0]) : NaN;
+		const d = s.desc || { mode: "plain", reads: 1, parts: "unwarp" };
+		const gpu = m.timer ? `${fmt(avg(m.gpu))} ms avg, p95 ${fmt(p95(m.gpu))} (timer query)`
+			: `${fmt(m.syncMs)} ms (sync estimate, no timer query)`;
+		return [
+			`DBpO Unsquish debug: ${d.mode}`,
+			`canvas ${s.canvas.width}x${s.canvas.height}   video ${v.videoWidth}x${v.videoHeight} @ ${fmt(m.videoFps, 1)} fps` +
+				(q ? ` (dropped ${q.droppedVideoFrames})` : ""),
+			`render ${fmt(fps, 1)} fps   CPU submit ${fmt(avg(m.cpu))} ms avg, p95 ${fmt(p95(m.cpu))}`,
+			`GPU ${gpu}`,
+			`passes: ${d.parts}  ~${d.reads} texture reads/px`,
+		].join("\n");
+	}
+
+	function benchReport(b) {
+		const head = "option\tGPU ms\tCPU ms\tfps\treads/px";
+		return [head, ...b.results.map((r) => `${r.name}\t${fmt(r.gpu)}\t${fmt(r.cpu)}\t${fmt(r.fps, 1)}\t${r.reads}`)].join("\n");
+	}
+
+	function makeOverlay(s) {
+		const box = document.createElement("div");
+		box.dataset.dbpoUnsquishDebug = "1";
+		Object.assign(box.style, {
+			position: "absolute", left: "6px", top: "6px", zIndex: "2147483647", pointerEvents: "auto",
+			font: "11px/1.35 ui-monospace, Consolas, monospace", background: "rgba(0,0,0,.74)", color: "#fff",
+			padding: "6px 8px", borderRadius: "6px", maxWidth: "92%", userSelect: "text",
+		});
+		const pre = document.createElement("pre");
+		pre.style.cssText = "margin:0;white-space:pre-wrap";
+		const row = document.createElement("div");
+		row.style.cssText = "margin-top:4px;display:flex;gap:4px;flex-wrap:wrap";
+		const btn = (label, fn) => {
+			const b = document.createElement("button");
+			b.textContent = label;
+			b.style.cssText = "font:11px system-ui;padding:2px 6px;border-radius:4px;border:1px solid #888;background:#333;color:#fff;cursor:pointer";
+			b.onclick = (e) => { e.stopPropagation(); fn(); };
+			row.appendChild(b);
+		};
+		btn("A/B bypass", () => { s.bypass = !s.bypass; });
+		btn("Split view", () => chrome.storage.sync.set({ compare: settings.compare === "split" ? "off" : "split" }));
+		btn("Benchmark", () => startBench(s));
+		btn("Copy results", () => {
+			const text = s.bench && s.bench.results.length ? benchReport(s.bench) : pre.textContent;
+			try { navigator.clipboard.writeText(text); } catch (e) { console.log(text); }
+		});
+		box.append(pre, row);
+		s.video.parentElement.appendChild(box);
+		s.overlay = { box, pre };
+		s.overlayTimer = setInterval(() => {
+			if (!s.overlay) return;
+			let text = overlayText(s);
+			if (s.bench) {
+				if (s.bench.running) text += `\nbenchmark ${s.bench.idx + 1}/${s.bench.steps.length} ...`;
+				else if (s.bench.results.length) text += "\n" + benchReport(s.bench);
+			}
+			pre.textContent = text;
+		}, 500);
+	}
+
+	function removeOverlay(s) {
+		if (s.overlayTimer) clearInterval(s.overlayTimer);
+		if (s.overlay) s.overlay.box.remove();
+		s.overlay = s.overlayTimer = null;
+	}
+
+	function startBench(s) {
+		const steps = BENCH_STEPS.map(([name, part]) => [name, FSQ.cleanEnhance(part ? { ...FSQ.NO_ENHANCE, ...part } : settings.enhance)]);
+		s.bench = { steps, idx: 0, results: [], running: true, t0: performance.now(), warmed: false };
+		s.bypass = false;
+		const m = metrics(s);
+		m.cpu.length = m.gpu.length = m.draws.length = 0;
+	}
+
+	/* Called after every draw while a benchmark runs; moves to the next option when one is measured. */
+	function benchTick(s, look) {
+		const b = s.bench, m = metrics(s), now = performance.now();
+		if (!b.warmed && now - b.t0 >= BENCH_WARMUP_MS) {
+			b.warmed = true;
+			b.tMeasure = now;
+			m.cpu.length = m.gpu.length = m.draws.length = 0;
+			b.drawsAtStart = 0;
+			b.count = 0;
+		}
+		if (b.warmed) b.count++;
+		if (b.warmed && now - b.tMeasure >= BENCH_STEP_MS) {
+			const [name, enh] = b.steps[b.idx];
+			b.results.push({
+				name, gpu: avg(m.gpu), cpu: avg(m.cpu), fps: (b.count * 1000) / (now - b.tMeasure),
+				reads: FSQ.readsPerPixel(FSQ.enhanceActive(enh) ? enh : null, look).reads,
+			});
+			b.idx++;
+			if (b.idx >= b.steps.length) {
+				b.running = false;
+				b.idx = b.steps.length - 1;
+				console.log("[DBpO Unsquish] benchmark\n" + benchReport(b));
+			} else {
+				b.warmed = false;
+				b.t0 = now;
+			}
+		}
 	}
 
 	function attach(video) {
@@ -1056,7 +1536,7 @@ void main() { v_uv = a_pos * 0.5 + 0.5; gl_Position = vec4(a_pos, 0.0, 1.0); }`;
 		gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
 		gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
 		const loc = {};
-		for (const n of ["u_video", "u_ax_a", "u_ax_b", "u_ay_a", "u_ay_b", "u_box", "u_texel", "u_nrgn", "u_rgn", "u_slot"]) loc[n] = gl.getUniformLocation(prog, n);
+		for (const n of ["u_video", "u_ax_a", "u_ax_b", "u_ay_a", "u_ay_b", "u_box", "u_texel", "u_nrgn", "u_rgn", "u_slot", "u_kernel"]) loc[n] = gl.getUniformLocation(prog, n);
 		const parent = video.parentElement;
 		if (getComputedStyle(parent).position === "static") parent.style.position = "relative";
 		parent.dataset.dbpoIsolation = parent.style.isolation;
@@ -1069,6 +1549,8 @@ void main() { v_uv = a_pos * 0.5 + 0.5; gl_Position = vec4(a_pos, 0.0, 1.0); }`;
 
 	function detach() {
 		if (!state) return;
+		removeOverlay(state);
+		carry = { bench: state.bench, bypass: state.bypass, m: state.m };
 		state.canvas.remove();
 		const par = state.video.parentElement;
 		if (par && "dbpoIsolation" in par.dataset) {
@@ -1102,6 +1584,29 @@ void main() { v_uv = a_pos * 0.5 + 0.5; gl_Position = vec4(a_pos, 0.0, 1.0); }`;
 		}
 	}
 
+	/* One complete draw of the picture (optionally into a screen rectangle). Returns whether the look ran. */
+	function renderOnce(s, look, enh, rect) {
+		const gl = s.gl;
+		s.rect = rect;
+		gl.uniform1i(s.loc.u_kernel, enh && enh.kernel === "lanczos" ? 1 : 0);
+		const st = enh ? FSQ.enhanceStages(enh) : {};
+		let lookOn = FSQ.lookActive(look) && !s.lookFailed;
+		if ((lookOn || st.deblock || st.edge) && !s.lookFailed) {
+			try {
+				drawWithLook(s, look, enh, () => gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4));
+				return lookOn;
+			} catch (e) {
+				console.warn("[DBpO Unsquish] viewer look / enhancement unavailable:", e);
+				s.lookFailed = true;
+				lookOn = false;
+				useTexReset(gl, s);
+			}
+		}
+		bindOutput(s, null, s.canvas.width, s.canvas.height);
+		gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
+		return false;
+	}
+
 	function draw() {
 		if (superseded()) {
 			detach();
@@ -1126,6 +1631,10 @@ void main() { v_uv = a_pos * 0.5 + 0.5; gl_Position = vec4(a_pos, 0.0, 1.0); }`;
 			if (!state) {
 				try {
 					state = attach(video);
+					if (state) {
+						Object.assign(state, carry);
+						if (state.m) Object.assign(state.m, { timer: undefined, pending: [] }); // queries belong to the old context
+					}
 				} catch (e) {
 					console.warn("[DBpO Unsquish] WebGL setup failed:", e);
 					state = null;
@@ -1136,13 +1645,18 @@ void main() { v_uv = a_pos * 0.5 + 0.5; gl_Position = vec4(a_pos, 0.0, 1.0); }`;
 				layout(state, cfg);
 				if (isLight()) {
 					// Only redraw when something changed: a new video frame, size, config or look.
-					const key = [video.currentTime, state.canvas.width, state.canvas.height, cfg.text, JSON.stringify(look)].join("|");
-					if (state.lastKey === key) {
+					const key = [video.currentTime, state.canvas.width, state.canvas.height, cfg.text, JSON.stringify(look), JSON.stringify(settings.enhance), settings.compare, settings.debug, !!state.bypass, !!state.bench].join("|");
+					if (state.lastKey === key && !(state.bench && state.bench.running)) {
 						setTimeout(() => requestAnimationFrame(draw), 8);
 						return;
 					}
 					state.lastKey = key;
 				} else state.lastKey = "";
+				const frameStart = performance.now();
+				const bench = state.bench && state.bench.running ? state.bench : null;
+				const enhOn = plain ? null : bench ? bench.steps[bench.idx][1] : state.bypass ? null : FSQ.cleanEnhance(settings.enhance);
+				const enh = FSQ.enhanceActive(enhOn) ? enhOn : null;
+				const q = settings.debug ? gpuBegin(state) : null;
 				gl.viewport(0, 0, state.canvas.width, state.canvas.height);
 				try {
 					gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, video);
@@ -1162,37 +1676,54 @@ void main() { v_uv = a_pos * 0.5 + 0.5; gl_Position = vec4(a_pos, 0.0, 1.0); }`;
 				gl.uniform4fv(loc.u_box, cfg.box);
 				gl.uniform2f(loc.u_texel, 1 / Math.max(video.videoWidth, 1), 1 / Math.max(video.videoHeight, 1));
 				// Sharp regions (atlas): paste each one from its slot in the frame.
+				const rgn = new Float32Array(16), slot = new Float32Array(16);
+				let nrgn = 0;
 				{
 					const vw = Math.max(video.videoWidth, 1), vh = Math.max(video.videoHeight, 1);
 					const slots = cfg.regions && cfg.regions.length ? FSQ.atlasLayout(cfg, vw, vh) || [] : [];
-					const rgn = new Float32Array(16), slot = new Float32Array(16);
 					slots.forEach((sl, i) => {
 						const r = cfg.regions[i];
 						rgn.set([r.x0, r.y0, r.x1, r.y1], i * 4);
 						slot.set([sl.x / vw, sl.y / vh, sl.w / vw, sl.h / vh], i * 4);
 					});
-					gl.uniform1i(loc.u_nrgn, slots.length);
+					nrgn = slots.length;
+					gl.uniform1i(loc.u_nrgn, nrgn);
 					gl.uniform4fv(loc.u_rgn, rgn);
 					gl.uniform4fv(loc.u_slot, slot);
 				}
-				let lookOn = FSQ.lookActive(look) && !state.lookFailed;
-				if (lookOn) {
-					try {
-						drawWithLook(state, look, () => gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4));
-					} catch (e) {
-						console.warn("[DBpO Unsquish] viewer look unavailable:", e);
-						state.lookFailed = true;
-						lookOn = false;
-						useTexReset(gl, state);
+				state.u = { ux, uy, rgn, nrgn };
+				state.frameNo = (state.frameNo || 0) + 1;
+				let lookOn;
+				const cw = state.canvas.width, ch = state.canvas.height;
+				if (settings.compare === "split" && enh && !bench) {
+					const half = cw >> 1;
+					renderOnce(state, look, null, { x: 0, y: 0, w: half, h: ch });
+					lookOn = renderOnce(state, look, enh, { x: half, y: 0, w: cw - half, h: ch });
+					gl.enable(gl.SCISSOR_TEST);
+					gl.scissor(half - 1, 0, 2, ch);
+					gl.clearColor(1, 1, 1, 1);
+					gl.clear(gl.COLOR_BUFFER_BIT);
+					gl.disable(gl.SCISSOR_TEST);
+				} else lookOn = renderOnce(state, look, enh, null);
+				if (settings.debug) {
+					gpuEnd(state, q);
+					const m = metrics(state);
+					if (!m.timer && state.frameNo % 30 === 0) {
+						gl.finish(); // sparse blocking sample: CPU submit + GPU execution
+						m.syncMs = performance.now() - frameStart;
 					}
 				}
-				if (!lookOn) {
-					gl.bindFramebuffer(gl.FRAMEBUFFER, null);
-					gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
-				}
+				record(state, performance.now() - frameStart, performance.now());
+				state.desc = describe(state, enh, lookOn ? look : FSQ.NO_LOOK);
+				if (settings.debug && !state.overlay) makeOverlay(state);
+				if (!settings.debug && state.overlay) removeOverlay(state);
+				if (bench) benchTick(state, lookOn ? look : FSQ.NO_LOOK);
 				document.documentElement.dataset.dbpoUnsquish = plain ? "plain" : cfg.text || "custom";
 				document.documentElement.dataset.dbpoLook = lookOn
 					? FSQ.LOOK_FIELDS.map(([k]) => +look[k].toFixed(3)).join(",")
+					: "";
+				document.documentElement.dataset.dbpoEnhance = enh
+					? [enh.kernel, enh.area, ...FSQ.ENHANCE_FIELDS.map(([k]) => +enh[k].toFixed(3))].join(",")
 					: "";
 			}
 		}
@@ -1226,6 +1757,12 @@ void main() { v_uv = a_pos * 0.5 + 0.5; gl_Position = vec4(a_pos, 0.0, 1.0); }`;
 			// extension was updated/removed; the new copy handles this page
 		}
 	}
+
+	// A/B: Alt+Shift+U bypasses the viewer-side enhancement (and shows it again).
+	window.addEventListener("keydown", (e) => {
+		if (superseded() || !state || !(e.altKey && e.shiftKey && e.code === "KeyU")) return;
+		state.bypass = !state.bypass;
+	});
 
 	chrome.storage.sync.get(settings, (s) => {
 		settings = { ...settings, ...s };

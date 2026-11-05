@@ -278,7 +278,31 @@ uniform vec2 u_texel; // 1 / video size
 uniform int u_nrgn;
 uniform vec4 u_rgn[4];  // sharp region in view uv: x0, y0, x1, y1
 uniform vec4 u_slot[4]; // its slot in the video frame uv: x, y, w, h
+uniform int u_kernel;   // 0 bilinear, 1 Lanczos3 (squeezed periphery only; the 1:1 center stays bilinear)
 varying vec2 v_uv;
+float lz3(float x) {
+	x = abs(x);
+	if (x < 1e-4) return 1.0;
+	if (x >= 3.0) return 0.0;
+	float px = 3.14159265 * x;
+	return 3.0 * sin(px) * sin(px / 3.0) / (px * px);
+}
+vec4 sample_lanczos(vec2 u) {
+	vec2 p = u / u_texel - 0.5, f = floor(p);
+	vec2 lo = u_box.xy + 0.5 * u_texel, hi = u_box.xy + u_box.zw - 0.5 * u_texel;
+	vec4 acc = vec4(0.0);
+	float wsum = 0.0;
+	for (int j = -2; j <= 3; j++) {
+		float wy = lz3(p.y - (f.y + float(j)));
+		for (int i = -2; i <= 3; i++) {
+			float w = lz3(p.x - (f.x + float(i))) * wy;
+			vec2 q = clamp((f + vec2(float(i), float(j)) + 0.5) * u_texel, lo, hi);
+			acc += texture2D(u_video, q) * w;
+			wsum += w;
+		}
+	}
+	return clamp(acc / wsum, 0.0, 1.0);
+}
 float periph(float t, float len, float k, float p) { return len * (t - k * pow(t, p + 1.0)); }
 float sq_forward(float x, vec4 A, vec4 B) {
 	float leftFull = periph(1.0, A.z, B.x, B.y);
@@ -304,7 +328,9 @@ void main() {
 	u = u_box.xy + u * u_box.zw;
 	// Stay half a pixel inside the picture so bilinear filtering never pulls in the bars.
 	u = clamp(u, u_box.xy + 0.5 * u_texel, u_box.xy + u_box.zw - 0.5 * u_texel);
-	gl_FragColor = texture2D(u_video, u);
+	bool center = v_uv.x >= u_ax_a.x && v_uv.x <= u_ax_a.y && v_uv.y >= u_ay_a.x && v_uv.y <= u_ay_a.y;
+	if (u_kernel == 1 && !center) gl_FragColor = vec4(sample_lanczos(u).rgb, 1.0);
+	else gl_FragColor = texture2D(u_video, u);
 }`;
 
 	/*
@@ -443,6 +469,169 @@ void main() {
 	gl_FragColor = vec4(clamp(c, 0.0, 1.0), src.a);
 }`;
 
+	/*
+	 * Viewer-side edge enhancement ("reconstruction"): extra passes after unsquishing that make the
+	 * stretched periphery look crisper. They cost the streamer no bitrate and change nothing in the
+	 * center. Models: research/foveation/viewer_restoration.py and viewer_snap_preview.py (the GPU
+	 * versions are cheaper approximations: 5x5 bilateral deblock in sqrt-encoded RGB, one steepening
+	 * iteration, 3x3 median flat merge).
+	 */
+	const PERIPH_GLSL = `
+precision highp float;
+uniform vec4 u_ax_a; uniform vec4 u_ax_b; uniform vec4 u_ay_a; uniform vec4 u_ay_b;
+uniform float u_area;   // 0 = squeezed periphery only, 1 = whole picture
+uniform int u_nrgn;
+uniform vec4 u_rgn[4];  // sharp regions (atlas) are left alone
+float dens(float x, vec4 A, vec4 B) {
+	float t = 0.0;
+	if (x < A.x) t = (A.x - x) / max(A.z, 1e-6);
+	else if (x > A.y) t = (x - A.y) / max(A.w, 1e-6);
+	return 1.0 - (1.0 - B.w) * pow(clamp(t, 0.0, 1.0), B.y);
+}
+// uv: picture position, top-down. 0 in the sharp center, up to 1 at the squeezed edges.
+float weight_at(vec2 uv) {
+	for (int i = 0; i < 4; i++) {
+		if (i >= u_nrgn) break;
+		vec4 r = u_rgn[i];
+		if (uv.x >= r.x && uv.x <= r.z && uv.y >= r.y && uv.y <= r.w) return 0.0;
+	}
+	if (u_area > 0.5) return 1.0;
+	float wx = (1.0 - dens(uv.x, u_ax_a, u_ax_b)) / max(1.0 - u_ax_b.w, 1e-3);
+	float wy = (1.0 - dens(uv.y, u_ay_a, u_ay_b)) / max(1.0 - u_ay_b.w, 1e-3);
+	return clamp(max(wx, wy) * 1.5, 0.0, 1.0);
+}
+varying vec2 v_uv;
+uniform sampler2D u_img;
+uniform vec2 u_px;
+`;
+
+	// Deblock / denoise: 5x5 edge-preserving (bilateral) smoothing, strength = range sigma.
+	const ENH_DEBLOCK_SHADER = PERIPH_GLSL + `
+uniform float u_amt;
+vec3 enc(vec3 c) { return sqrt(max(c, 0.0)); }
+void main() {
+	vec4 c4 = texture2D(u_img, v_uv);
+	float w = weight_at(vec2(v_uv.x, 1.0 - v_uv.y));
+	if (w <= 0.0) { gl_FragColor = c4; return; }
+	float sig = mix(0.012, 0.05, u_amt);
+	vec3 base = enc(c4.rgb), acc = vec3(0.0);
+	float ws = 0.0;
+	for (int j = -2; j <= 2; j++) {
+		for (int i = -2; i <= 2; i++) {
+			vec3 s = texture2D(u_img, v_uv + vec2(float(i), float(j)) * u_px).rgb;
+			vec3 d = enc(s) - base;
+			float wt = exp(-dot(d, d) / (2.0 * sig * sig) - float(i * i + j * j) / 4.5);
+			acc += s * wt;
+			ws += wt;
+		}
+	}
+	gl_FragColor = vec4(mix(c4.rgb, acc / ws, w), c4.a);
+}`;
+
+	// Edge pass: sharpen, edge snap (steepen edges + median-merge flat areas), vibrance,
+	// posterize + ordered dither, grain. u_a = sharpen, snap, vibrance, posterize; u_b = dither, grain.
+	const ENH_EDGE_SHADER = PERIPH_GLSL + `
+uniform vec4 u_a;
+uniform vec2 u_b;
+uniform float u_frame;
+float luma(vec3 c) { return dot(c, vec3(0.2126, 0.7152, 0.0722)); }
+vec3 tap(float x, float y) { return texture2D(u_img, v_uv + vec2(x, y) * u_px).rgb; }
+#define SORT(a, b) { vec3 t_ = min(a, b); b = max(a, b); a = t_; }
+float bayer2(vec2 a) { a = floor(a); return fract(a.x * 0.5 + a.y * a.y * 0.75); }
+float bayer4(vec2 a) { return bayer2(0.5 * a) * 0.25 + bayer2(a); }
+void main() {
+	vec4 c4 = texture2D(u_img, v_uv);
+	float w = weight_at(vec2(v_uv.x, 1.0 - v_uv.y));
+	if (w <= 0.0) { gl_FragColor = c4; return; }
+	vec3 c = c4.rgb;
+	vec3 p0 = tap(-1.0, -1.0), p1 = tap(0.0, -1.0), p2 = tap(1.0, -1.0);
+	vec3 p3 = tap(-1.0, 0.0), p4 = c, p5 = tap(1.0, 0.0);
+	vec3 p6 = tap(-1.0, 1.0), p7 = tap(0.0, 1.0), p8 = tap(1.0, 1.0);
+	vec3 blur = (p0 + p2 + p6 + p8 + 2.0 * (p1 + p3 + p5 + p7) + 4.0 * p4) / 16.0;
+	vec3 o = c + u_a.x * 0.8 * (c - blur); // sharpen
+	if (u_a.y > 0.0) {
+		float y0 = luma(p0), y1 = luma(p1), y2 = luma(p2), y3 = luma(p3), y5 = luma(p5), y6 = luma(p6), y7 = luma(p7), y8 = luma(p8);
+		float g = length(vec2((y2 + 2.0 * y5 + y8) - (y0 + 2.0 * y3 + y6), (y6 + 2.0 * y7 + y8) - (y0 + 2.0 * y1 + y2)));
+		vec3 lo = min(min(min(p0, p1), min(p2, p3)), min(min(p4, p5), min(p6, min(p7, p8))));
+		vec3 hi = max(max(max(p0, p1), max(p2, p3)), max(max(p4, p5), max(p6, max(p7, p8))));
+		vec3 target = (luma(blur) - luma(p4)) > 0.0 ? lo : hi; // steepen: pull toward the nearer extreme
+		float a = clamp(g * 6.0, 0.0, 1.0) * u_a.y * 0.8;
+		o = o * (1.0 - 0.5 * a) + target * 0.5 * a;
+		// flat areas take the 3x3 median (Pixel Snapper "merge")
+		vec3 v0 = p0, v1 = p1, v2 = p2, v3 = p3, v4 = p4, v5 = p5, v6 = p6, v7 = p7, v8 = p8;
+		SORT(v1, v2) SORT(v4, v5) SORT(v7, v8) SORT(v0, v1) SORT(v3, v4) SORT(v6, v7)
+		SORT(v1, v2) SORT(v4, v5) SORT(v7, v8) SORT(v0, v3) SORT(v5, v8) SORT(v4, v7)
+		SORT(v3, v6) SORT(v1, v4) SORT(v2, v5) SORT(v4, v7) SORT(v4, v2) SORT(v6, v4) SORT(v4, v2)
+		float flatness = 1.0 - smoothstep(0.1, 0.2, clamp(g * 4.0, 0.0, 1.0));
+		o = mix(o, v4, flatness * clamp(u_a.y * 2.0, 0.0, 1.0));
+	}
+	if (u_a.z > 0.0) { // vibrance: low-saturation pixels gain most
+		float y = luma(o), sat = max(max(o.r, o.g), o.b) - min(min(o.r, o.g), o.b);
+		o = vec3(y) + (o - vec3(y)) * (1.0 + u_a.z * 0.5 * (1.0 - sat));
+	}
+	if (u_a.w > 0.0 || u_b.x > 0.0) { // posterize (255 -> 31 levels) with ordered dither
+		float levels = mix(255.0, 31.0, u_a.w);
+		float m = bayer4(gl_FragCoord.xy) - 0.46875;
+		o = floor(o * levels + m * u_b.x * 2.0 + 0.5) / levels;
+	}
+	if (u_b.y > 0.0) {
+		float n = fract(sin(dot(gl_FragCoord.xy + u_frame, vec2(12.9898, 78.233))) * 43758.5453);
+		o += (n - 0.5) * u_b.y * (8.0 / 255.0);
+	}
+	gl_FragColor = vec4(clamp(mix(c, o, w), 0.0, 1.0), c4.a);
+}`;
+
+	/* Enhancement settings: [name, label]; all 0..1, 0 = off. */
+	const ENHANCE_FIELDS = [
+		["deblock", "Deblock"], ["sharpen", "Edge sharpen"], ["snap", "Edge snap"], ["vibrance", "Edge vibrance"],
+		["posterize", "Posterize"], ["dither", "Dither"], ["grain", "Grain"],
+	];
+	const NO_ENHANCE = Object.freeze({
+		kernel: "bilinear", area: "periphery", ...Object.fromEntries(ENHANCE_FIELDS.map(([k]) => [k, 0])),
+	});
+	const ENHANCE_PRESETS = {
+		off: { ...NO_ENHANCE },
+		light: { ...NO_ENHANCE, kernel: "lanczos", deblock: 0.3, sharpen: 0.5 },
+		balanced: { ...NO_ENHANCE, kernel: "lanczos", deblock: 0.5, sharpen: 0.4, snap: 0.5, vibrance: 0.2 },
+		crisp: { ...NO_ENHANCE, kernel: "lanczos", deblock: 0.5, snap: 1, vibrance: 0.4, posterize: 0.6, dither: 0.3 },
+	};
+
+	/** Clamped copy of enhancement settings from storage (missing values = off). */
+	function cleanEnhance(e) {
+		const out = { kernel: e && e.kernel === "lanczos" ? "lanczos" : "bilinear", area: e && e.area === "all" ? "all" : "periphery" };
+		for (const [k] of ENHANCE_FIELDS) out[k] = clamp01(Number(e && e[k]) || 0);
+		return out;
+	}
+
+	/** Which render stages an enhancement needs. */
+	function enhanceStages(e) {
+		return {
+			lanczos: e.kernel === "lanczos",
+			deblock: e.deblock > 0,
+			edge: e.sharpen > 0 || e.snap > 0 || e.vibrance > 0 || e.posterize > 0 || e.dither > 0 || e.grain > 0,
+		};
+	}
+
+	function enhanceActive(e) {
+		if (!e) return false;
+		const st = enhanceStages(e);
+		return st.lanczos || st.deblock || st.edge;
+	}
+
+	/** Rough texture reads per pixel of the whole draw (periphery pixels), for the debug overlay. */
+	function readsPerPixel(e, look) {
+		let n = 1; // unwarp
+		const parts = ["unwarp"];
+		if (e && e.kernel === "lanczos") { n += 35; parts[0] = "unwarp lanczos3"; }
+		if (e && e.deblock > 0) { n += 26; parts.push("deblock"); }
+		const st = e ? enhanceStages(e) : {};
+		if (st.edge) { n += 10; parts.push("edge"); }
+		if (colorActive(look)) { n += 1; parts.push("colour"); }
+		if (look && (look.sharpen > 0 || look.clarity > 0 || look.hdr > 0 || look.bloom > 0)) { n += 36; parts.push("details"); }
+		if (look && look.sharpenPlus > 0) { n += 10; parts.push("sharpen+"); }
+		return { reads: n, parts };
+	}
+
 	/** The page a pasted config belongs to: host + first path segment ("www.twitch.tv/somechannel"). */
 	function pageKey(href) {
 		try {
@@ -457,6 +646,8 @@ void main() {
 		MIN_DENSITY, derive, forward, density, inverse, parse, uniforms, FRAGMENT_SHADER, atlasLayout,
 		NO_LOOK, lookActive, colorActive, cleanLook, identity, pageKey, LOOK_BLUR_SHADER, LOOK_DETAILS_SHADER, LOOK_CAS_SHADER,
 		LOOK_COLOR_SHADER, LOOK_FIELDS, packLook, unpackLook,
+		ENH_DEBLOCK_SHADER, ENH_EDGE_SHADER, ENHANCE_FIELDS, NO_ENHANCE, ENHANCE_PRESETS, cleanEnhance, enhanceStages,
+		enhanceActive, readsPerPixel,
 	};
 	if (typeof module !== "undefined" && module.exports) module.exports = api;
 	else root.FSQ = api;

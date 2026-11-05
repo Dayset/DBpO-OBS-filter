@@ -7,7 +7,12 @@ $("sliders").innerHTML = FSQ.LOOK_FIELDS.map(
 	([k, label, signed]) =>
 		`<div class="slider"><span>${label}</span><input type="range" id="${k}" min="${signed ? -100 : 0}" max="100" step="1"><output id="${k}Out"></output></div>`
 ).join("");
-const defaults = { enabled: true, autoDetect: true, config: "", configPage: "", quality: "auto", lookMode: "streamer", myLook: NO_LOOK, plainVideos: false };
+$("enhSliders").innerHTML = FSQ.ENHANCE_FIELDS.map(
+	([k, label]) =>
+		`<div class="slider"><span>${label}</span><input type="range" id="e_${k}" min="0" max="100" step="1"><output id="e_${k}Out"></output></div>`
+).join("");
+const ENH_KEYS = FSQ.ENHANCE_FIELDS.map(([k]) => k);
+const defaults = { enabled: true, autoDetect: true, config: "", configPage: "", quality: "auto", lookMode: "streamer", myLook: NO_LOOK, plainVideos: false, enhance: FSQ.NO_ENHANCE, debug: false, compare: "off" };
 let tabKey = ""; // the page this popup was opened on (pasted configs belong to it)
 let current = null; // the config in use (pasted or detected), for showing the streamer's look
 
@@ -39,6 +44,21 @@ function renderLook(s) {
 				: "No look: you see the stream exactly as sent.";
 }
 
+/* Edge enhancement controls: the preset box shows which preset the current values equal, else "Custom". */
+function renderEnhance(s) {
+	const e = FSQ.cleanEnhance(s.enhance);
+	$("enhKernel").value = e.kernel;
+	$("enhArea").value = e.area;
+	for (const k of ENH_KEYS) {
+		$(`e_${k}`).value = Math.round(e[k] * 100);
+		$(`e_${k}Out`).textContent = `${Math.round(e[k] * 100)}%`;
+	}
+	const same = (a, b) => a.kernel === b.kernel && a.area === b.area && ENH_KEYS.every((k) => Math.abs(a[k] - b[k]) < 0.005);
+	$("enhPreset").value = Object.keys(FSQ.ENHANCE_PRESETS).find((n) => same(e, FSQ.ENHANCE_PRESETS[n])) || "custom";
+	$("debug").checked = !!s.debug;
+	$("compare").value = s.compare === "split" ? "split" : "off";
+}
+
 /* ", 2 sharp areas" when the config keeps HUD regions sharp (atlas), else "". */
 function regionsText(cfg) {
 	const n = cfg && cfg.regions ? cfg.regions.length : 0;
@@ -55,6 +75,7 @@ function render(s, detected) {
 	const pasted = here ? FSQ.parse(s.config) : null;
 	current = pasted || (s.autoDetect && detected ? FSQ.parse(detected) : null);
 	renderLook(s);
+	renderEnhance(s);
 	const st = $("status");
 	st.classList.remove("bad");
 	if (s.config && here && !pasted) {
@@ -111,5 +132,25 @@ for (const k of LOOK_KEYS) {
 		if (!pending) pending = setTimeout(() => ((pending = null), saveMyLook()), 700);
 	});
 	$(k).addEventListener("change", saveMyLook);
+}
+function readEnhance() {
+	const e = { kernel: $("enhKernel").value, area: $("enhArea").value };
+	for (const k of ENH_KEYS) e[k] = Number($(`e_${k}`).value) / 100;
+	return FSQ.cleanEnhance(e);
+}
+$("enhPreset").onchange = (e) => {
+	if (e.target.value !== "custom") chrome.storage.sync.set({ enhance: FSQ.ENHANCE_PRESETS[e.target.value] }, load);
+};
+$("enhKernel").onchange = () => chrome.storage.sync.set({ enhance: readEnhance() }, load);
+$("enhArea").onchange = () => chrome.storage.sync.set({ enhance: readEnhance() }, load);
+$("debug").onchange = (e) => chrome.storage.sync.set({ debug: e.target.checked }, load);
+$("compare").onchange = (e) => chrome.storage.sync.set({ compare: e.target.value }, load);
+let pendingEnh = null;
+for (const k of ENH_KEYS) {
+	$(`e_${k}`).addEventListener("input", () => {
+		$(`e_${k}Out`).textContent = `${$(`e_${k}`).value}%`;
+		if (!pendingEnh) pendingEnh = setTimeout(() => ((pendingEnh = null), chrome.storage.sync.set({ enhance: readEnhance() })), 700);
+	});
+	$(`e_${k}`).addEventListener("change", () => chrome.storage.sync.set({ enhance: readEnhance() }, load));
 }
 load();
