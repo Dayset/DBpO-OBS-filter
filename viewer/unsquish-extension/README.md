@@ -69,6 +69,14 @@ When the streamer marks HUD areas (a minimap, ammo, a webcam) as "Keep sharp", t
 
 See `plugins/foveated-squish/README.md` for the streamer's side.
 
+## Only on the right page
+
+A pasted config belongs to the page it was pasted on (for Twitch: that channel) and is ignored everywhere else, so it never touches other videos. A code found in the page title (auto-detect) only ever applies to that page. On pages with no recognised code the extension idles and checks back twice a second.
+
+## Quality (phones)
+
+The popup has a Quality setting: Automatic (light on phones), Full, or Light. Light draws at most 1.5 pixels per screen pixel and 1280 pixels wide, and redraws only when a new video frame arrives, which saves battery and heat on phones that report 3x screens.
+
 ## Phones (Android and iPhone)
 
 Chrome on a phone can't run extensions, and the Twitch app can't run anything, so watch in a browser that can.

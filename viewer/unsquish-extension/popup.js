@@ -7,7 +7,8 @@ $("sliders").innerHTML = FSQ.LOOK_FIELDS.map(
 	([k, label, signed]) =>
 		`<div class="slider"><span>${label}</span><input type="range" id="${k}" min="${signed ? -100 : 0}" max="100" step="1"><output id="${k}Out"></output></div>`
 ).join("");
-const defaults = { enabled: true, autoDetect: true, config: "", lookMode: "streamer", myLook: NO_LOOK, plainVideos: false };
+const defaults = { enabled: true, autoDetect: true, config: "", configPage: "", quality: "auto", lookMode: "streamer", myLook: NO_LOOK, plainVideos: false };
+let tabKey = ""; // the page this popup was opened on (pasted configs belong to it)
 let current = null; // the config in use (pasted or detected), for showing the streamer's look
 
 function lookText(l) {
@@ -47,13 +48,16 @@ function regionsText(cfg) {
 function render(s, detected) {
 	$("enabled").checked = s.enabled;
 	$("autoDetect").checked = s.autoDetect;
-	$("config").value = s.config;
-	const pasted = FSQ.parse(s.config);
+	$("quality").value = s.quality;
+	// A pasted config belongs to the page it was pasted on (older installs: every page).
+	const here = !s.configPage || s.configPage === tabKey;
+	$("config").value = here ? s.config : "";
+	const pasted = here ? FSQ.parse(s.config) : null;
 	current = pasted || (s.autoDetect && detected ? FSQ.parse(detected) : null);
 	renderLook(s);
 	const st = $("status");
 	st.classList.remove("bad");
-	if (s.config && !pasted) {
+	if (s.config && here && !pasted) {
 		st.textContent = "That config string isn't valid (or asks for a squeeze the curve can't do).";
 		st.classList.add("bad");
 	} else if (pasted) {
@@ -66,19 +70,32 @@ function render(s, detected) {
 }
 
 function load() {
-	chrome.storage.sync.get(defaults, (s) => chrome.storage.local.get({ detected: "" }, (l) => render(s, l.detected)));
+	const go = () =>
+		chrome.storage.sync.get(defaults, (s) =>
+			chrome.storage.local.get({ detectedBy: {} }, (l) => render(s, l.detectedBy[tabKey] || ""))
+		);
+	// The userscript panel lives in the page itself; the extension popup asks for the active tab.
+	if (chrome.tabs && chrome.tabs.query)
+		chrome.tabs.query({ active: true, currentWindow: true }, (t) => {
+			// Only a real web page can own a config (not the popup's own tab or a browser page).
+			const url = (t[0] && t[0].url) || "";
+			tabKey = /^https?:/i.test(url) ? FSQ.pageKey(url) : "";
+			go();
+		});
+	else ((tabKey = FSQ.pageKey(location.href)), go());
 }
 
-$("save").onclick = () => chrome.storage.sync.set({ config: $("config").value.trim() }, load);
+$("save").onclick = () => chrome.storage.sync.set({ config: $("config").value.trim(), configPage: tabKey }, load);
 // Apply as soon as a valid string is pasted or typed (no Save click needed).
 $("config").addEventListener("input", () => {
 	const text = $("config").value.trim();
 	const cfg = FSQ.parse(text);
-	if (cfg) chrome.storage.sync.set({ config: cfg.text }, load);
+	if (cfg) chrome.storage.sync.set({ config: cfg.text, configPage: tabKey }, load);
 });
-$("clear").onclick = () => chrome.storage.sync.set({ config: "" }, load);
+$("clear").onclick = () => chrome.storage.sync.set({ config: "", configPage: "" }, load);
 $("enabled").onchange = (e) => chrome.storage.sync.set({ enabled: e.target.checked }, load);
 $("autoDetect").onchange = (e) => chrome.storage.sync.set({ autoDetect: e.target.checked }, load);
+$("quality").onchange = (e) => chrome.storage.sync.set({ quality: e.target.value }, load);
 $("lookMode").onchange = (e) => chrome.storage.sync.set({ lookMode: e.target.value }, load);
 $("plainVideos").onchange = (e) => chrome.storage.sync.set({ plainVideos: e.target.checked }, load);
 function saveMyLook() {

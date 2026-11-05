@@ -443,9 +443,19 @@ void main() {
 	gl_FragColor = vec4(clamp(c, 0.0, 1.0), src.a);
 }`;
 
+	/** The page a pasted config belongs to: host + first path segment ("www.twitch.tv/somechannel"). */
+	function pageKey(href) {
+		try {
+			const u = new URL(href);
+			return u.hostname.toLowerCase() + "/" + (u.pathname.split("/")[1] || "").toLowerCase();
+		} catch (e) {
+			return "";
+		}
+	}
+
 	const api = {
 		MIN_DENSITY, derive, forward, density, inverse, parse, uniforms, FRAGMENT_SHADER, atlasLayout,
-		NO_LOOK, lookActive, colorActive, cleanLook, identity, LOOK_BLUR_SHADER, LOOK_DETAILS_SHADER, LOOK_CAS_SHADER,
+		NO_LOOK, lookActive, colorActive, cleanLook, identity, pageKey, LOOK_BLUR_SHADER, LOOK_DETAILS_SHADER, LOOK_CAS_SHADER,
 		LOOK_COLOR_SHADER, LOOK_FIELDS, packLook, unpackLook,
 	};
 	if (typeof module !== "undefined" && module.exports) module.exports = api;

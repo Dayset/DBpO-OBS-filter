@@ -506,9 +506,19 @@ void main() {
 	gl_FragColor = vec4(clamp(c, 0.0, 1.0), src.a);
 }`;
 
+	/** The page a pasted config belongs to: host + first path segment ("www.twitch.tv/somechannel"). */
+	function pageKey(href) {
+		try {
+			const u = new URL(href);
+			return u.hostname.toLowerCase() + "/" + (u.pathname.split("/")[1] || "").toLowerCase();
+		} catch (e) {
+			return "";
+		}
+	}
+
 	const api = {
 		MIN_DENSITY, derive, forward, density, inverse, parse, uniforms, FRAGMENT_SHADER, atlasLayout,
-		NO_LOOK, lookActive, colorActive, cleanLook, identity, LOOK_BLUR_SHADER, LOOK_DETAILS_SHADER, LOOK_CAS_SHADER,
+		NO_LOOK, lookActive, colorActive, cleanLook, identity, pageKey, LOOK_BLUR_SHADER, LOOK_DETAILS_SHADER, LOOK_CAS_SHADER,
 		LOOK_COLOR_SHADER, LOOK_FIELDS, packLook, unpackLook,
 	};
 	if (typeof module !== "undefined" && module.exports) module.exports = api;
@@ -553,6 +563,11 @@ void main() {
   <textarea id="config" placeholder="FSQ1:rx=0.75,ry=0.75,cx=0.15,cy=0.15,fx=0.5,fy=0.5,px=1,py=1,ar=1.7778"></textarea>
   <button id="save">Save</button> <button id="clear">Clear</button>
   <div id="status" class="status"></div>
+  <label>Quality: <select id="quality">
+    <option value="auto">Automatic (light on phones)</option>
+    <option value="full">Full</option>
+    <option value="light">Light (saves battery and heat)</option>
+  </select></label>
   <fieldset>
     <legend>Look (like NVIDIA Freestyle)</legend>
     <label>Look: <select id="lookMode">
@@ -580,7 +595,8 @@ $("sliders").innerHTML = FSQ.LOOK_FIELDS.map(
 	([k, label, signed]) =>
 		`<div class="slider"><span>${label}</span><input type="range" id="${k}" min="${signed ? -100 : 0}" max="100" step="1"><output id="${k}Out"></output></div>`
 ).join("");
-const defaults = { enabled: true, autoDetect: true, config: "", lookMode: "streamer", myLook: NO_LOOK, plainVideos: false };
+const defaults = { enabled: true, autoDetect: true, config: "", configPage: "", quality: "auto", lookMode: "streamer", myLook: NO_LOOK, plainVideos: false };
+let tabKey = ""; // the page this popup was opened on (pasted configs belong to it)
 let current = null; // the config in use (pasted or detected), for showing the streamer's look
 
 function lookText(l) {
@@ -620,13 +636,16 @@ function regionsText(cfg) {
 function render(s, detected) {
 	$("enabled").checked = s.enabled;
 	$("autoDetect").checked = s.autoDetect;
-	$("config").value = s.config;
-	const pasted = FSQ.parse(s.config);
+	$("quality").value = s.quality;
+	// A pasted config belongs to the page it was pasted on (older installs: every page).
+	const here = !s.configPage || s.configPage === tabKey;
+	$("config").value = here ? s.config : "";
+	const pasted = here ? FSQ.parse(s.config) : null;
 	current = pasted || (s.autoDetect && detected ? FSQ.parse(detected) : null);
 	renderLook(s);
 	const st = $("status");
 	st.classList.remove("bad");
-	if (s.config && !pasted) {
+	if (s.config && here && !pasted) {
 		st.textContent = "That config string isn't valid (or asks for a squeeze the curve can't do).";
 		st.classList.add("bad");
 	} else if (pasted) {
@@ -639,19 +658,32 @@ function render(s, detected) {
 }
 
 function load() {
-	chrome.storage.sync.get(defaults, (s) => chrome.storage.local.get({ detected: "" }, (l) => render(s, l.detected)));
+	const go = () =>
+		chrome.storage.sync.get(defaults, (s) =>
+			chrome.storage.local.get({ detectedBy: {} }, (l) => render(s, l.detectedBy[tabKey] || ""))
+		);
+	// The userscript panel lives in the page itself; the extension popup asks for the active tab.
+	if (chrome.tabs && chrome.tabs.query)
+		chrome.tabs.query({ active: true, currentWindow: true }, (t) => {
+			// Only a real web page can own a config (not the popup's own tab or a browser page).
+			const url = (t[0] && t[0].url) || "";
+			tabKey = /^https?:/i.test(url) ? FSQ.pageKey(url) : "";
+			go();
+		});
+	else ((tabKey = FSQ.pageKey(location.href)), go());
 }
 
-$("save").onclick = () => chrome.storage.sync.set({ config: $("config").value.trim() }, load);
+$("save").onclick = () => chrome.storage.sync.set({ config: $("config").value.trim(), configPage: tabKey }, load);
 // Apply as soon as a valid string is pasted or typed (no Save click needed).
 $("config").addEventListener("input", () => {
 	const text = $("config").value.trim();
 	const cfg = FSQ.parse(text);
-	if (cfg) chrome.storage.sync.set({ config: cfg.text }, load);
+	if (cfg) chrome.storage.sync.set({ config: cfg.text, configPage: tabKey }, load);
 });
-$("clear").onclick = () => chrome.storage.sync.set({ config: "" }, load);
+$("clear").onclick = () => chrome.storage.sync.set({ config: "", configPage: "" }, load);
 $("enabled").onchange = (e) => chrome.storage.sync.set({ enabled: e.target.checked }, load);
 $("autoDetect").onchange = (e) => chrome.storage.sync.set({ autoDetect: e.target.checked }, load);
+$("quality").onchange = (e) => chrome.storage.sync.set({ quality: e.target.value }, load);
 $("lookMode").onchange = (e) => chrome.storage.sync.set({ lookMode: e.target.value }, load);
 $("plainVideos").onchange = (e) => chrome.storage.sync.set({ plainVideos: e.target.checked }, load);
 function saveMyLook() {
@@ -798,10 +830,15 @@ void main() { v_uv = a_pos * 0.5 + 0.5; gl_Position = vec4(a_pos, 0.0, 1.0); }`;
 		enabled: true,
 		autoDetect: true,
 		config: "",
+		quality: "auto", // "light" draws fewer pixels and only new video frames (phones: auto)
+		configPage: "", // page the pasted config belongs to ("" = older install: every page)
 		lookMode: "streamer",
 		myLook: { sharpen: 0, clarity: 0, hdr: 0, bloom: 0, sharpenPlus: 0 }, // more fields are filled in by FSQ.cleanLook
 		plainVideos: false,
 	};
+	const isLight = () =>
+		settings.quality === "light" ||
+		(settings.quality === "auto" && /Android|iPhone|iPad|iPod|Mobi/i.test(navigator.userAgent));
 	let detected = null; // config found in the page
 	let state = null; // { video, canvas, gl, prog, loc, tex, cfg }
 
@@ -809,7 +846,10 @@ void main() { v_uv = a_pos * 0.5 + 0.5; gl_Position = vec4(a_pos, 0.0, 1.0); }`;
 		if (!settings.enabled) return null;
 		// Chat signal from the streamer (chatsignal.js): "off" means show the picture as sent.
 		if (document.documentElement.dataset.dbpoFsq === "off") return null;
-		return FSQ.parse(settings.config) || (settings.autoDetect ? detected : null);
+		// A pasted config only applies on the page it was pasted for; on other pages the
+		// extension stays idle unless the page itself carries a recognised code.
+		const mine = !settings.configPage || settings.configPage === FSQ.pageKey(location.href);
+		return (mine && FSQ.parse(settings.config)) || (settings.autoDetect ? detected : null);
 	}
 
 	/* The look to apply on top of a squished stream's config. */
@@ -1052,7 +1092,9 @@ void main() { v_uv = a_pos * 0.5 + 0.5; gl_Position = vec4(a_pos, 0.0, 1.0); }`;
 		const left = vr.left - pr.left - parent.clientLeft + (vr.width - w) / 2;
 		const top = vr.top - pr.top - parent.clientTop + (vr.height - h) / 2;
 		Object.assign(s.canvas.style, { left: `${left}px`, top: `${top}px`, width: `${w}px`, height: `${h}px` });
-		const dpr = window.devicePixelRatio || 1;
+		// Light: never more than 1.5 pixels per CSS pixel and at most 1280 wide (phones report 3x).
+		let dpr = window.devicePixelRatio || 1;
+		if (isLight()) dpr = Math.min(dpr, 1.5, 1280 / Math.max(w, 1));
 		const cw = Math.max(1, Math.round(w * dpr)), ch = Math.max(1, Math.round(h * dpr));
 		if (s.canvas.width !== cw || s.canvas.height !== ch) {
 			s.canvas.width = cw;
@@ -1092,6 +1134,15 @@ void main() { v_uv = a_pos * 0.5 + 0.5; gl_Position = vec4(a_pos, 0.0, 1.0); }`;
 			if (state) {
 				const { gl, loc } = state;
 				layout(state, cfg);
+				if (isLight()) {
+					// Only redraw when something changed: a new video frame, size, config or look.
+					const key = [video.currentTime, state.canvas.width, state.canvas.height, cfg.text, JSON.stringify(look)].join("|");
+					if (state.lastKey === key) {
+						setTimeout(() => requestAnimationFrame(draw), 8);
+						return;
+					}
+					state.lastKey = key;
+				} else state.lastKey = "";
 				gl.viewport(0, 0, state.canvas.width, state.canvas.height);
 				try {
 					gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, video);
@@ -1145,7 +1196,9 @@ void main() { v_uv = a_pos * 0.5 + 0.5; gl_Position = vec4(a_pos, 0.0, 1.0); }`;
 					: "";
 			}
 		}
-		requestAnimationFrame(draw);
+		// Nothing recognised on this page: check back twice a second instead of every frame.
+		if (!cfg && !state) setTimeout(() => requestAnimationFrame(draw), 500);
+		else requestAnimationFrame(draw);
 	}
 
 	/* Auto-detect: an FSQ1 tag in the page title or a stream title element. */
@@ -1162,7 +1215,13 @@ void main() { v_uv = a_pos * 0.5 + 0.5; gl_Position = vec4(a_pos, 0.0, 1.0); }`;
 			}
 		}
 		try {
-			chrome.storage.local.set({ detected: detected ? detected.text : "" });
+			const key = FSQ.pageKey(location.href);
+			chrome.storage.local.get({ detectedBy: {} }, (l) => {
+				const map = { ...l.detectedBy };
+				if (detected) map[key] = detected.text;
+				else delete map[key];
+				if ((map[key] || "") !== (l.detectedBy[key] || "")) chrome.storage.local.set({ detectedBy: map });
+			});
 		} catch (e) {
 			// extension was updated/removed; the new copy handles this page
 		}

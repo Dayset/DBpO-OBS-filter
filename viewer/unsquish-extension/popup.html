@@ -27,6 +27,11 @@
   <textarea id="config" placeholder="FSQ1:rx=0.75,ry=0.75,cx=0.15,cy=0.15,fx=0.5,fy=0.5,px=1,py=1,ar=1.7778"></textarea>
   <button id="save">Save</button> <button id="clear">Clear</button>
   <div id="status" class="status"></div>
+  <label>Quality: <select id="quality">
+    <option value="auto">Automatic (light on phones)</option>
+    <option value="full">Full</option>
+    <option value="light">Light (saves battery and heat)</option>
+  </select></label>
   <fieldset>
     <legend>Look (like NVIDIA Freestyle)</legend>
     <label>Look: <select id="lookMode">
