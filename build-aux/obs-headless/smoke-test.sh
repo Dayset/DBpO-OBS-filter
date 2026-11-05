@@ -93,7 +93,9 @@ EOF
 	if [[ -f "$dir/tests/placement.py" ]]; then
 		read -r -a place_args <<<"$(python3 "$dir/tests/placement.py" settings)"
 		python3 "$dir/tests/placement.py" make >"$work/pin.rgba"
-		if env "${extra_env[@]}" DISPLAY="$display" timeout 300 "$work/obs-headless" "$so" "$data" "$id" "$W" "$H" \
+		# The check states the canvas it needs (regions must fit the strip); it overrides the plugin's default.
+		canvas="$(python3 "$dir/tests/placement.py" canvas)"
+		if env "${extra_env[@]}" OBS_HEADLESS_CANVAS="$canvas" DISPLAY="$display" timeout 300 "$work/obs-headless" "$so" "$data" "$id" "$W" "$H" \
 			"${place_args[@]}" <"$work/pin.rgba" >"$work/pout.rgba" 2>"$work/plog.txt"; then
 			size="$(grep -o 'output [0-9]*x[0-9]*' "$work/plog.txt" | head -1 | cut -d' ' -f2)"
 			if result="$(python3 "$dir/tests/placement.py" check "$work/pout.rgba" "$size")"; then
