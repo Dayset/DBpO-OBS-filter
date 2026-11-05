@@ -307,7 +307,7 @@ int main(int argc, char **argv)
 	}
 	out_bytes = (size_t)OW * OH * 4;
 	fprintf(stderr, "obs-headless: output %ux%u\n", OW, OH);
-	fprintf(stderr, "obs-headless: canvas %ux%u (env %s), video %ux%u\n", cw, ch, canvas ? canvas : "unset", obs_get_base_width(), obs_get_base_height());
+	fprintf(stderr, "obs-headless: canvas %ux%u (env %s)\n", cw, ch, canvas ? canvas : "unset");
 	in_buf = malloc(frame_bytes);
 	out_buf = malloc(out_bytes);
 	feed_src = src;
