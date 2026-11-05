@@ -29,6 +29,9 @@ with this program. If not, see <https://www.gnu.org/licenses/>
 #include "squish-math.h"
 #include "atlas-math.h"
 
+/* Width of the squished picture when sharp regions are on; the strip uses the rest. */
+#define ATLAS_BOX_W 0.8
+
 #ifdef _WIN32
 #define WIN32_LEAN_AND_MEAN
 #include <windows.h>
@@ -90,6 +93,8 @@ struct layout {
 	uint32_t vw, vh;        /* OBS output (scaled) */
 	uint32_t tw, th;        /* chosen stream resolution (Fill) */
 	enum fit_result fit;
+	struct atlas_slot slots[ATLAS_MAX_REGIONS]; /* sharp regions in the strip */
+	int nslots;
 };
 
 /* Stream resolution list: 0 = match the canvas, 1 = custom squeeze, else a
@@ -121,6 +126,7 @@ struct squish_filter {
 	gs_texrender_t *look_out;  /* look: Details result */
 	gs_texrender_t *look_out2; /* look: Sharpen+ result */
 	gs_texrender_t *display;
+	gs_texrender_t *composed; /* streamed frame: picture + atlas strip */
 	bool needs_update;
 	bool output_valid;
 
@@ -132,6 +138,8 @@ struct squish_filter {
 	enum layout_mode layout;
 	int target;   /* TARGET_CANVAS, TARGET_CUSTOM or a height */
 	double floor; /* lowest density = 1 / max edge compression */
+	struct atlas_region regions[ATLAS_MAX_REGIONS];
+	int nregions;
 
 	/* What the properties view shows, so it only rebuilds when this changes
 	 * (rebuilding while a slider is dragged makes the sliders jump). */
@@ -251,6 +259,41 @@ static int read_target(obs_data_t *s)
 	return obs_data_get_int(s, S_LAYOUT) == LAYOUT_EXACT ? TARGET_CUSTOM : TARGET_CANVAS;
 }
 
+static int read_regions(obs_data_t *s, struct atlas_region *out);
+
+/* Sharp regions: the picture shrinks into a box on the left (ATLAS_BOX_W of the
+ * stream width); the regions are packed into the strip on the right. L is left
+ * unchanged when they do not fit (the regions are then not streamed). */
+static void atlas_place(const struct squish_filter *f, uint32_t w, uint32_t h, struct layout *L,
+			struct squish_config *c)
+{
+	struct atlas a;
+	memset(&a, 0, sizeof(a));
+	a.squish = *c;
+	a.squish.boxed = true;
+	a.squish.ox = 0.0;
+	a.squish.oy = 0.0;
+	a.squish.bw = ATLAS_BOX_W;
+	a.squish.bh = 1.0;
+	a.count = f->nregions;
+	memcpy(a.regions, f->regions, sizeof(a.regions));
+	if (!atlas_layout(&a, (int)L->tw, (int)L->th, (int)w, (int)h, L->slots))
+		return;
+	const uint32_t pw = ((uint32_t)lround(ATLAS_BOX_W * L->tw)) & ~1u;
+	L->nslots = a.count;
+	L->ow = pw;
+	L->oh = L->th;
+	L->fw = L->tw;
+	L->fh = L->th;
+	c->x.r = (double)L->ow / w;
+	c->y.r = (double)L->oh / h;
+	c->boxed = true;
+	c->ox = 0.0;
+	c->oy = 0.0;
+	c->bw = (double)pw / L->tw;
+	c->bh = 1.0;
+}
+
 static void compute_layout(const struct squish_filter *f, uint32_t w, uint32_t h, struct layout *L)
 {
 	memset(L, 0, sizeof(*L));
@@ -290,6 +333,8 @@ static void compute_layout(const struct squish_filter *f, uint32_t w, uint32_t h
 	c.y.r = (double)L->oh / h;
 	c.ar = (double)w / h;
 	c.boxed = false;
+	if (f->nregions > 0 && f->layout == LAYOUT_FILL)
+		atlas_place(f, w, h, L, &c);
 	L->c = c;
 }
 
@@ -304,6 +349,7 @@ static void fsq_update(void *data, obs_data_t *s)
 	f->view = (enum view_mode)obs_data_get_int(s, S_VIEW);
 	f->target = read_target(s);
 	f->layout = f->target == TARGET_CUSTOM ? LAYOUT_EXACT : LAYOUT_FILL;
+	f->nregions = read_regions(s, f->regions);
 }
 
 /* ------------------------------------------------------------------ lifecycle */
@@ -338,6 +384,7 @@ static void *fsq_create(obs_data_t *settings, obs_source_t *context)
 	f->look_v = gs_texrender_create(GS_RGBA, GS_ZS_NONE);
 	f->look_out = gs_texrender_create(GS_RGBA, GS_ZS_NONE);
 	f->look_out2 = gs_texrender_create(GS_RGBA, GS_ZS_NONE);
+	f->composed = gs_texrender_create(GS_RGBA, GS_ZS_NONE);
 	obs_leave_graphics();
 	bfree(path);
 
@@ -351,6 +398,7 @@ static void *fsq_create(obs_data_t *settings, obs_source_t *context)
 		gs_texrender_destroy(f->look_v);
 		gs_texrender_destroy(f->look_out);
 		gs_texrender_destroy(f->look_out2);
+		gs_texrender_destroy(f->composed);
 		obs_leave_graphics();
 		bfree(f);
 		return NULL;
@@ -371,6 +419,7 @@ static void fsq_destroy(void *data)
 	gs_texrender_destroy(f->look_v);
 	gs_texrender_destroy(f->look_out);
 	gs_texrender_destroy(f->look_out2);
+	gs_texrender_destroy(f->composed);
 	gs_effect_destroy(f->effect);
 	obs_leave_graphics();
 	bfree(f);
@@ -546,6 +595,59 @@ static bool capture_input(struct squish_filter *f, obs_source_t *target, obs_sou
 	return true;
 }
 
+/* One Atlas-technique quad: samples tex over uv (u0, v0, u1, v1) and draws it
+ * at (x, y) in the current ortho space. qw x qh includes the gutter; the slot is
+ * sw x sh inside it, and the gutter repeats the slot's edge pixels. */
+static void atlas_quad(gs_effect_t *e, gs_texture_t *tex, const float uv[4], float qw, float qh, float sw, float sh,
+		       float gutter, float x, float y)
+{
+	struct vec2 v;
+	gs_effect_set_texture(gs_effect_get_param_by_name(e, "image"), tex);
+	vec2_set(&v, uv[0], uv[1]);
+	gs_effect_set_vec2(gs_effect_get_param_by_name(e, "atlas_uv0"), &v);
+	vec2_set(&v, uv[2], uv[3]);
+	gs_effect_set_vec2(gs_effect_get_param_by_name(e, "atlas_uv1"), &v);
+	vec2_set(&v, qw, qh);
+	gs_effect_set_vec2(gs_effect_get_param_by_name(e, "atlas_quad"), &v);
+	vec2_set(&v, sw, sh);
+	gs_effect_set_vec2(gs_effect_get_param_by_name(e, "atlas_slot"), &v);
+	gs_effect_set_float(gs_effect_get_param_by_name(e, "atlas_gutter"), gutter);
+	gs_matrix_push();
+	gs_matrix_translate3f(x, y, 0.0f);
+	while (gs_effect_loop(e, "Atlas"))
+		gs_draw_sprite(NULL, 0, (uint32_t)qw, (uint32_t)qh);
+	gs_matrix_pop();
+}
+
+/* Streamed frame: the squished picture at the origin, then each region copied
+ * from the uncleaned input into its slot. */
+static bool compose_atlas(struct squish_filter *f, const struct layout *L, gs_texture_t *raw, gs_texture_t *sq)
+{
+	gs_texrender_reset(f->composed);
+	if (!gs_texrender_begin(f->composed, L->fw, L->fh))
+		return false;
+	struct vec4 clear;
+	vec4_zero(&clear);
+	gs_clear(GS_CLEAR_COLOR, &clear, 0.0f, 0);
+	gs_ortho(0.0f, (float)L->fw, 0.0f, (float)L->fh, -100.0f, 100.0f);
+	gs_effect_t *e = f->effect;
+
+	const float full[4] = {0.0f, 0.0f, 1.0f, 1.0f};
+	atlas_quad(e, sq, full, (float)L->ow, (float)L->oh, (float)L->ow, (float)L->oh, 0.0f, 0.0f, 0.0f);
+
+	const float g = (float)ATLAS_GUTTER;
+	for (int i = 0; i < L->nslots; i++) {
+		const struct atlas_slot *s = &L->slots[i];
+		const struct atlas_region *r = &f->regions[i];
+		/* Texture v runs bottom-up in OBS, region y is measured from the top. */
+		const float uv[4] = {(float)r->x0, (float)(1.0 - r->y1), (float)r->x1, (float)(1.0 - r->y0)};
+		atlas_quad(e, raw, uv, (float)s->w + 2.0f * g, (float)s->h + 2.0f * g, (float)s->w, (float)s->h, g,
+			   (float)s->x - g, (float)L->fh - (float)s->y - (float)s->h - g);
+	}
+	gs_texrender_end(f->composed);
+	return true;
+}
+
 static void fsq_render(void *data, gs_effect_t *unused)
 {
 	UNUSED_PARAMETER(unused);
@@ -572,6 +674,7 @@ static void fsq_render(void *data, gs_effect_t *unused)
 		gs_blend_function(GS_BLEND_ONE, GS_BLEND_ZERO);
 		if (capture_input(f, target, parent, w, h)) {
 			gs_texture_t *in = gs_texrender_get_texture(f->input);
+			gs_texture_t *raw = in; /* regions copy from here, never cleaned */
 			if (f->clean > 0.0 && run_pass(f, f->cleaned, "Clean", in, c, w, h, w, h))
 				in = gs_texrender_get_texture(f->cleaned);
 			if (f->view == VIEW_ZONE) {
@@ -581,7 +684,11 @@ static void fsq_render(void *data, gs_effect_t *unused)
 				gs_texture_t *sq = gs_texrender_get_texture(f->squished);
 				f->display = f->squished;
 				f->output_valid = true;
-				if (f->view == VIEW_UNSQUISHED) {
+				if (L.nslots > 0) {
+					/* Sharp regions: every view shows the streamed frame (picture + strip). */
+					f->output_valid = compose_atlas(f, &L, raw, sq);
+					f->display = f->composed;
+				} else if (f->view == VIEW_UNSQUISHED) {
 					f->output_valid = run_pass(f, f->output, "Unsquish", sq, c, L.ow, L.oh, pw, ph);
 					f->display = f->output_valid ? apply_look(f, f->output, pw, ph) : f->output;
 				}
@@ -727,6 +834,7 @@ static void describe(struct squish_filter *f, obs_data_t *s, char *info, size_t 
 	tmp.target = read_target(s);
 	tmp.layout = tmp.target == TARGET_CUSTOM ? LAYOUT_EXACT : LAYOUT_FILL;
 	tmp.view = VIEW_SQUISHED;
+	tmp.nregions = read_regions(s, tmp.regions);
 
 	uint32_t w = 1920, h = 1080;
 	target_size(f, &w, &h);
