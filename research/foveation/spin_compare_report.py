@@ -11,7 +11,7 @@ import numpy as np
 from PIL import Image
 from skimage.metrics import structural_similarity
 
-CX, CY = 0.15, 0.15  # sharp center half-size (fractions), as in the config
+CX, CY = float(os.environ.get("SPIN_CX", 0.15)), float(os.environ.get("SPIN_CX", 0.15))  # sharp center half-size (fractions), as in the config
 
 
 def luma(path):

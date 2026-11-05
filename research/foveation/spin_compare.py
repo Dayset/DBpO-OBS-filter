@@ -29,7 +29,7 @@ import bitrate_harness as bh  # noqa: E402
 
 SW, SH = 2560, 1440  # game
 OW, OH = int(os.environ.get("SPIN_OW", 1920)), int(os.environ.get("SPIN_OH", 1080))  # stream (963p: 1712x964, 4:2:0 needs even rows)
-CFG = "FSQ1:rx=0.75,ry=0.75,cx=0.15,cy=0.15,fx=0.5,fy=0.5,px=1,py=1,ar=1.7778"
+CFG = os.environ.get("SPIN_CFG", "FSQ1:rx=0.75,ry=0.75,cx=0.15,cy=0.15,fx=0.5,fy=0.5,px=1,py=1,ar=1.7778")
 SPEED = 80  # px per frame, turning left
 COLOR = "colorspace=bt709:color_primaries=bt709:color_trc=bt709:color_range=tv"
 X264 = ["-r", "60", "-c:v", "libx264", "-preset", "veryfast", "-profile:v", "high", "-bf", "2", "-g", "120", "-keyint_min", "120",
