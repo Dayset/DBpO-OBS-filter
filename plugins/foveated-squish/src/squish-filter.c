@@ -682,6 +682,28 @@ static bool compose_atlas(struct squish_filter *f, const struct layout *L, gs_te
 	return true;
 }
 
+/* Unsquished preview with sharp regions: paste each region back where it is in
+ * the source, from its slot in the streamed frame (what viewers see). */
+static bool paste_regions(struct squish_filter *f, const struct layout *L, uint32_t pw, uint32_t ph)
+{
+	if (!gs_texrender_begin(f->output, pw, ph))
+		return false;
+	gs_ortho(0.0f, (float)pw, 0.0f, (float)ph, -100.0f, 100.0f);
+	gs_effect_t *e = f->effect;
+	gs_texture_t *strip = gs_texrender_get_texture(f->composed);
+	const float fw = (float)L->fw, fh = (float)L->fh;
+	for (int i = 0; i < L->nslots; i++) {
+		const struct atlas_slot *s = &L->slots[i];
+		const struct atlas_region *r = &f->regions[i];
+		const float uv[4] = {(float)s->x / fw, (float)s->y / fh, (float)(s->x + s->w) / fw,
+				     (float)(s->y + s->h) / fh};
+		const float qw = (float)((r->x1 - r->x0) * pw), qh = (float)((r->y1 - r->y0) * ph);
+		atlas_quad(e, strip, uv, qw, qh, qw, qh, 0.0f, (float)(r->x0 * pw), (float)(r->y0 * ph));
+	}
+	gs_texrender_end(f->output);
+	return true;
+}
+
 static void fsq_render(void *data, gs_effect_t *unused)
 {
 	UNUSED_PARAMETER(unused);
@@ -722,6 +744,13 @@ static void fsq_render(void *data, gs_effect_t *unused)
 					/* Sharp regions: every view shows the streamed frame (picture + strip). */
 					f->output_valid = compose_atlas(f, &L, raw, sq);
 					f->display = f->composed;
+					if (f->output_valid && f->view == VIEW_UNSQUISHED) {
+						f->output_valid =
+							run_pass(f, f->output, "Unsquish", sq, c, L.ow, L.oh, pw, ph) &&
+							paste_regions(f, &L, pw, ph);
+						f->display = f->output_valid ? apply_look(f, f->output, pw, ph)
+									     : f->output;
+					}
 				} else if (f->view == VIEW_UNSQUISHED) {
 					f->output_valid = run_pass(f, f->output, "Unsquish", sq, c, L.ow, L.oh, pw, ph);
 					f->display = f->output_valid ? apply_look(f, f->output, pw, ph) : f->output;
