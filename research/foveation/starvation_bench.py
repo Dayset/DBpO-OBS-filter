@@ -33,6 +33,7 @@ from scipy.ndimage import uniform_filter
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import atlas_math as am  # noqa: E402
 from squish_math import Squish  # noqa: E402
+import starvation_math as sm  # noqa: E402
 
 W, H, FPS = 1920, 1080, 60
 SEGS = [("calm1", 0, 180), ("spin", 180, 420), ("calm2", 420, 600)]
@@ -41,7 +42,6 @@ SETTLE = 30
 SQ = "FSQ1:rx=0.75,ry=0.75,cx=0.15,cy=0.15,fx=0.5,fy=0.5,px=1,py=1,ar=1.778"
 SIZES = {1080: (1920, 1080), 810: (1440, 810), 720: (1280, 720), 540: (960, 540), 360: (640, 360)}
 CODES = {1080: 0, 720: 1, 540: 2, 360: 3, 810: 4}
-MX, MY, CELL, BITS = W - 160, 1056, 16, 5  # 4 code bits + parity, 2 cells per bit (Manchester)
 CENTER = (slice(int(H * .35), int(H * .65)), slice(int(W * .35), int(W * .65)))
 
 
@@ -86,26 +86,8 @@ def build(src, work):
 
 # ---------------- sender ----------------
 
-def marker(frame, code):
-    bits = [(code >> i) & 1 for i in range(4)]
-    bits.append(sum(bits) & 1)
-    for i, b in enumerate(bits):
-        for j, on in enumerate((b, 1 - b)):
-            x = MX + (2 * i + j) * CELL
-            frame[MY:MY + CELL, x:x + CELL] = 235 if on else 16
-    return frame
-
-
-def read_marker(frame):
-    y = 0.299 * frame[..., 0] + 0.587 * frame[..., 1] + 0.114 * frame[..., 2]
-    bits = []
-    for i in range(BITS):
-        a = y[MY + 4:MY + 12, MX + 2 * i * CELL + 4:MX + 2 * i * CELL + 12].mean()
-        b = y[MY + 4:MY + 12, MX + (2 * i + 1) * CELL + 4:MX + (2 * i + 1) * CELL + 12].mean()
-        bits.append(1 if a > b else 0)
-    if sum(bits[:4]) & 1 != bits[4]:
-        return None
-    return sum(b << i for i, b in enumerate(bits[:4]))
+marker = sm.draw_marker  # reference implementation (STARVATION_SPEC.md)
+read_marker = sm.read_marker
 
 
 class SquishMats:
