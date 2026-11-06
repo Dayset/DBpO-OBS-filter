@@ -29,6 +29,7 @@ with this program. If not, see <https://www.gnu.org/licenses/>
 #include "embedded-effect.h" /* generated from data/foveated_squish.effect */
 #include "squish-math.h"
 #include "atlas-math.h"
+#include "starvation.h"
 
 /* Width of the squished picture when sharp regions are on; the strip uses the rest. */
 #define ATLAS_BOX_W 0.8
@@ -84,6 +85,15 @@ enum atlas_state {
 #define S_ATLAS_H "atlas_%d_h"
 #define S_ATLAS_SCALE "atlas_%d_scale"
 #define S_IMPORT "import"
+/* Dynamic resolution when starved (epic #10, research/foveation/STARVATION_SPEC.md) */
+#define S_STV_ON "starve_on"
+#define S_STV_LOWEST "starve_lowest"   /* 1 = 720, 2 = 540, 3 = 360 */
+#define S_STV_BITRATE "starve_bitrate" /* kbit/s, 0 = from the streaming output */
+#define S_STV_SENS "starve_sensitivity"
+#define S_STV_NET "starve_network"
+#define S_STV_SQUISH "starve_squish"
+#define STV_MX 240
+#define STV_MY 135
 /* Viewer look: sent to viewers in the config string, applied by the browser
  * extension, shown here only in the Unsquished preview (never streamed). */
 #define S_LOOK_SHARPEN "look_sharpen"
@@ -167,6 +177,30 @@ struct squish_filter {
 	gs_texrender_t *display;
 	gs_texrender_t *composed; /* streamed frame: picture + atlas strip */
 	gs_texrender_t *mean;     /* 1x1: average colour of one region */
+	/* starvation levels */
+	gs_texrender_t *level;  /* streamed frame with the level applied */
+	gs_texrender_t *metric; /* 240x135 source luma */
+	gs_stagesurf_t *stage[2];
+	int stage_i;
+	bool stage_full[2];
+	uint8_t prev_luma[STV_MX * STV_MY];
+	bool have_prev;
+	bool stv_on, stv_net, stv_squish;
+	int stv_lowest;
+	double stv_bitrate, stv_sens;
+	int stv_forced; /* -1 = auto, else a code 0..3 */
+	struct stv_controller stv;
+	bool stv_ready;
+	int stv_code;         /* code applied to the last streamed frame */
+	double stv_congestion; /* 0..1 */
+	double stv_budget;     /* kbit/s used */
+	int stv_dropped_prev;
+	int stv_dropped_hold; /* frames left of "recent drops" */
+	struct stv_hotkey {
+		struct squish_filter *f;
+		int code; /* -1 = auto */
+	} hk[5];
+	int stv_tick;
 	/* DBPO_FSQ_ANALYZE=1: GPU time per stage, logged every ANALYZE_PERIOD frames. */
 	bool analyze;
 	gs_timer_t *timers[ANALYZE_STAGES];
@@ -417,6 +451,8 @@ static void compute_layout(const struct squish_filter *f, uint32_t w, uint32_t h
 	L->c = c;
 }
 
+static void stv_apply_settings(struct squish_filter *f, obs_data_t *s);
+
 static void fsq_update(void *data, obs_data_t *s)
 {
 	struct squish_filter *f = data;
@@ -430,6 +466,7 @@ static void fsq_update(void *data, obs_data_t *s)
 	f->layout = f->target == TARGET_CUSTOM ? LAYOUT_EXACT : LAYOUT_FILL;
 	f->nregions = read_regions(s, f->regions, NULL);
 	f->blank_dup = obs_data_get_bool(s, S_ATLAS_BLANK);
+	stv_apply_settings(f, s);
 }
 
 /* ------------------------------------------------------------------ lifecycle */
@@ -467,6 +504,10 @@ static void *fsq_create(obs_data_t *settings, obs_source_t *context)
 	f->look_col = gs_texrender_create(GS_RGBA, GS_ZS_NONE);
 	f->composed = gs_texrender_create(GS_RGBA, GS_ZS_NONE);
 	f->mean = gs_texrender_create(GS_RGBA, GS_ZS_NONE);
+	f->level = gs_texrender_create(GS_RGBA, GS_ZS_NONE);
+	f->metric = gs_texrender_create(GS_RGBA, GS_ZS_NONE);
+	f->stage[0] = gs_stagesurface_create(STV_MX, STV_MY, GS_RGBA);
+	f->stage[1] = gs_stagesurface_create(STV_MX, STV_MY, GS_RGBA);
 	const char *an = getenv("DBPO_FSQ_ANALYZE");
 	f->analyze = an && an[0] == '1';
 	if (f->analyze)
@@ -488,11 +529,21 @@ static void *fsq_create(obs_data_t *settings, obs_source_t *context)
 		gs_texrender_destroy(f->look_col);
 		gs_texrender_destroy(f->composed);
 		gs_texrender_destroy(f->mean);
+		gs_texrender_destroy(f->level);
+		gs_texrender_destroy(f->metric);
+		gs_stagesurface_destroy(f->stage[0]);
+		gs_stagesurface_destroy(f->stage[1]);
 		obs_leave_graphics();
 		bfree(f);
 		return NULL;
 	}
+	f->stv_forced = -1;
 	fsq_update(f, settings);
+	for (int i = 0; i < 5; i++) {
+		f->hk[i].f = f;
+		f->hk[i].code = stv_hotkey_codes[i];
+		obs_hotkey_register_source(context, stv_hotkey_names[i], T(stv_hotkey_labels[i]), stv_hotkey_cb, &f->hk[i]);
+	}
 	return f;
 }
 
@@ -511,6 +562,10 @@ static void fsq_destroy(void *data)
 	gs_texrender_destroy(f->look_col);
 	gs_texrender_destroy(f->composed);
 	gs_texrender_destroy(f->mean);
+	gs_texrender_destroy(f->level);
+	gs_texrender_destroy(f->metric);
+	gs_stagesurface_destroy(f->stage[0]);
+	gs_stagesurface_destroy(f->stage[1]);
 	for (int k = 0; k < ANALYZE_STAGES; k++)
 		if (f->timers[k])
 			gs_timer_destroy(f->timers[k]);
@@ -861,6 +916,207 @@ static void analyze_collect(struct squish_filter *f)
 	blog(LOG_INFO, "%s", line);
 }
 
+
+/* ------------------------------------------------------------------ starvation levels (epic #10) */
+
+static const int stv_hotkey_codes[5] = {0, 1, 2, 3, -1};
+static const char *stv_hotkey_names[5] = {"dbpo_fsq_force_full", "dbpo_fsq_force_720", "dbpo_fsq_force_540",
+					  "dbpo_fsq_force_360", "dbpo_fsq_auto"};
+static const char *stv_hotkey_labels[5] = {"HotkeyForce1080", "HotkeyForce720", "HotkeyForce540", "HotkeyForce360",
+					   "HotkeyAuto"};
+
+static void stv_hotkey_cb(void *data, obs_hotkey_id id, obs_hotkey_t *hotkey, bool pressed)
+{
+	UNUSED_PARAMETER(id);
+	UNUSED_PARAMETER(hotkey);
+	struct stv_hotkey *h = data;
+	if (!pressed)
+		return;
+	h->f->stv_forced = h->code;
+	obs_log(LOG_INFO, "starvation level: %s", h->code < 0 ? "automatic" : "forced");
+}
+
+/* Budget (kbit/s) and congestion from the streaming output; runs twice a second. */
+static void stv_read_stream(struct squish_filter *f)
+{
+	double budget = f->stv_bitrate > 0.0 ? f->stv_bitrate : 6000.0; /* manual, or the Twitch default */
+	double congestion = 0.0;
+	obs_output_t *out = obs_get_output_by_name("adv_stream");
+	if (!out || !obs_output_active(out)) {
+		obs_output_release(out);
+		out = obs_get_output_by_name("simple_stream");
+	}
+	if (out && obs_output_active(out)) {
+		if (f->stv_bitrate <= 0.0) {
+			obs_encoder_t *enc = obs_output_get_video_encoder(out);
+			obs_data_t *es = enc ? obs_encoder_get_settings(enc) : NULL;
+			const long long br = es ? obs_data_get_int(es, "bitrate") : 0;
+			if (br > 0)
+				budget = (double)br;
+			obs_data_release(es);
+		}
+		if (f->stv_net) {
+			congestion = (double)obs_output_get_congestion(out);
+			const int dropped = obs_output_get_frames_dropped(out);
+			if (dropped > f->stv_dropped_prev)
+				f->stv_dropped_hold = 4; /* 2 s of "recent drops" */
+			f->stv_dropped_prev = dropped;
+			if (f->stv_dropped_hold > 0) {
+				f->stv_dropped_hold--;
+				if (congestion < 0.3)
+					congestion = 0.3;
+			}
+		}
+	}
+	obs_output_release(out);
+	f->stv_budget = budget;
+	f->stv_congestion = congestion;
+	f->stv.cfg.budget_kbps = budget;
+}
+
+/* Source luma at 240x135 (GPU), read back one frame late; feeds the controller. */
+static void stv_metric(struct squish_filter *f, gs_texture_t *raw, uint32_t w, uint32_t h)
+{
+	gs_effect_t *e = f->effect;
+	gs_texrender_reset(f->metric);
+	if (gs_texrender_begin(f->metric, STV_MX, STV_MY)) {
+		struct vec4 clear;
+		vec4_zero(&clear);
+		gs_clear(GS_CLEAR_COLOR, &clear, 0.0f, 0);
+		gs_ortho(0.0f, (float)STV_MX, 0.0f, (float)STV_MY, -100.0f, 100.0f);
+		struct vec2 v;
+		gs_effect_set_texture(gs_effect_get_param_by_name(e, "image"), raw);
+		vec2_set(&v, (float)w, (float)h);
+		gs_effect_set_vec2(gs_effect_get_param_by_name(e, "src_size"), &v);
+		vec2_set(&v, (float)STV_MX, (float)STV_MY);
+		gs_effect_set_vec2(gs_effect_get_param_by_name(e, "out_size"), &v);
+		while (gs_effect_loop(e, "Metric"))
+			gs_draw_sprite(NULL, 0, STV_MX, STV_MY);
+		gs_texrender_end(f->metric);
+		gs_stage_texture(f->stage[f->stage_i], gs_texrender_get_texture(f->metric));
+		f->stage_full[f->stage_i] = true;
+	}
+	const int prev = f->stage_i ^ 1;
+	f->stage_i = prev; /* the next frame stages into the slot we read now */
+	if (!f->stage_full[prev])
+		return;
+	f->stage_full[prev] = false;
+	uint8_t *data;
+	uint32_t linesize;
+	if (!gs_stagesurface_map(f->stage[prev], &data, &linesize))
+		return;
+	uint8_t cur[STV_MX * STV_MY];
+	for (int y = 0; y < STV_MY; y++)
+		for (int x = 0; x < STV_MX; x++)
+			cur[y * STV_MX + x] = data[(size_t)y * linesize + (size_t)x * 4];
+	gs_stagesurface_unmap(f->stage[prev]);
+	if (f->have_prev) {
+		unsigned long sum = 0;
+		for (int i = 0; i < STV_MX * STV_MY; i++)
+			sum += (unsigned long)abs((int)cur[i] - (int)f->prev_luma[i]);
+		const double m = (double)sum / (STV_MX * STV_MY);
+		if (f->stv_tick++ % 30 == 0)
+			stv_read_stream(f);
+		const int before = f->stv.cur;
+		stv_controller_step(&f->stv, m, f->stv_congestion);
+		if (f->stv.cur != before)
+			obs_log(LOG_INFO, "starvation level %d -> %d (demand/budget %.2f, budget %.0f kbit/s)", before,
+				f->stv.cur, f->stv.ratio, f->stv_budget);
+	}
+	memcpy(f->prev_luma, cur, sizeof(cur));
+	f->have_prev = true;
+}
+
+/* Squish levels (codes 4, 5): the squished picture is made smaller. Returns false when the density
+ * floor does not allow it; the caller then uses the plain level instead. */
+static bool stv_squish_cfg(const struct squish_filter *f, const struct layout *L, int code, struct squish_config *c2,
+			   uint32_t *rw, uint32_t *rh)
+{
+	const struct stv_rect r = stv_rect(code, (int)L->fw, (int)L->fh);
+	*c2 = L->c;
+	c2->x.r = (double)r.w / L->w;
+	c2->y.r = (double)r.h / L->h;
+	if (c2->x.r > 1.0 || c2->y.r > 1.0 || c2->x.r < squish_axis_min_r_floor(&c2->x, f->floor) ||
+	    c2->y.r < squish_axis_min_r_floor(&c2->y, f->floor))
+		return false;
+	*rw = (uint32_t)r.w;
+	*rh = (uint32_t)r.h;
+	return true;
+}
+
+/* Streamed frame with the level applied: picture top-left (area downscale), black elsewhere, strip as is,
+ * marker last. src is the squished picture / composed frame, pict the picture area inside it. */
+static bool stv_level_pass(struct squish_filter *f, gs_texture_t *src, uint32_t pict_w, uint32_t pict_h,
+			   uint32_t rect_w, uint32_t rect_h, bool strip, int code, uint32_t fw, uint32_t fh)
+{
+	gs_texrender_reset(f->level);
+	if (!gs_texrender_begin(f->level, fw, fh))
+		return false;
+	struct vec4 clear;
+	vec4_zero(&clear);
+	gs_clear(GS_CLEAR_COLOR, &clear, 0.0f, 0);
+	gs_ortho(0.0f, (float)fw, 0.0f, (float)fh, -100.0f, 100.0f);
+	gs_effect_t *e = f->effect;
+	struct vec2 v;
+	struct vec4 q;
+	gs_effect_set_texture(gs_effect_get_param_by_name(e, "image"), src);
+	vec2_set(&v, (float)gs_texture_get_width(src), (float)gs_texture_get_height(src));
+	gs_effect_set_vec2(gs_effect_get_param_by_name(e, "src_size"), &v);
+	vec2_set(&v, (float)fw, (float)fh);
+	gs_effect_set_vec2(gs_effect_get_param_by_name(e, "out_size"), &v);
+	vec2_set(&v, (float)pict_w, (float)pict_h);
+	gs_effect_set_vec2(gs_effect_get_param_by_name(e, "lvl_pict"), &v);
+	vec2_set(&v, (float)rect_w, (float)rect_h);
+	gs_effect_set_vec2(gs_effect_get_param_by_name(e, "lvl_rect"), &v);
+	gs_effect_set_float(gs_effect_get_param_by_name(e, "lvl_strip"), strip ? 1.0f : 0.0f);
+	int mx, my;
+	stv_marker_pos((int)fw, (int)fh, &mx, &my);
+	vec2_set(&v, (float)mx, (float)my);
+	gs_effect_set_vec2(gs_effect_get_param_by_name(e, "lvl_marker"), &v);
+	uint8_t cells[2 * STV_BITS];
+	stv_marker_cells(code, cells);
+	vec4_set(&q, cells[0], cells[1], cells[2], cells[3]);
+	gs_effect_set_vec4(gs_effect_get_param_by_name(e, "mk_a"), &q);
+	vec4_set(&q, cells[4], cells[5], cells[6], cells[7]);
+	gs_effect_set_vec4(gs_effect_get_param_by_name(e, "mk_b"), &q);
+	vec4_set(&q, cells[8], cells[9], 0.0f, 0.0f);
+	gs_effect_set_vec4(gs_effect_get_param_by_name(e, "mk_c"), &q);
+	while (gs_effect_loop(e, "Level"))
+		gs_draw_sprite(NULL, 0, fw, fh);
+	gs_texrender_end(f->level);
+	return true;
+}
+
+static void stv_apply_settings(struct squish_filter *f, obs_data_t *s)
+{
+	f->stv_on = obs_data_get_bool(s, S_STV_ON);
+	f->stv_lowest = (int)obs_data_get_int(s, S_STV_LOWEST);
+	if (f->stv_lowest < 1 || f->stv_lowest > 3)
+		f->stv_lowest = 3;
+	f->stv_bitrate = obs_data_get_double(s, S_STV_BITRATE);
+	f->stv_sens = obs_data_get_double(s, S_STV_SENS);
+	f->stv_net = obs_data_get_bool(s, S_STV_NET);
+	f->stv_squish = obs_data_get_bool(s, S_STV_SQUISH);
+	struct stv_controller_cfg cfg = stv_default_cfg(f->stv_bitrate > 0.0 ? f->stv_bitrate : 6000.0);
+	cfg.k = f->stv_sens > 0.0 ? f->stv_sens : 1.35;
+	cfg.lowest = f->stv_lowest;
+	if (!f->stv_ready) {
+		stv_controller_init(&f->stv, &cfg);
+		f->stv_ready = true;
+	} else { /* keep the state, change the knobs */
+		cfg.budget_kbps = f->stv.cfg.budget_kbps;
+		f->stv.cfg = cfg;
+		if (f->stv.cur > cfg.lowest)
+			f->stv.cur = cfg.lowest;
+	}
+}
+
+static void stv_level_name(int code, char *buf, size_t n)
+{
+	static const char *names[STV_LEVELS] = {"full", "720", "540", "360", "squish 810", "squish 540"};
+	snprintf(buf, n, "%s", code >= 0 && code < STV_LEVELS ? names[code] : "?");
+}
+
 static void fsq_render(void *data, gs_effect_t *unused)
 {
 	UNUSED_PARAMETER(unused);
@@ -888,13 +1144,30 @@ static void fsq_render(void *data, gs_effect_t *unused)
 		if (capture_input(f, target, parent, w, h)) {
 			gs_texture_t *in = gs_texrender_get_texture(f->input);
 			gs_texture_t *raw = in; /* regions copy from here, never cleaned */
+			int stv_code = 0;
+			struct squish_config stv_c2;
+			uint32_t stv_rw = 0, stv_rh = 0;
+			bool stv_squished = false;
+			if (f->stv_on && f->view == VIEW_SQUISHED) {
+				stv_metric(f, raw, w, h);
+				stv_code = f->stv_forced >= 0 ? f->stv_forced : f->stv.cur;
+				if (f->stv_squish && L.nslots == 0 && (stv_code == 1 || stv_code == 2)) {
+					const int sq_code = stv_code == 1 ? 4 : 5; /* 720 -> squish 810, 540 -> squish 540 */
+					if (stv_squish_cfg(f, &L, sq_code, &stv_c2, &stv_rw, &stv_rh)) {
+						stv_code = sq_code;
+						stv_squished = true;
+					}
+				}
+			}
+			const struct squish_config *sq_c = stv_squished ? &stv_c2 : c;
+			const uint32_t sq_w = stv_squished ? stv_rw : L.ow, sq_h = stv_squished ? stv_rh : L.oh;
 			if (f->clean > 0.0 && run_pass(f, f->cleaned, "Clean", in, c, w, h, w, h))
 				in = gs_texrender_get_texture(f->cleaned);
 			if (f->view == VIEW_ZONE) {
 				f->output_valid = run_pass(f, f->output, "Zone", in, c, w, h, pw, ph);
 				f->display = f->output;
 			} else if (analyze_begin(f, STAGE_SQUISH),
-				   run_pass(f, f->squished, "Squish", in, c, w, h, L.ow, L.oh) &&
+				   run_pass(f, f->squished, "Squish", in, sq_c, w, h, sq_w, sq_h) &&
 					   (analyze_end(f, STAGE_SQUISH), true)) {
 				gs_texture_t *sq = gs_texrender_get_texture(f->squished);
 				f->display = f->squished;
@@ -922,6 +1195,24 @@ static void fsq_render(void *data, gs_effect_t *unused)
 				} else if (f->view == VIEW_UNSQUISHED) {
 					f->output_valid = run_pass(f, f->output, "Unsquish", sq, c, L.ow, L.oh, pw, ph);
 					f->display = f->output_valid ? apply_look(f, f->output, pw, ph) : f->output;
+				}
+			}
+			if (f->stv_on && f->view == VIEW_SQUISHED && f->output_valid) {
+				gs_texture_t *lsrc = gs_texrender_get_texture(f->display);
+				bool ok;
+				if (stv_squished) {
+					ok = stv_level_pass(f, lsrc, sq_w, sq_h, sq_w, sq_h, false, stv_code, L.fw, L.fh);
+				} else {
+					const uint32_t pict_w = L.nslots > 0 ? L.ow : L.fw, pict_h = L.nslots > 0 ? L.oh : L.fh;
+					const struct stv_rect rr = stv_rect(stv_code, (int)pict_w, (int)pict_h);
+					ok = stv_level_pass(f, lsrc, pict_w, pict_h, (uint32_t)rr.w, (uint32_t)rr.h,
+							    L.nslots > 0, stv_code, L.fw, L.fh);
+				}
+				if (ok) {
+					f->display = f->level;
+					f->stv_code = stv_code;
+				} else {
+					f->output_valid = false;
 				}
 			}
 		}
@@ -1087,8 +1378,10 @@ static void describe(struct squish_filter *f, obs_data_t *s, char *info, size_t 
 	target_size(f, &w, &h);
 	struct layout L;
 	compute_layout(&tmp, w, h, &L);
-	if (cfg)
+	if (cfg) {
+		L.c.starve = f->stv_on;
 		squish_config_format(&L.c, cfg, cfg_size);
+	}
 	if (cfg && tmp.nregions > 0 && L.atlas_state == ATLAS_OK)
 		append_regions(cfg, cfg_size, tmp.regions, tmp.nregions);
 
@@ -1497,6 +1790,29 @@ static obs_properties_t *fsq_properties(void *data)
 		obs_property_set_modified_callback(pr, cfg_modified);
 	}
 
+	/* Dynamic resolution when starved (epic #10) */
+	obs_properties_t *stv = obs_properties_create();
+	{
+		char readout[256];
+		char name[16];
+		stv_level_name(f->stv_code, name, sizeof(name));
+		snprintf(readout, sizeof(readout), T("StarveReadout"), name, f->stv.ratio, f->stv_budget,
+			 f->stv_congestion * 100.0);
+		obs_properties_add_text(stv, "starve_info", T("StarveInfo"), OBS_TEXT_INFO);
+		obs_properties_add_text(stv, "starve_readout", readout, OBS_TEXT_INFO);
+		obs_property_t *lp = obs_properties_add_list(stv, S_STV_LOWEST, T("StarveLowest"), OBS_COMBO_TYPE_LIST,
+							    OBS_COMBO_FORMAT_INT);
+		obs_property_list_add_int(lp, T("Starve.720"), 1);
+		obs_property_list_add_int(lp, T("Starve.540"), 2);
+		obs_property_list_add_int(lp, T("Starve.360"), 3);
+		obs_property_t *bp = obs_properties_add_int(stv, S_STV_BITRATE, T("StarveBitrate"), 0, 60000, 100);
+		obs_property_int_set_suffix(bp, " kbit/s");
+		obs_properties_add_float_slider(stv, S_STV_SENS, T("StarveSensitivity"), 0.5, 3.0, 0.05);
+		obs_properties_add_bool(stv, S_STV_NET, T("StarveNetwork"));
+		obs_properties_add_bool(stv, S_STV_SQUISH, T("StarveSquish"));
+		obs_properties_add_group(props, S_STV_ON, T("Starve"), OBS_GROUP_CHECKABLE, stv);
+	}
+
 	obs_properties_t *share = obs_properties_create();
 	obs_property_t *tp = obs_properties_add_text(share, S_TITLE, T("TitleText"), OBS_TEXT_DEFAULT);
 	obs_property_set_modified_callback(tp, cfg_modified);
@@ -1570,6 +1886,12 @@ static void fsq_defaults(obs_data_t *s)
 		obs_data_set_default_double(s, key, 100.0);
 	}
 	obs_data_set_default_int(s, S_TARGET, TARGET_CANVAS);
+	obs_data_set_default_bool(s, S_STV_ON, false);
+	obs_data_set_default_int(s, S_STV_LOWEST, 3);
+	obs_data_set_default_double(s, S_STV_BITRATE, 0.0);
+	obs_data_set_default_double(s, S_STV_SENS, 1.35);
+	obs_data_set_default_bool(s, S_STV_NET, true);
+	obs_data_set_default_bool(s, S_STV_SQUISH, false);
 	obs_data_set_default_double(s, S_MAXCOMP, 12.5);
 }
 

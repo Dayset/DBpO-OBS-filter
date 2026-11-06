@@ -62,6 +62,9 @@ struct squish_config {
 		double brightness, contrast, gamma, saturation, vibrance, temperature, tint, hue, highlights, shadows;
 		double bw, sepia, night;
 	} look;
+	/* Stream uses starvation levels (key sl=1): the viewer reads the level marker, see
+	 * research/foveation/STARVATION_SPEC.md. */
+	bool starve;
 };
 
 bool squish_look_active(const struct squish_look *l);
