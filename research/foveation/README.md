@@ -143,3 +143,7 @@ None of these save bits: every variant costs more and looks worse. H.264 doesn't
 ## Caveats
 
 Synthetic content, x264 only (no NVENC here). Re-measure on a lossless gameplay recording before deciding. The squish needs a viewer-side unwarp (custom player, MPV shader, or a browser extension that re-renders the page's `<video>` through WebGL); viewers without it see the squeezed picture.
+
+## Bitrate starvation: dynamic resolution inside a fixed frame
+
+See [starvation_findings.md](starvation_findings.md) (`starvation_bench.py`, `starvation_report.py`): black padding equals a real low-res stream, edge-repeat is worse, switching mid-stream is free, and a cheap temporal-difference metric tracks encoder demand.
