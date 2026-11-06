@@ -182,3 +182,28 @@ if __name__ == "__main__":
         run(sys.argv[2], int(sys.argv[3]), a or ["s0", "s1", "s2", "s3", "auto"], kk)
     elif c == "report":
         report(sys.argv[2])
+
+
+def external(work, path, offset, name):
+    """Measure a stream encoded elsewhere (e.g. OBS NVENC -> Twitch): path[j] is aligned with ref[j + offset]."""
+    ref = os.path.join(work, "ref.mkv")
+    rows = []
+    import itertools
+    r = itertools.islice(frames(ref), offset, None)
+    for j, (a, g) in enumerate(zip(r, frames(path))):
+        if j % STEP:
+            continue
+        la, lb = luma(a.astype(np.float32)), luma(g.astype(np.float32))
+        s = ssim_map(la, lb)
+        rows.append((j + offset, 0, 1, psnr(la, lb), psnr(la[CENTER], lb[CENTER]), float(s.mean()), float(s[CENTER].mean())))
+    resp = os.path.join(work, "results.json")
+    allr = json.load(open(resp)) if os.path.exists(resp) else {}
+    bits = frame_bits(path)
+    allr[name] = {"rows": rows, "mbit_s": round(bits.sum() / (len(bits) / FPS) / 1e6, 2), "offset": offset}
+    json.dump(allr, open(resp, "w"))
+    r = np.array(rows)
+    print(name, f"clip SSIM {r[:, 5].mean():.4f} centre SSIM {r[:, 6].mean():.4f} centre PSNR {r[:, 4].mean():.2f} whole PSNR {r[:, 3].mean():.2f}")
+
+
+if __name__ == "__main__" and sys.argv[1] == "external":
+    external(sys.argv[2], sys.argv[3], int(sys.argv[4]), sys.argv[5])
