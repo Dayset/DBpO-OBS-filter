@@ -7,6 +7,7 @@ picture and scales it back up. The stream never stops and the frame size never c
 Twitch and the player keep running.
 
     python3 starvation_bench.py build SRC.mp4 WORK           # reference timeline (calm / spin / calm)
+    python3 starvation_bench.py load TIMELINE.mkv WORK       # same timeline from the ready-made lossless file
     python3 starvation_bench.py run WORK KBPS NAME [NAME..]  # encode + measure variants
     python3 starvation_bench.py dyn WORK KBPS SCHEDULE [kf]  # e.g. calm1=1080,spin=540,calm2=1080
     python3 starvation_bench.py detect WORK                  # cheap complexity metric vs CRF-23 bits
@@ -82,6 +83,27 @@ def build(src, work):
         out[k] = f
         k += 1
     out.flush()
+
+
+def load(path, work):
+    """Fill WORK/ref.u8 from the published lossless timeline (starvation_timeline_1080p60_rgb_lossless.mkv,
+    600 frames, bit-exact with `build`). Frame count and size are checked."""
+    os.makedirs(work, exist_ok=True)
+    out = np.memmap(os.path.join(work, "ref.u8"), np.uint8, "w+", shape=(N, H, W, 3))
+    p = subprocess.Popen(["ffmpeg", "-loglevel", "error", "-i", path, "-f", "rawvideo", "-pix_fmt", "rgb24", "-"],
+                         stdout=subprocess.PIPE)
+    k = 0
+    while True:
+        b = p.stdout.read(W * H * 3)
+        if len(b) < W * H * 3:
+            break
+        if k < N:
+            out[k] = np.frombuffer(b, np.uint8).reshape(H, W, 3)
+        k += 1
+    p.wait()
+    out.flush()
+    if k != N:
+        sys.exit(f"expected {N} frames of {W}x{H}, got {k}")
 
 
 # ---------------- sender ----------------
@@ -377,6 +399,8 @@ def main():
     cmd = sys.argv[1]
     if cmd == "build":
         build(sys.argv[2], sys.argv[3])
+    elif cmd == "load":
+        load(sys.argv[2], sys.argv[3])
     elif cmd == "run":
         work, kbps = sys.argv[2], int(sys.argv[3])
         done = json.load(open(os.path.join(work, "results.json"))) if os.path.exists(
