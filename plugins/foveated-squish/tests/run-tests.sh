@@ -15,6 +15,10 @@ trap 'rm -rf "$out"' EXIT
 python3 "$root/research/foveation/color_math.py" --golden-header | diff -q - "$here/look_golden.h" >/dev/null || { echo "tests/look_golden.h is out of date: regenerate with color_math.py --golden-header"; exit 1; }
 gcc -O2 -Wall -Wextra -std=c17 -I"$src" -I"$here" "$src/squish-math.c" "$here/test_squish_math.c" -lm -o "$out/test_squish_math"
 gcc -O2 -Wall -Wextra -std=c17 -I"$src" -I"$here" "$src/atlas-math.c" "$src/squish-math.c" "$here/test_atlas_math.c" -lm -o "$out/test_atlas_math"
+python3 "$root/research/foveation/starvation_math.py" --golden-header | diff -q - "$here/starvation_golden.h" >/dev/null || { echo "tests/starvation_golden.h is out of date: regenerate with starvation_math.py --golden-header"; exit 1; }
+gcc -O2 -Wall -Wextra -std=c17 -I"$src" -I"$here" "$src/starvation.c" "$here/test_starvation.c" -lm -o "$out/test_starvation"
+python3 "$root/research/foveation/starvation_math.py" --selftest >/dev/null && echo "starvation Python reference selftest: PASS"
+"$out/test_starvation"
 python3 "$root/research/foveation/color_math.py" >/dev/null && echo "colour look reference selftest: PASS"
 python3 "$root/research/foveation/atlas_math.py" --selftest >/dev/null && echo "atlas Python reference selftest: PASS"
 "$out/test_atlas_math"
