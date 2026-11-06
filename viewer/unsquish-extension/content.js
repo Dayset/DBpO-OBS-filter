@@ -555,6 +555,30 @@ void main() { v_uv = a_pos * 0.5 + 0.5; gl_Position = vec4(a_pos, 0.0, 1.0); }`;
 		return false;
 	}
 
+	/** Level for the frame just uploaded: read the 160x16 marker (same decoded frame), hold on a bad read. */
+	function readLevel(s, video, cfg) {
+		const STV = self.FSQSTV;
+		const vw = video.videoWidth, vh = video.videoHeight;
+		if (!STV || !vw || !vh) return null;
+		if (!s.stv) {
+			const cv = document.createElement("canvas");
+			cv.width = 160;
+			cv.height = 16;
+			s.stv = { ctx: cv.getContext("2d", { willReadFrequently: true }), holder: new STV.Holder(60) };
+		}
+		let code = null;
+		try {
+			const [mx, my] = STV.markerPos(vw, vh);
+			s.stv.ctx.drawImage(video, mx, my, 160, 16, 0, 0, 160, 16);
+			code = STV.decodeImage(s.stv.ctx.getImageData(0, 0, 160, 16).data);
+		} catch (e) {
+			code = null;
+		}
+		const level = s.stv.holder.update(code);
+		document.documentElement.dataset.dbpoLevel = String(level);
+		return STV.levelView(cfg, level, vw, vh);
+	}
+
 	function draw() {
 		if (superseded()) {
 			detach();
@@ -615,13 +639,23 @@ void main() { v_uv = a_pos * 0.5 + 0.5; gl_Position = vec4(a_pos, 0.0, 1.0); }`;
 					detach();
 					return requestAnimationFrame(draw);
 				}
-				const ux = FSQ.uniforms(cfg.x), uy = FSQ.uniforms(cfg.y);
+				// Starvation levels: the marker says how small the picture is inside this very frame.
+				let lvBox = cfg.box, lvX = cfg.x, lvY = cfg.y;
+				if (cfg.starve && !plain) {
+					const lv = readLevel(state, video, cfg);
+					if (lv) {
+						lvBox = lv.box;
+						lvX = lv.x;
+						lvY = lv.y;
+					}
+				}
+				const ux = FSQ.uniforms(lvX), uy = FSQ.uniforms(lvY);
 				gl.uniform1i(loc.u_video, 0);
 				gl.uniform4fv(loc.u_ax_a, ux.A);
 				gl.uniform4fv(loc.u_ax_b, ux.B);
 				gl.uniform4fv(loc.u_ay_a, uy.A);
 				gl.uniform4fv(loc.u_ay_b, uy.B);
-				gl.uniform4fv(loc.u_box, cfg.box);
+				gl.uniform4fv(loc.u_box, lvBox);
 				gl.uniform2f(loc.u_texel, 1 / Math.max(video.videoWidth, 1), 1 / Math.max(video.videoHeight, 1));
 				// Sharp regions (atlas): paste each one from its slot in the frame.
 				const rgn = new Float32Array(16), slot = new Float32Array(16);

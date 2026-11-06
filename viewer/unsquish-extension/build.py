@@ -8,7 +8,7 @@
                       install from a file or sideload; needs signing for release builds)
   build.py --check    fails if the committed userscript is out of date (for CI)
 
-The userscript is the real content.js, chatsignal.js and squish.js plus a small shim that
+The userscript is the real content.js, chatsignal.js, squish.js and starvation.js plus a small shim that
 maps chrome.storage onto the userscript manager's storage, and the popup turned into a
 floating settings panel (button in the corner of the page).
 """
@@ -128,6 +128,7 @@ def build_userscript():
         "(function () {\n\"use strict\";\n",
         SHIM,
         "{\n" + read("squish.js") + "\n}\n",
+        "{\n" + read("starvation.js") + "\n}\n",
         panel,
         "{\n" + popup_js + "\n}\n",
         "{\n" + read("chatsignal.js") + "\n}\n",
@@ -143,7 +144,7 @@ def build_firefox():
     path = os.path.join(dist, "dbpo-unsquish-firefox.zip")
     with zipfile.ZipFile(path, "w", zipfile.ZIP_DEFLATED) as z:
         z.write(os.path.join(HERE, "manifest.firefox.json"), "manifest.json")
-        for n in ("squish.js", "content.js", "chatsignal.js", "popup.html", "popup.js"):
+        for n in ("squish.js", "starvation.js", "content.js", "chatsignal.js", "popup.html", "popup.js"):
             z.write(os.path.join(HERE, n), n)
         for n in os.listdir(os.path.join(HERE, "icons")):
             z.write(os.path.join(HERE, "icons", n), "icons/" + n)

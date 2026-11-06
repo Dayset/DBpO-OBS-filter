@@ -27,6 +27,7 @@ python3 "$here/compare_reference.py" "C plugin" <"$out/c.txt"
 
 if command -v node >/dev/null; then
 	node "$root/viewer/unsquish-extension/tests/look_code.js"
+	node "$root/viewer/unsquish-extension/tests/starvation.js"
 	node "$root/viewer/unsquish-extension/tests/compare.js" >"$out/js.txt"
 	python3 "$here/compare_reference.py" "JS extension" <"$out/js.txt"
 else
@@ -36,6 +37,7 @@ fi
 if [[ "${1:-}" == "--e2e" ]]; then
 	python3 "$root/viewer/unsquish-extension/tests/e2e.py"
 	python3 "$root/viewer/unsquish-extension/tests/e2e_atlas.py"
+	python3 "$root/viewer/unsquish-extension/tests/e2e_starvation.py"
 	python3 "$root/viewer/unsquish-extension/tests/e2e_controls.py"
 	python3 "$root/viewer/unsquish-extension/tests/e2e_scope.py"
 	python3 "$root/viewer/unsquish-extension/tests/e2e_light.py"

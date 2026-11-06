@@ -139,6 +139,8 @@ const chrome = (() => {
 			x: { r: g("rx", 0.75), c: g("cx", 0.15), f: g("fx", 0.5), p: g("px", 1) },
 			y: { r: g("ry", 0.75), c: g("cy", 0.15), f: g("fy", 0.5), p: g("py", 1) },
 			ar: g("ar", 16 / 9),
+			// Stream uses starvation levels (sl=1): read the level marker every frame (starvation.js).
+			starve: g("sl", 0) === 1,
 			// Where the squished picture sits in the video frame (black bars around it).
 			box: [g("ox", 0), g("oy", 0), g("bw", 1), g("bh", 1)],
 			// Viewer look, applied after unsquishing (0..1 each, 0 = off). Older
@@ -322,7 +324,7 @@ const chrome = (() => {
 	/** A config that leaves the picture as it is (forward(x) = x): for plain, non-squished videos. */
 	function identity(ar) {
 		const a = { r: 1, c: 0.5, f: 0.5, p: 1 };
-		return { x: { ...a }, y: { ...a }, ar: ar > 0 ? ar : 16 / 9, box: [0, 0, 1, 1], look: { ...NO_LOOK }, text: "" };
+		return { x: { ...a }, y: { ...a }, ar: ar > 0 ? ar : 16 / 9, box: [0, 0, 1, 1], look: { ...NO_LOOK }, text: "", starve: false };
 	}
 
 	/** Uniform values for the unwarp shader: per axis A = (lo, hi, ll, lr), B = (k, p, r, dmin). */
@@ -714,6 +716,112 @@ void main() {
 	};
 	if (typeof module !== "undefined" && module.exports) module.exports = api;
 	else root.FSQ = api;
+})(typeof self !== "undefined" ? self : this);
+
+}
+
+{
+/*
+ * Starvation levels (browser side). Mirrors research/foveation/starvation_math.py and
+ * plugins/foveated-squish/src/starvation.c; spec: research/foveation/STARVATION_SPEC.md.
+ * tests/starvation.js checks this file against research/foveation/starvation_golden.json.
+ *
+ * The stream frame keeps its size; at a lower level the picture is drawn smaller in the top-left and a
+ * 160x16 marker (5 Manchester bits: 4 code bits + even parity) in the bottom-right says which level.
+ */
+(function (root) {
+	// code -> [name, kind, fraction of the picture rect (plain) / of the frame (squish)]
+	const LEVELS = { 0: ["full", "plain", 1], 1: ["720", "plain", 2 / 3], 2: ["540", "plain", 1 / 2], 3: ["360", "plain", 1 / 3], 4: ["squish-810", "squish", 3 / 4], 5: ["squish-540", "squish", 1 / 2] };
+	const CELL = 16, BITS = 5, STRIP_W = 160, STRIP_H = 16, MIN_CONTRAST = 4;
+
+	const roundEven = (v) => Math.floor(v + 0.5) & ~1;
+
+	/** Picture size {w, h} of a level inside a pw x ph rect; origin (0, 0). */
+	function rect(code, pw, ph) {
+		const f = (LEVELS[code] || LEVELS[0])[2];
+		return { w: roundEven(f * pw), h: roundEven(f * ph) };
+	}
+
+	function markerPos(w, h) {
+		return [w - STRIP_W, Math.floor((h - 24) / 16) * 16];
+	}
+
+	function markerBits(code) {
+		const bits = [0, 1, 2, 3].map((i) => (code >> i) & 1);
+		bits.push(bits.reduce((a, b) => a + b, 0) & 1);
+		return bits;
+	}
+
+	/** Code from the 10 inner-8x8 mean luma values (limited range), or null (parity fail / unreadable). */
+	function decodeMeans(m) {
+		const bits = [];
+		for (let i = 0; i < BITS; i++) {
+			const a = m[2 * i], b = m[2 * i + 1];
+			if (Math.abs(a - b) < MIN_CONTRAST) return null;
+			bits.push(a > b ? 1 : 0);
+		}
+		if (((bits[0] + bits[1] + bits[2] + bits[3]) & 1) !== bits[4]) return null;
+		return bits[0] | (bits[1] << 1) | (bits[2] << 2) | (bits[3] << 3);
+	}
+
+	/** Decode the 160x16 strip from RGBA pixels (canvas ImageData.data). */
+	function decodeImage(data) {
+		const m = [];
+		for (let c = 0; c < 2 * BITS; c++) {
+			let sum = 0;
+			for (let y = 4; y < 12; y++)
+				for (let x = c * CELL + 4; x < c * CELL + 12; x++) {
+					const i = (y * STRIP_W + x) * 4;
+					sum += 0.299 * data[i] + 0.587 * data[i + 1] + 0.114 * data[i + 2];
+				}
+			m.push(16 + (sum / 64) * (219 / 255)); // luma as the encoder stores it
+		}
+		return decodeMeans(m);
+	}
+
+	/** Keeps the last valid level for at most round(0.2 fps) frames (min 3) when the marker is unreadable. */
+	class Holder {
+		constructor(fps = 60) {
+			this.n = Math.max(3, Math.round(0.2 * fps));
+			this.last = 0;
+			this.age = 0;
+		}
+		update(code) {
+			if (code !== null && code !== undefined) {
+				this.last = code in LEVELS ? code : 0; // reserved code -> level 0
+				this.age = 0;
+			} else if (++this.age > this.n) this.last = 0;
+			return this.last;
+		}
+	}
+
+	/**
+	 * What to draw for a level: { box, x, y } (picture rectangle in the frame as fractions, and the axis
+	 * configs), or null for level 0. cfg = FSQ.parse result. Plain levels shrink cfg.box (the sharp-region
+	 * strip, if any, stays); squish levels (4, 5) re-run the unsquish with r scaled to the smaller picture and
+	 * only exist without sharp regions.
+	 */
+	function levelView(cfg, code, vw, vh) {
+		const lv = LEVELS[code];
+		if (!lv || code === 0) return null;
+		const [ox, oy, bw, bh] = cfg.box;
+		if (lv[1] === "plain") {
+			const r = rect(code, bw * vw, bh * vh);
+			return { box: [ox, oy, r.w / vw, r.h / vh], x: cfg.x, y: cfg.y };
+		}
+		if (cfg.regions && cfg.regions.length) return null;
+		if (!(ox === 0 && oy === 0 && bw === 1 && bh === 1)) return null;
+		const r = rect(code, vw, vh);
+		return {
+			box: [0, 0, r.w / vw, r.h / vh],
+			x: { ...cfg.x, r: (r.w * cfg.x.r) / vw },
+			y: { ...cfg.y, r: (r.h * cfg.y.r) / vh },
+		};
+	}
+
+	const api = { LEVELS, rect, markerPos, markerBits, decodeMeans, decodeImage, Holder, levelView };
+	if (typeof module !== "undefined" && module.exports) module.exports = api;
+	else root.FSQSTV = api;
 })(typeof self !== "undefined" ? self : this);
 
 }
@@ -1607,6 +1715,30 @@ void main() { v_uv = a_pos * 0.5 + 0.5; gl_Position = vec4(a_pos, 0.0, 1.0); }`;
 		return false;
 	}
 
+	/** Level for the frame just uploaded: read the 160x16 marker (same decoded frame), hold on a bad read. */
+	function readLevel(s, video, cfg) {
+		const STV = self.FSQSTV;
+		const vw = video.videoWidth, vh = video.videoHeight;
+		if (!STV || !vw || !vh) return null;
+		if (!s.stv) {
+			const cv = document.createElement("canvas");
+			cv.width = 160;
+			cv.height = 16;
+			s.stv = { ctx: cv.getContext("2d", { willReadFrequently: true }), holder: new STV.Holder(60) };
+		}
+		let code = null;
+		try {
+			const [mx, my] = STV.markerPos(vw, vh);
+			s.stv.ctx.drawImage(video, mx, my, 160, 16, 0, 0, 160, 16);
+			code = STV.decodeImage(s.stv.ctx.getImageData(0, 0, 160, 16).data);
+		} catch (e) {
+			code = null;
+		}
+		const level = s.stv.holder.update(code);
+		document.documentElement.dataset.dbpoLevel = String(level);
+		return STV.levelView(cfg, level, vw, vh);
+	}
+
 	function draw() {
 		if (superseded()) {
 			detach();
@@ -1667,13 +1799,23 @@ void main() { v_uv = a_pos * 0.5 + 0.5; gl_Position = vec4(a_pos, 0.0, 1.0); }`;
 					detach();
 					return requestAnimationFrame(draw);
 				}
-				const ux = FSQ.uniforms(cfg.x), uy = FSQ.uniforms(cfg.y);
+				// Starvation levels: the marker says how small the picture is inside this very frame.
+				let lvBox = cfg.box, lvX = cfg.x, lvY = cfg.y;
+				if (cfg.starve && !plain) {
+					const lv = readLevel(state, video, cfg);
+					if (lv) {
+						lvBox = lv.box;
+						lvX = lv.x;
+						lvY = lv.y;
+					}
+				}
+				const ux = FSQ.uniforms(lvX), uy = FSQ.uniforms(lvY);
 				gl.uniform1i(loc.u_video, 0);
 				gl.uniform4fv(loc.u_ax_a, ux.A);
 				gl.uniform4fv(loc.u_ax_b, ux.B);
 				gl.uniform4fv(loc.u_ay_a, uy.A);
 				gl.uniform4fv(loc.u_ay_b, uy.B);
-				gl.uniform4fv(loc.u_box, cfg.box);
+				gl.uniform4fv(loc.u_box, lvBox);
 				gl.uniform2f(loc.u_texel, 1 / Math.max(video.videoWidth, 1), 1 / Math.max(video.videoHeight, 1));
 				// Sharp regions (atlas): paste each one from its slot in the frame.
 				const rgn = new Float32Array(16), slot = new Float32Array(16);

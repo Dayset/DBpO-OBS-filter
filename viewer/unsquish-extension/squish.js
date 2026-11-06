@@ -76,6 +76,8 @@
 			x: { r: g("rx", 0.75), c: g("cx", 0.15), f: g("fx", 0.5), p: g("px", 1) },
 			y: { r: g("ry", 0.75), c: g("cy", 0.15), f: g("fy", 0.5), p: g("py", 1) },
 			ar: g("ar", 16 / 9),
+			// Stream uses starvation levels (sl=1): read the level marker every frame (starvation.js).
+			starve: g("sl", 0) === 1,
 			// Where the squished picture sits in the video frame (black bars around it).
 			box: [g("ox", 0), g("oy", 0), g("bw", 1), g("bh", 1)],
 			// Viewer look, applied after unsquishing (0..1 each, 0 = off). Older
@@ -259,7 +261,7 @@
 	/** A config that leaves the picture as it is (forward(x) = x): for plain, non-squished videos. */
 	function identity(ar) {
 		const a = { r: 1, c: 0.5, f: 0.5, p: 1 };
-		return { x: { ...a }, y: { ...a }, ar: ar > 0 ? ar : 16 / 9, box: [0, 0, 1, 1], look: { ...NO_LOOK }, text: "" };
+		return { x: { ...a }, y: { ...a }, ar: ar > 0 ? ar : 16 / 9, box: [0, 0, 1, 1], look: { ...NO_LOOK }, text: "", starve: false };
 	}
 
 	/** Uniform values for the unwarp shader: per axis A = (lo, hi, ll, lr), B = (k, p, r, dmin). */
