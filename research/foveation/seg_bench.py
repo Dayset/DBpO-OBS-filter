@@ -59,7 +59,7 @@ def view(g, a):
 def schedule(name, seg, kbps):
     if name == "full":
         return [0] * N
-    if name.startswith("a"):
+    if name.startswith("a") and name[1:].isdigit():
         return [int(name[1:])] * N
     if name in ("abrupt", "ramp"):  # 1080 / 540 alternating every 5 s
         tgt = [0 if (i // 300) % 2 == 0 else 38 for i in range(N)]
