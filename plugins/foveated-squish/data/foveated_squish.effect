@@ -47,11 +47,11 @@ uniform float2 atlas_slot; // atlas: slot size in pixels
 uniform float  atlas_gutter;
 uniform float2 lvl_pict;   // starvation level: size of the picture area inside `image` (px)
 uniform float2 lvl_rect;   // starvation level: size of the level's rectangle at the top-left (px)
-uniform float  lvl_strip;  // starvation level: 1 = copy the strip beside the picture, 0 = black
-uniform float2 lvl_marker; // starvation level: marker strip origin (px), 160x16
-uniform float4 mk_a;       // starvation level: marker cells 0..3 (1 = white, 0 = black)
-uniform float4 mk_b;       // cells 4..7
-uniform float4 mk_c;       // cells 8..9 (z, w unused)
+uniform float  lvl_strip;  // starvation level: 1 = copy the sharp-region strip from strip_img, 0 = black
+uniform float2 lvl_marker; // starvation level: marker v1 row origin (px); the extension row is 16 px above it
+uniform float  mk_v1;      // marker v1 row: bit k = cell k (16x16) is white (10 cells)
+uniform float  mk_ext;     // marker extension row: bit k = cell k (8x16) is white (20 cells)
+uniform texture2d strip_img; // starvation level: the normal streamed frame (for the strip)
 
 sampler_state linearClamp {
 	Filter   = Linear;
@@ -237,32 +237,24 @@ float4 PSMean(VertData v_in) : TARGET
 // Starvation level: the picture (top-left lvl_pict of `image`) is area-downscaled into the top-left
 // lvl_rect, the rest of the frame is black, the strip beside the picture (sharp regions) is copied as is,
 // and the marker is drawn last. Spec: research/foveation/STARVATION_SPEC.md.
+float cell_bit(float bits, float k)
+{
+	return fmod(floor(bits / exp2(k)), 2.0);
+}
+
 float4 PSLevel(VertData v_in) : TARGET
 {
 	float2 p = floor(v_in.uv * out_size);
-	if (p.x >= lvl_marker.x && p.x < lvl_marker.x + 160.0 && p.y >= lvl_marker.y && p.y < lvl_marker.y + 16.0) {
-		int cell = (int)floor((p.x - lvl_marker.x) / 16.0);
-		float v = 0.0;
-		if (cell == 0) v = mk_a.x; else if (cell == 1) v = mk_a.y; else if (cell == 2) v = mk_a.z; else if (cell == 3) v = mk_a.w;
-		else if (cell == 4) v = mk_b.x; else if (cell == 5) v = mk_b.y; else if (cell == 6) v = mk_b.z; else if (cell == 7) v = mk_b.w;
-		else if (cell == 8) v = mk_c.x; else v = mk_c.y;
+	float2 m = lvl_marker;
+	if (p.x >= m.x && p.x < m.x + 160.0 && p.y >= m.y - 16.0 && p.y < m.y + 16.0) {
+		float v = p.y >= m.y ? cell_bit(mk_v1, floor((p.x - m.x) / 16.0)) : cell_bit(mk_ext, floor((p.x - m.x) / 8.0));
 		return float4(v, v, v, 1.0);
 	}
+	if (p.x < lvl_rect.x && p.y < lvl_rect.y)
+		return image.SampleLevel(linearClamp, (p + 0.5) / lvl_rect, 0.0); // picture, already at the step's size
 	if (lvl_strip > 0.5 && (p.x >= lvl_pict.x || p.y >= lvl_pict.y))
-		return image.SampleLevel(linearClamp, (p + 0.5) / src_size, 0.0); // strip: same pixel
-	if (p.x >= lvl_rect.x || p.y >= lvl_rect.y)
-		return float4(0.0, 0.0, 0.0, 1.0);
-	float2 s = lvl_pict / lvl_rect;
-	if (abs(s.x - 1.0) < 0.0001 && abs(s.y - 1.0) < 0.0001)
-		return image.SampleLevel(linearClamp, (p + 0.5) / src_size, 0.0);
-	float4 sum = float4(0.0, 0.0, 0.0, 0.0);
-	for (int j = 0; j < 4; j++) {
-		for (int i = 0; i < 4; i++) {
-			float2 t = (float2(i, j) + 0.5) / 4.0;
-			sum += image.SampleLevel(linearClamp, (p + t) * s / src_size, 0.0);
-		}
-	}
-	return sum / 16.0;
+		return strip_img.SampleLevel(linearClamp, (p + 0.5) / out_size, 0.0); // sharp-region strip, unchanged
+	return float4(0.0, 0.0, 0.0, 1.0);
 }
 
 // Metric: source -> 240x135 luma (in r, g, b) for the starvation detector (8x8 taps).

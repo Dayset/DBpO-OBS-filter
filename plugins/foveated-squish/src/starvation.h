@@ -37,8 +37,8 @@ struct stv_controller_cfg {
 	double alpha;    /* EMA weight, default 1/8 */
 	int down_frames; /* default 6 */
 	int up_frames;   /* default 60 */
-	int lowest;      /* lowest allowed code (1..3), default 3 */
-	double table[4]; /* demand/budget upper bounds for codes 0..3: 1.5, 3, 6, inf */
+	int lowest;      /* lowest allowed target (1..5), default 3 */
+	double table[6]; /* demand/budget upper bounds for targets 0..5: 1.5, 3, 6, 12, 24, inf */
 };
 
 struct stv_controller {
@@ -56,4 +56,42 @@ void stv_controller_init(struct stv_controller *c, const struct stv_controller_c
 /* congestion 0..1 lowers the budget (budget * (1 - congestion), at most 0.9 off). */
 int stv_controller_step(struct stv_controller *c, double metric, double congestion);
 
-/* Viewer-side hold is in the extension; the sender side never needs it. */
+/* Marker v2 (spec 9): smooth steps. Row 1 = v1 marker with code STV_EXT_CODE, row 2 (16 px above) = 20 cells of
+ * 8x16 carrying scale step a (0..63) and squeeze step q (0..7). */
+#define STV_EXT_CODE 15
+#define STV_A_MAX 63
+#define STV_Q_MAX 7
+#define STV_F_MIN (1.0 / 6.0)
+#define STV_EXT_BITS 10
+#define STV_EXT_CELL 8
+
+double stv_frac(int a);           /* picture fraction 1 .. 1/6 */
+double stv_squeeze(int a, int q); /* factor on the squish ratio r: frac(a) ^ (q / 7) */
+int stv_a_for(double f);          /* nearest step for a fraction */
+struct stv_rect stv_rect2(int a, int pw, int ph);
+void stv_ext_pos(int frame_w, int frame_h, int *x, int *y);
+void stv_ext_bits(int a, int q, int bits[STV_EXT_BITS]);
+/* Bits packed for the shader: bit k = cell k is white. v1 row: 10 cells; extension row: 20 cells. */
+unsigned stv_cells_v1(int code);
+unsigned stv_cells_ext(int a, int q);
+
+/* Linear ramp of (a, q) to a target over n frames; step() is called once per frame. */
+struct stv_ramp {
+	double a, q, a0, q0, ta, tq;
+	int n, i;
+};
+void stv_ramp_init(struct stv_ramp *r);
+void stv_ramp_go(struct stv_ramp *r, int a, int q, int frames);
+void stv_ramp_step(struct stv_ramp *r, int *a, int *q);
+
+/* Demo loop (spec 9.4): (a, q, ramp seconds, hold seconds). */
+#define STV_DEMO_PHASES 5
+extern const double stv_demo[STV_DEMO_PHASES][4];
+struct stv_demo_state {
+	int phase, frame;
+};
+/* Advances the demo by one frame at fps and drives the ramp. */
+void stv_demo_step(struct stv_demo_state *d, struct stv_ramp *r, double fps);
+
+/* Detector target index (0..5) -> picture fraction (1080, 720, 540, 360, 270, 180 at 1080p). */
+double stv_target_frac(int idx);

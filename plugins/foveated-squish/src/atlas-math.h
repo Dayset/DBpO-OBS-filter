@@ -41,5 +41,4 @@ bool atlas_parse(const char *s, struct atlas *a);
 double atlas_region_floor(const struct atlas *a, const struct atlas_region *r);
 /* Deterministic shelf packing (spec section 3). Output: one slot per region.
  * Returns false if the regions cannot fit above the density floor. */
-bool atlas_layout(const struct atlas *a, int out_w, int out_h, int src_w, int src_h,
-		  struct atlas_slot *slots);
+bool atlas_layout(const struct atlas *a, int out_w, int out_h, int src_w, int src_h, struct atlas_slot *slots);

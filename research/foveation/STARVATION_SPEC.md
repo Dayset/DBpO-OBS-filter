@@ -93,3 +93,40 @@ like the other keys. The code table (§2) is fixed in this spec and **not** sent
 
 `starvation_golden.json` has: rects per level for 1920x1080, 1712x964, 1280x720; marker bit patterns for each code; a few
 pixel samples of `render` and `view` for a fixed synthetic image. C, shader and JS compare against it.
+
+## 9. Marker v2: smooth steps, squeeze ramps, demo loop
+
+v1 has six fixed levels; switching between them is a visible jump in sharpness. v2 lets the sender move in
+small steps every few frames, so the change is gradual for extension viewers. The frame size still never changes.
+
+### 9.1 State per frame
+- **Scale step `a`** (0..63): picture fraction `f = 1 − (5/6)·a/63` (1 … 1/6; one step ≈ 14 px at 1080p).
+  Rect = `round(f·pw) & ~1` × `round(f·ph) & ~1` of the picture rect (whole frame, or the part left of the
+  sharp-region strip). The strip stays as it is.
+- **Squeeze step `q`** (0..7): the squish ratio becomes `r·g` with `g = f^(q/7)`. `q = 0` scales the squished
+  picture evenly; `q = 7` keeps the centre at its full-size density and takes the whole shrink from the edges.
+  The sender clamps `q` to what the density floor allows (with a large sharp centre that is often only 1–2).
+- The sender squishes straight from the source into the rect with ratio `r·g` (one resample, no second downscale).
+
+### 9.2 Marker
+- Row 1 (unchanged position, §4): v1 marker with code **15** = "extended". Old viewers treat 15 as reserved
+  (full size), so they show the small picture uncropped; update the extension.
+- Row 2, **16 px above row 1**: 20 cells of **8×16** px, Manchester like §4, 10 bits LSB first:
+  `a` (6 bits), `q` (3 bits), even parity over those 9 bits. Decode: mean of the inner 4×8 of each cell.
+- The strip is therefore 160×32. Robustness: decoded on 120/120 frames of a clip stepping through every `a`
+  and `q` at x264 CBR 1500 / 3000 / 6000 (`starvation_math.py --robust`).
+- Viewers read v1 streams too (code → nearest step; squish codes → q = 7).
+
+### 9.3 Ramps
+Every target change (detector, hotkey) is reached by a linear ramp of `a` and `q` over
+"Shrink time" (default 0.5 s) or "Grow-back time" (default 2 s). The sender rounds half up each frame.
+Each step is an ordinary in-place switch (measured free for the encoder mid-GOP, §7).
+
+### 9.4 Demo loop
+Hotkey / setting. Phases (a, q, ramp s, hold s): (0, 0, 2, 4) → (38, 7, 2, 4) → (38, 0, 2, 4) → (50, 0, 2, 4) →
+(50, 7, 2, 4), then again. Squeeze is clamped to the floor per frame, so with strong squish settings the "squeezed"
+phases look like the plain ones.
+
+### 9.5 Detector targets
+The detector now has six targets (fractions 1, 2/3, 1/2, 1/3, 1/4, 1/6; demand/budget thresholds 1.5, 3, 6, 12,
+24). "Lowest allowed level" caps it (default 360p, so behaviour is unchanged unless 270p/180p is chosen).

@@ -1,4 +1,5 @@
 #include <stdio.h>
+#include <math.h>
 #include <string.h>
 
 #include "starvation.h"
@@ -82,6 +83,41 @@ int main(void)
 			stv_controller_step(&c, 30.0, 0.0);
 		CHECK(c.cur == 2, "lowest allowed level caps the drop");
 	}
+
+	/* v2: steps, rects, extension bits, demo ramp */
+	for (int i = 0; i < STV_GOLDEN_V2_N; i++) {
+		const int a = stv_golden_v2_steps[i][0], q = stv_golden_v2_steps[i][1];
+		CHECK(fabs(stv_frac(a) - stv_golden_v2_frac[i]) < 1e-12, "v2 fraction");
+		CHECK(fabs(stv_squeeze(a, q) - stv_golden_v2_squeeze[i]) < 1e-12, "v2 squeeze");
+		int bits[STV_EXT_BITS];
+		stv_ext_bits(a, q, bits);
+		CHECK(memcmp(bits, stv_golden_v2_bits[i], sizeof bits) == 0, "v2 extension bits");
+		const unsigned m = stv_cells_ext(a, q);
+		int ok = 1;
+		for (int k = 0; k < STV_EXT_BITS; k++)
+			ok &= ((m >> (2 * k)) & 1u) == (unsigned)bits[k] &&
+			      ((m >> (2 * k + 1)) & 1u) == (unsigned)!bits[k];
+		CHECK(ok, "v2 cells are Manchester");
+		for (int f = 0; f < 4; f++) {
+			struct stv_rect r = stv_rect2(a, stv_golden_v2_frames[f][0], stv_golden_v2_frames[f][1]);
+			CHECK(r.w == stv_golden_v2_rects[f][i][0] && r.h == stv_golden_v2_rects[f][i][1],
+			      "v2 rect matches Python");
+		}
+	}
+	{
+		struct stv_ramp r;
+		struct stv_demo_state d = {0, 0};
+		stv_ramp_init(&r);
+		int bad = 0;
+		for (int i = 0; i < STV_GOLDEN_DEMO_N; i++) {
+			int a, q;
+			stv_demo_step(&d, &r, 60.0);
+			stv_ramp_step(&r, &a, &q);
+			bad += a != stv_golden_demo[i][0] || q != stv_golden_demo[i][1];
+		}
+		CHECK(bad == 0, "demo loop matches Python");
+	}
+	CHECK(stv_a_for(0.5) == 38 && stv_a_for(1.0) == 0 && stv_a_for(1.0 / 6.0) == 63, "a_for");
 
 	fprintf(stderr, "starvation: %s\n", fails ? "FAIL" : "PASS");
 	return fails ? 1 : 0;

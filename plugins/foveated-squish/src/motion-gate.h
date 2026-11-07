@@ -11,15 +11,15 @@
 #define MOTION_LEVELS 4
 
 struct motion_sample {
-	double mean_flow_px; /* mean flow magnitude, px per frame at flow resolution */
+	double mean_flow_px;  /* mean flow magnitude, px per frame at flow resolution */
 	double match_quality; /* fraction of blocks with a real match, 0..1 */
 };
 
 struct motion_gate_config {
-	double flow_full_px;  /* flow magnitude that counts as full motion (m = 1) */
+	double flow_full_px;            /* flow magnitude that counts as full motion (m = 1) */
 	double up[MOTION_LEVELS - 1];   /* rise to level i+1 when m >= up[i] */
 	double down[MOTION_LEVELS - 1]; /* fall to level i when m < down[i] (below up[i]) */
-	double hold_ms;       /* minimum time a level is kept before it changes */
+	double hold_ms;                 /* minimum time a level is kept before it changes */
 };
 
 struct motion_gate {

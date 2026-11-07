@@ -161,9 +161,9 @@ void squish_config_format(const struct squish_config *cfg, char *buf, size_t siz
 /* Look values in code order (same as color_math.py FIELDS). */
 static double *look_field(struct squish_look *l, int i)
 {
-	double *f[] = {&l->sharpen,    &l->clarity,    &l->hdr,        &l->bloom,   &l->sharpen_plus, &l->brightness,
-		       &l->contrast,   &l->gamma,      &l->saturation, &l->vibrance, &l->temperature, &l->tint,
-		       &l->hue,        &l->highlights, &l->shadows,    &l->bw,      &l->sepia,        &l->night};
+	double *f[] = {&l->sharpen,  &l->clarity,    &l->hdr,        &l->bloom,    &l->sharpen_plus, &l->brightness,
+		       &l->contrast, &l->gamma,      &l->saturation, &l->vibrance, &l->temperature,  &l->tint,
+		       &l->hue,      &l->highlights, &l->shadows,    &l->bw,       &l->sepia,        &l->night};
 	return f[i];
 }
 #define LOOK_FIELDS 18
@@ -247,7 +247,8 @@ bool squish_look_unpack(const char *s, struct squish_look *l)
 		p += 3;
 	unsigned char bits[14 * 16];
 	int nb = 0;
-	while (nb + 14 <= (int)sizeof(bits) && (p[0] & 0xF0) == 0xE0 && (p[1] & 0xC0) == 0x80 && (p[2] & 0xC0) == 0x80) {
+	while (nb + 14 <= (int)sizeof(bits) && (p[0] & 0xF0) == 0xE0 && (p[1] & 0xC0) == 0x80 &&
+	       (p[2] & 0xC0) == 0x80) {
 		const unsigned cp = ((unsigned)(p[0] & 0x0F) << 12) | ((unsigned)(p[1] & 0x3F) << 6) | (p[2] & 0x3F);
 		if (cp < 0x4E00 || cp >= 0x4E00 + 16384)
 			return false;
@@ -277,9 +278,16 @@ bool squish_config_parse(const char *s, struct squish_config *cfg)
 		s++;
 	if (strncmp(s, "FSQ1:", 5) != 0)
 		return false;
-	struct squish_config c = {
-		{0.75, 0.15, 0.5, 1.0},   {0.75, 0.15, 0.5, 1.0}, 16.0 / 9.0, false, 0.0, 0.0, 1.0, 1.0,
-		{.sharpen = 0.0}, false};
+	struct squish_config c = {{0.75, 0.15, 0.5, 1.0},
+				  {0.75, 0.15, 0.5, 1.0},
+				  16.0 / 9.0,
+				  false,
+				  0.0,
+				  0.0,
+				  1.0,
+				  1.0,
+				  {.sharpen = 0.0},
+				  false};
 	const char *p = s + 5;
 	while (*p) {
 		char key[8] = {0};

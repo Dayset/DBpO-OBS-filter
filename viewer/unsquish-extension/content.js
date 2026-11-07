@@ -363,6 +363,9 @@ void main() { v_uv = a_pos * 0.5 + 0.5; gl_Position = vec4(a_pos, 0.0, 1.0); }`;
 			`render ${fmt(fps, 1)} fps   CPU submit ${fmt(avg(m.cpu))} ms avg, p95 ${fmt(p95(m.cpu))}`,
 			`GPU ${gpu}`,
 			`passes: ${d.parts}  ~${d.reads} texture reads/px`,
+			...(s.stv && s.stvState && self.FSQSTV
+				? [`starvation: ${Math.round(self.FSQSTV.frac(s.stvState.a) * 100)}% size (step ${s.stvState.a}), squeeze ${s.stvState.q}/7, marker read ${fmt((100 * s.stv.good) / Math.max(s.stv.reads, 1), 1)}%`]
+				: []),
 		].join("\n");
 	}
 
@@ -555,7 +558,7 @@ void main() { v_uv = a_pos * 0.5 + 0.5; gl_Position = vec4(a_pos, 0.0, 1.0); }`;
 		return false;
 	}
 
-	/** Level for the frame just uploaded: read the 160x16 marker (same decoded frame), hold on a bad read. */
+	/** Step for the frame just uploaded: read the 160x32 marker strip (same decoded frame), hold on a bad read. */
 	function readLevel(s, video, cfg) {
 		const STV = self.FSQSTV;
 		const vw = video.videoWidth, vh = video.videoHeight;
@@ -563,20 +566,23 @@ void main() { v_uv = a_pos * 0.5 + 0.5; gl_Position = vec4(a_pos, 0.0, 1.0); }`;
 		if (!s.stv) {
 			const cv = document.createElement("canvas");
 			cv.width = 160;
-			cv.height = 16;
-			s.stv = { ctx: cv.getContext("2d", { willReadFrequently: true }), holder: new STV.Holder(60) };
+			cv.height = 32;
+			s.stv = { ctx: cv.getContext("2d", { willReadFrequently: true }), holder: new STV.StateHolder(60), reads: 0, good: 0 };
 		}
-		let code = null;
+		let st = null;
 		try {
 			const [mx, my] = STV.markerPos(vw, vh);
-			s.stv.ctx.drawImage(video, mx, my, 160, 16, 0, 0, 160, 16);
-			code = STV.decodeImage(s.stv.ctx.getImageData(0, 0, 160, 16).data);
+			s.stv.ctx.drawImage(video, mx, my - 16, 160, 32, 0, 0, 160, 32);
+			st = STV.decodeStrip(s.stv.ctx.getImageData(0, 0, 160, 32).data);
 		} catch (e) {
-			code = null;
+			st = null;
 		}
-		const level = s.stv.holder.update(code);
-		document.documentElement.dataset.dbpoLevel = String(level);
-		return STV.levelView(cfg, level, vw, vh);
+		s.stv.reads++;
+		if (st) s.stv.good++;
+		const cur = s.stv.holder.update(st);
+		s.stvState = cur;
+		document.documentElement.dataset.dbpoLevel = `${cur.a},${cur.q}`;
+		return STV.stepView(cfg, cur, vw, vh);
 	}
 
 	function draw() {

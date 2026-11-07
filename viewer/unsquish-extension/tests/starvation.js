@@ -46,5 +46,42 @@ const vb = STV.levelView(boxed, 2, 1712, 964);
 check(Math.abs(vb.box[2] - 0.4) < 0.001, "boxed plain level shrinks only the picture rect");
 check(STV.levelView(boxed, 4, 1712, 964) === null, "squish level not used with a strip");
 
+// v2
+const G2 = g.v2;
+G2.steps.forEach(([a, q], i) => {
+	check(Math.abs(STV.frac(a) - G2.frac[i]) < 1e-12 && Math.abs(STV.squeeze(a, q) - G2.squeeze[i]) < 1e-12, `v2 frac/squeeze ${a},${q}`);
+	check(JSON.stringify(STV.extBits(a, q)) === JSON.stringify(G2.ext_bits[i]), `v2 bits ${a},${q}`);
+	for (const [size, rects] of Object.entries(G2.rects)) {
+		const [w, h] = size.split("x").map(Number);
+		const r = STV.rect2(a, w, h);
+		check(r.w === rects[i][0] && r.h === rects[i][1], `v2 rect ${size} ${a},${q}`);
+	}
+	const m = [];
+	for (const b of STV.extBits(a, q)) m.push(...(b ? [235, 16] : [16, 235]));
+	const d = STV.decodeExtMeans(m);
+	check(d && d.a === a && d.q === q, `v2 decode ${a},${q}`);
+});
+// Full strip decode from synthetic pixels (v1 row = code 15, extension row = state).
+function strip(a, q) {
+	const px = new Uint8ClampedArray(160 * 32 * 4);
+	const v1 = STV.markerBits(15), ext = STV.extBits(a, q);
+	for (let y = 0; y < 32; y++)
+		for (let x = 0; x < 160; x++) {
+			let on;
+			if (y >= 16) { const c = Math.floor(x / 16); on = c % 2 === 0 ? v1[c >> 1] : 1 - v1[c >> 1]; }
+			else { const c = Math.floor(x / 8); on = c % 2 === 0 ? ext[c >> 1] : 1 - ext[c >> 1]; }
+			px.fill(on ? 255 : 0, (y * 160 + x) * 4, (y * 160 + x) * 4 + 3);
+			px[(y * 160 + x) * 4 + 3] = 255;
+		}
+	return px;
+}
+for (const [a, q] of [[0, 0], [38, 7], [63, 3], [17, 1]]) {
+	const st = STV.decodeStrip(strip(a, q));
+	check(st && st.a === a && st.q === q, `v2 strip decode ${a},${q}`);
+}
+const sv = STV.stepView(cfg, { a: 38, q: 7 }, 1712, 964);
+check(Math.abs(sv.box[2] - STV.rect2(38, 1712, 964).w / 1712) < 1e-12 && Math.abs(sv.x.r - cfg.x.r * STV.squeeze(38, 7)) < 1e-12, "v2 step view");
+check(STV.stepView(cfg, { a: 0, q: 0 }, 1712, 964) === null, "v2 full size = no change");
+
 console.error(`starvation JS vs golden: ${fails ? "FAIL" : "PASS"}`);
 process.exitCode = fails ? 1 : 0;

@@ -87,11 +87,14 @@ enum atlas_state {
 #define S_IMPORT "import"
 /* Dynamic resolution when starved (epic #10, research/foveation/STARVATION_SPEC.md) */
 #define S_STV_ON "starve_on"
-#define S_STV_LOWEST "starve_lowest"   /* 1 = 720, 2 = 540, 3 = 360 */
+#define S_STV_LOWEST "starve_lowest"   /* 1 = 720, 2 = 540, 3 = 360, 4 = 270, 5 = 180 */
 #define S_STV_BITRATE "starve_bitrate" /* kbit/s, 0 = from the streaming output */
 #define S_STV_SENS "starve_sensitivity"
 #define S_STV_NET "starve_network"
 #define S_STV_SQUISH "starve_squish"
+#define S_STV_RAMP_DOWN "starve_ramp_down" /* seconds */
+#define S_STV_RAMP_UP "starve_ramp_up"     /* seconds */
+#define S_STV_DEMO "starve_demo"
 #define STV_MX 240
 #define STV_MY 135
 /* Viewer look: sent to viewers in the config string, applied by the browser
@@ -194,10 +197,15 @@ struct squish_filter {
 	bool stv_on, stv_net, stv_squish;
 	int stv_lowest;
 	double stv_bitrate, stv_sens;
-	int stv_forced; /* -1 = auto, else a code 0..3 */
+	int stv_forced; /* -1 = auto, else a detector target 0..3 */
+	bool stv_demo;  /* demo loop instead of the detector */
+	struct stv_demo_state demo;
+	struct stv_ramp ramp;
+	double ramp_down_s, ramp_up_s;
+	int stv_a, stv_q;        /* step of the last streamed frame */
+	gs_texrender_t *stv_pic; /* picture squished straight into the step's rectangle */
 	struct stv_controller stv;
 	bool stv_ready;
-	int stv_code;          /* code applied to the last streamed frame */
 	double stv_congestion; /* 0..1 */
 	double stv_budget;     /* kbit/s used */
 	int stv_dropped_prev;
@@ -205,7 +213,7 @@ struct squish_filter {
 	struct stv_hotkey {
 		struct squish_filter *f;
 		int code; /* -1 = auto */
-	} hk[5];
+	} hk[6];
 	int stv_tick;
 	/* DBPO_FSQ_ANALYZE=1: GPU time per stage, logged every ANALYZE_PERIOD frames. */
 	bool analyze;
@@ -478,11 +486,14 @@ static void fsq_update(void *data, obs_data_t *s)
 /* ------------------------------------------------------------------ lifecycle */
 
 /* Hotkeys: force a level / back to automatic (registered in fsq_create). */
-static const int stv_hotkey_codes[5] = {0, 1, 2, 3, -1};
-static const char *stv_hotkey_names[5] = {"dbpo_fsq_force_full", "dbpo_fsq_force_720", "dbpo_fsq_force_540",
-					  "dbpo_fsq_force_360", "dbpo_fsq_auto"};
-static const char *stv_hotkey_labels[5] = {"HotkeyForce1080", "HotkeyForce720", "HotkeyForce540", "HotkeyForce360",
-					   "HotkeyAuto"};
+#define STV_HOTKEYS 6
+#define STV_HK_AUTO (-1)
+#define STV_HK_DEMO (-2)
+static const int stv_hotkey_codes[STV_HOTKEYS] = {0, 1, 2, 3, STV_HK_AUTO, STV_HK_DEMO};
+static const char *stv_hotkey_names[STV_HOTKEYS] = {"dbpo_fsq_force_full", "dbpo_fsq_force_720", "dbpo_fsq_force_540",
+						    "dbpo_fsq_force_360",  "dbpo_fsq_auto",      "dbpo_fsq_demo"};
+static const char *stv_hotkey_labels[STV_HOTKEYS] = {"HotkeyForce1080", "HotkeyForce720", "HotkeyForce540",
+						     "HotkeyForce360",  "HotkeyAuto",     "HotkeyDemo"};
 
 static void stv_hotkey_cb(void *data, obs_hotkey_id id, obs_hotkey_t *hotkey, bool pressed)
 {
@@ -491,6 +502,14 @@ static void stv_hotkey_cb(void *data, obs_hotkey_id id, obs_hotkey_t *hotkey, bo
 	struct stv_hotkey *h = data;
 	if (!pressed)
 		return;
+	if (h->code == STV_HK_DEMO) {
+		h->f->stv_demo = !h->f->stv_demo;
+		h->f->demo = (struct stv_demo_state){0, 0};
+		h->f->stv_forced = STV_HK_AUTO;
+		obs_log(LOG_INFO, "starvation demo loop %s", h->f->stv_demo ? "on" : "off");
+		return;
+	}
+	h->f->stv_demo = false;
 	h->f->stv_forced = h->code;
 	obs_log(LOG_INFO, "starvation level: %s", h->code < 0 ? "automatic" : "forced");
 }
@@ -529,6 +548,7 @@ static void *fsq_create(obs_data_t *settings, obs_source_t *context)
 	f->composed = gs_texrender_create(GS_RGBA, GS_ZS_NONE);
 	f->mean = gs_texrender_create(GS_RGBA, GS_ZS_NONE);
 	f->level = gs_texrender_create(GS_RGBA, GS_ZS_NONE);
+	f->stv_pic = gs_texrender_create(GS_RGBA, GS_ZS_NONE);
 	f->metric = gs_texrender_create(GS_RGBA, GS_ZS_NONE);
 	f->stage[0] = gs_stagesurface_create(STV_MX, STV_MY, GS_RGBA);
 	f->stage[1] = gs_stagesurface_create(STV_MX, STV_MY, GS_RGBA);
@@ -554,6 +574,7 @@ static void *fsq_create(obs_data_t *settings, obs_source_t *context)
 		gs_texrender_destroy(f->composed);
 		gs_texrender_destroy(f->mean);
 		gs_texrender_destroy(f->level);
+		gs_texrender_destroy(f->stv_pic);
 		gs_texrender_destroy(f->metric);
 		gs_stagesurface_destroy(f->stage[0]);
 		gs_stagesurface_destroy(f->stage[1]);
@@ -562,8 +583,9 @@ static void *fsq_create(obs_data_t *settings, obs_source_t *context)
 		return NULL;
 	}
 	f->stv_forced = -1;
+	stv_ramp_init(&f->ramp);
 	fsq_update(f, settings);
-	for (int i = 0; i < 5; i++) {
+	for (int i = 0; i < STV_HOTKEYS; i++) {
 		f->hk[i].f = f;
 		f->hk[i].code = stv_hotkey_codes[i];
 		obs_hotkey_register_source(context, stv_hotkey_names[i], T(stv_hotkey_labels[i]), stv_hotkey_cb,
@@ -588,6 +610,7 @@ static void fsq_destroy(void *data)
 	gs_texrender_destroy(f->composed);
 	gs_texrender_destroy(f->mean);
 	gs_texrender_destroy(f->level);
+	gs_texrender_destroy(f->stv_pic);
 	gs_texrender_destroy(f->metric);
 	gs_stagesurface_destroy(f->stage[0]);
 	gs_stagesurface_destroy(f->stage[1]);
@@ -1034,27 +1057,44 @@ static void stv_metric(struct squish_filter *f, gs_texture_t *raw, uint32_t w, u
 	f->have_prev = true;
 }
 
-/* Squish levels (codes 4, 5): the squished picture is made smaller. Returns false when the density
- * floor does not allow it; the caller then uses the plain level instead. */
-static bool stv_squish_cfg(const struct squish_filter *f, const struct layout *L, int code, struct squish_config *c2,
-			   uint32_t *rw, uint32_t *rh)
+/* Strongest squeeze step the density floor allows at scale step a (the centre keeps its size, the edges take
+ * the rest; with a big centre there is little room). */
+static int stv_max_q(const struct squish_filter *f, const struct layout *L, int a)
 {
-	const struct stv_rect r = stv_rect(code, (int)L->fw, (int)L->fh);
-	*c2 = L->c;
-	c2->x.r = (double)r.w / L->w;
-	c2->y.r = (double)r.h / L->h;
-	if (c2->x.r > 1.0 || c2->y.r > 1.0 || c2->x.r < squish_axis_min_r_floor(&c2->x, f->floor) ||
-	    c2->y.r < squish_axis_min_r_floor(&c2->y, f->floor))
-		return false;
-	*rw = (uint32_t)r.w;
-	*rh = (uint32_t)r.h;
-	return true;
+	for (int q = STV_Q_MAX; q > 0; q--) {
+		const double g = stv_squeeze(a, q);
+		struct squish_axis x = L->c.x, y = L->c.y;
+		x.r *= g;
+		y.r *= g;
+		if (x.r >= squish_axis_min_r_floor(&x, f->floor) && y.r >= squish_axis_min_r_floor(&y, f->floor))
+			return q;
+	}
+	return 0;
 }
 
-/* Streamed frame with the level applied: picture top-left (area downscale), black elsewhere, strip as is,
- * marker last. src is the squished picture / composed frame, pict the picture area inside it. */
-static bool stv_level_pass(struct squish_filter *f, gs_texture_t *src, uint32_t pict_w, uint32_t pict_h,
-			   uint32_t rect_w, uint32_t rect_h, bool strip, int code, uint32_t fw, uint32_t fh)
+/* Next step (a, q) to stream: forced level, demo loop or detector, reached through the ramp. */
+static void stv_next_step(struct squish_filter *f, const struct layout *L, int *a, int *q)
+{
+	const double fps = 60.0;
+	if (f->stv_demo) {
+		stv_demo_step(&f->demo, &f->ramp, fps);
+	} else {
+		const int idx = f->stv_forced >= 0 ? f->stv_forced : f->stv.cur;
+		const int ta = stv_a_for(stv_target_frac(idx));
+		const int tq = f->stv_squish ? STV_Q_MAX : 0;
+		const double secs = ta > (int)floor(f->ramp.a + 0.5) ? f->ramp_down_s : f->ramp_up_s;
+		stv_ramp_go(&f->ramp, ta, tq, (int)floor(secs * fps + 0.5));
+	}
+	stv_ramp_step(&f->ramp, a, q);
+	const int mq = stv_max_q(f, L, *a);
+	if (*q > mq)
+		*q = mq;
+}
+
+/* Streamed frame at step (a, q): pic (rect-sized) at the top-left, the sharp-region strip copied from strip
+ * (frame-sized, may be NULL), black elsewhere, marker v2 last. pict = picture area of the normal frame. */
+static bool stv_level_pass(struct squish_filter *f, gs_texture_t *pic, gs_texture_t *strip, uint32_t pict_w,
+			   uint32_t pict_h, uint32_t rect_w, uint32_t rect_h, int a, int q, uint32_t fw, uint32_t fh)
 {
 	gs_texrender_reset(f->level);
 	if (!gs_texrender_begin(f->level, fw, fh))
@@ -1065,10 +1105,8 @@ static bool stv_level_pass(struct squish_filter *f, gs_texture_t *src, uint32_t 
 	gs_ortho(0.0f, (float)fw, 0.0f, (float)fh, -100.0f, 100.0f);
 	gs_effect_t *e = f->effect;
 	struct vec2 v;
-	struct vec4 q;
-	gs_effect_set_texture(gs_effect_get_param_by_name(e, "image"), src);
-	vec2_set(&v, (float)gs_texture_get_width(src), (float)gs_texture_get_height(src));
-	gs_effect_set_vec2(gs_effect_get_param_by_name(e, "src_size"), &v);
+	gs_effect_set_texture(gs_effect_get_param_by_name(e, "image"), pic);
+	gs_effect_set_texture(gs_effect_get_param_by_name(e, "strip_img"), strip ? strip : pic);
 	vec2_set(&v, (float)fw, (float)fh);
 	gs_effect_set_vec2(gs_effect_get_param_by_name(e, "out_size"), &v);
 	vec2_set(&v, (float)pict_w, (float)pict_h);
@@ -1080,14 +1118,8 @@ static bool stv_level_pass(struct squish_filter *f, gs_texture_t *src, uint32_t 
 	stv_marker_pos((int)fw, (int)fh, &mx, &my);
 	vec2_set(&v, (float)mx, (float)my);
 	gs_effect_set_vec2(gs_effect_get_param_by_name(e, "lvl_marker"), &v);
-	uint8_t cells[2 * STV_BITS];
-	stv_marker_cells(code, cells);
-	vec4_set(&q, cells[0], cells[1], cells[2], cells[3]);
-	gs_effect_set_vec4(gs_effect_get_param_by_name(e, "mk_a"), &q);
-	vec4_set(&q, cells[4], cells[5], cells[6], cells[7]);
-	gs_effect_set_vec4(gs_effect_get_param_by_name(e, "mk_b"), &q);
-	vec4_set(&q, cells[8], cells[9], 0.0f, 0.0f);
-	gs_effect_set_vec4(gs_effect_get_param_by_name(e, "mk_c"), &q);
+	gs_effect_set_float(gs_effect_get_param_by_name(e, "mk_v1"), (float)stv_cells_v1(STV_EXT_CODE));
+	gs_effect_set_float(gs_effect_get_param_by_name(e, "mk_ext"), (float)stv_cells_ext(a, q));
 	while (gs_effect_loop(e, "Level"))
 		gs_draw_sprite(NULL, 0, fw, fh);
 	gs_texrender_end(f->level);
@@ -1098,8 +1130,14 @@ static void stv_apply_settings(struct squish_filter *f, obs_data_t *s)
 {
 	f->stv_on = obs_data_get_bool(s, S_STV_ON);
 	f->stv_lowest = (int)obs_data_get_int(s, S_STV_LOWEST);
-	if (f->stv_lowest < 1 || f->stv_lowest > 3)
+	if (f->stv_lowest < 1 || f->stv_lowest > 5)
 		f->stv_lowest = 3;
+	f->ramp_down_s = obs_data_get_double(s, S_STV_RAMP_DOWN);
+	f->ramp_up_s = obs_data_get_double(s, S_STV_RAMP_UP);
+	const bool demo = obs_data_get_bool(s, S_STV_DEMO);
+	if (demo != f->stv_demo)
+		f->demo = (struct stv_demo_state){0, 0};
+	f->stv_demo = demo;
 	f->stv_bitrate = obs_data_get_double(s, S_STV_BITRATE);
 	f->stv_sens = obs_data_get_double(s, S_STV_SENS);
 	f->stv_net = obs_data_get_bool(s, S_STV_NET);
@@ -1118,10 +1156,12 @@ static void stv_apply_settings(struct squish_filter *f, obs_data_t *s)
 	}
 }
 
-static void stv_level_name(int code, char *buf, size_t n)
+static void stv_level_name(const struct squish_filter *f, char *buf, size_t n)
 {
-	static const char *names[STV_LEVELS] = {"full", "720", "540", "360", "squish 810", "squish 540"};
-	snprintf(buf, n, "%s", code >= 0 && code < STV_LEVELS ? names[code] : "?");
+	snprintf(buf, n, "%.0f%% size (step %d), squeeze %d/7%s", stv_frac(f->stv_a) * 100.0, f->stv_a, f->stv_q,
+		 f->stv_demo          ? ", demo loop"
+		 : f->stv_forced >= 0 ? ", forced"
+				      : "");
 }
 
 static void fsq_render(void *data, gs_effect_t *unused)
@@ -1151,31 +1191,19 @@ static void fsq_render(void *data, gs_effect_t *unused)
 		if (capture_input(f, target, parent, w, h)) {
 			gs_texture_t *in = gs_texrender_get_texture(f->input);
 			gs_texture_t *raw = in; /* regions copy from here, never cleaned */
-			int stv_code = 0;
-			struct squish_config stv_c2;
-			uint32_t stv_rw = 0, stv_rh = 0;
-			bool stv_squished = false;
-			if (f->stv_on && f->view == VIEW_SQUISHED) {
+			int stv_a = 0, stv_q = 0;
+			const bool stv = f->stv_on && f->view == VIEW_SQUISHED;
+			if (stv) {
 				stv_metric(f, raw, w, h);
-				stv_code = f->stv_forced >= 0 ? f->stv_forced : f->stv.cur;
-				if (f->stv_squish && L.nslots == 0 && (stv_code == 1 || stv_code == 2)) {
-					const int sq_code =
-						stv_code == 1 ? 4 : 5; /* 720 -> squish 810, 540 -> squish 540 */
-					if (stv_squish_cfg(f, &L, sq_code, &stv_c2, &stv_rw, &stv_rh)) {
-						stv_code = sq_code;
-						stv_squished = true;
-					}
-				}
+				stv_next_step(f, &L, &stv_a, &stv_q);
 			}
-			const struct squish_config *sq_c = stv_squished ? &stv_c2 : c;
-			const uint32_t sq_w = stv_squished ? stv_rw : L.ow, sq_h = stv_squished ? stv_rh : L.oh;
 			if (f->clean > 0.0 && run_pass(f, f->cleaned, "Clean", in, c, w, h, w, h))
 				in = gs_texrender_get_texture(f->cleaned);
 			if (f->view == VIEW_ZONE) {
 				f->output_valid = run_pass(f, f->output, "Zone", in, c, w, h, pw, ph);
 				f->display = f->output;
 			} else if (analyze_begin(f, STAGE_SQUISH),
-				   run_pass(f, f->squished, "Squish", in, sq_c, w, h, sq_w, sq_h) &&
+				   run_pass(f, f->squished, "Squish", in, c, w, h, L.ow, L.oh) &&
 					   (analyze_end(f, STAGE_SQUISH), true)) {
 				gs_texture_t *sq = gs_texrender_get_texture(f->squished);
 				f->display = f->squished;
@@ -1205,22 +1233,29 @@ static void fsq_render(void *data, gs_effect_t *unused)
 					f->display = f->output_valid ? apply_look(f, f->output, pw, ph) : f->output;
 				}
 			}
-			if (f->stv_on && f->view == VIEW_SQUISHED && f->output_valid) {
-				gs_texture_t *lsrc = gs_texrender_get_texture(f->display);
-				bool ok;
-				if (stv_squished) {
-					ok = stv_level_pass(f, lsrc, sq_w, sq_h, sq_w, sq_h, false, stv_code, L.fw,
-							    L.fh);
-				} else {
-					const uint32_t pict_w = L.nslots > 0 ? L.ow : L.fw,
-						       pict_h = L.nslots > 0 ? L.oh : L.fh;
-					const struct stv_rect rr = stv_rect(stv_code, (int)pict_w, (int)pict_h);
-					ok = stv_level_pass(f, lsrc, pict_w, pict_h, (uint32_t)rr.w, (uint32_t)rr.h,
-							    L.nslots > 0, stv_code, L.fw, L.fh);
+			if (stv && f->output_valid) {
+				/* Picture rect of the normal frame: the whole frame, or the part left of the sharp-region strip. */
+				const uint32_t pict_w = L.ow, pict_h = L.oh;
+				const struct stv_rect rr = stv_rect2(stv_a, (int)pict_w, (int)pict_h);
+				gs_texture_t *strip = L.nslots > 0 ? gs_texrender_get_texture(f->composed) : NULL;
+				gs_texture_t *pic = gs_texrender_get_texture(f->squished);
+				bool ok = true;
+				if (stv_a > 0 || stv_q > 0) {
+					/* Squish straight from the source into the smaller rect, r scaled by the squeeze. */
+					struct squish_config c2 = *c;
+					const double g = stv_squeeze(stv_a, stv_q);
+					c2.x.r *= g;
+					c2.y.r *= g;
+					ok = run_pass(f, f->stv_pic, "Squish", in, &c2, w, h, (uint32_t)rr.w,
+						      (uint32_t)rr.h);
+					pic = gs_texrender_get_texture(f->stv_pic);
 				}
+				ok = ok && stv_level_pass(f, pic, strip, pict_w, pict_h, (uint32_t)rr.w, (uint32_t)rr.h,
+							  stv_a, stv_q, L.fw, L.fh);
 				if (ok) {
 					f->display = f->level;
-					f->stv_code = stv_code;
+					f->stv_a = stv_a;
+					f->stv_q = stv_q;
 				} else {
 					f->output_valid = false;
 				}
@@ -1804,8 +1839,8 @@ static obs_properties_t *fsq_properties(void *data)
 	obs_properties_t *stv = obs_properties_create();
 	{
 		char readout[256];
-		char name[16];
-		stv_level_name(f->stv_code, name, sizeof(name));
+		char name[96];
+		stv_level_name(f, name, sizeof(name));
 		snprintf(readout, sizeof(readout), T("StarveReadout"), name, f->stv.ratio, f->stv_budget,
 			 f->stv_congestion * 100.0);
 		obs_properties_add_text(stv, "starve_info", T("StarveInfo"), OBS_TEXT_INFO);
@@ -1815,11 +1850,20 @@ static obs_properties_t *fsq_properties(void *data)
 		obs_property_list_add_int(lp, T("Starve.720"), 1);
 		obs_property_list_add_int(lp, T("Starve.540"), 2);
 		obs_property_list_add_int(lp, T("Starve.360"), 3);
+		obs_property_list_add_int(lp, T("Starve.270"), 4);
+		obs_property_list_add_int(lp, T("Starve.180"), 5);
 		obs_property_t *bp = obs_properties_add_int(stv, S_STV_BITRATE, T("StarveBitrate"), 0, 60000, 100);
 		obs_property_int_set_suffix(bp, " kbit/s");
 		obs_properties_add_float_slider(stv, S_STV_SENS, T("StarveSensitivity"), 0.5, 3.0, 0.05);
 		obs_properties_add_bool(stv, S_STV_NET, T("StarveNetwork"));
 		obs_properties_add_bool(stv, S_STV_SQUISH, T("StarveSquish"));
+		obs_property_t *rd =
+			obs_properties_add_float_slider(stv, S_STV_RAMP_DOWN, T("StarveRampDown"), 0.0, 4.0, 0.1);
+		obs_property_float_set_suffix(rd, " s");
+		obs_property_t *ru =
+			obs_properties_add_float_slider(stv, S_STV_RAMP_UP, T("StarveRampUp"), 0.0, 6.0, 0.1);
+		obs_property_float_set_suffix(ru, " s");
+		obs_properties_add_bool(stv, S_STV_DEMO, T("StarveDemo"));
 		obs_properties_add_group(props, S_STV_ON, T("Starve"), OBS_GROUP_CHECKABLE, stv);
 	}
 
@@ -1902,6 +1946,9 @@ static void fsq_defaults(obs_data_t *s)
 	obs_data_set_default_double(s, S_STV_SENS, 1.35);
 	obs_data_set_default_bool(s, S_STV_NET, true);
 	obs_data_set_default_bool(s, S_STV_SQUISH, false);
+	obs_data_set_default_double(s, S_STV_RAMP_DOWN, 0.5);
+	obs_data_set_default_double(s, S_STV_RAMP_UP, 2.0);
+	obs_data_set_default_bool(s, S_STV_DEMO, false);
 	obs_data_set_default_double(s, S_MAXCOMP, 12.5);
 }
 
