@@ -1,0 +1,57 @@
+<!doctype html><html><body>
+<script type="module">
+import { createDeinterlacer } from "./deinterlace.js";
+const W = 1920, H = 1080;
+function source(f) {                       // moving vertical bars + horizontal gradient, per frame
+  const c = document.createElement("canvas"); c.width = W; c.height = H;
+  const g = c.getContext("2d"), im = g.createImageData(W, H);
+  for (let y = 0; y < H; y++) for (let x = 0; x < W; x++) {
+    const v = ((x + f * 7) % 64 < 32) ? 200 : 40;
+    const i = (y * W + x) * 4;
+    im.data[i] = im.data[i+1] = im.data[i+2] = (v + y / 8) & 255; im.data[i+3] = 255;
+  }
+  g.putImageData(im, 0, 0); return c;
+}
+function pack(src, parity) {               // what the streamer's filter would send
+  const c = document.createElement("canvas"); c.width = W; c.height = H;
+  const g = c.getContext("2d");
+  g.fillStyle = "#000"; g.fillRect(0, 0, W, H);
+  const s = src.getContext("2d").getImageData(0, 0, W, H).data;
+  const out = g.createImageData(W, H);
+  for (let k = 0; k < 540; k++) {          // field row k = source row 2k+parity
+    const sy = 2 * k + parity;
+    for (let x = 0; x < W; x++) {
+      const si = (sy * W + x) * 4, di = (k * W + x) * 4;
+      out.data[di] = s[si]; out.data[di+1] = s[si+1]; out.data[di+2] = s[si+2]; out.data[di+3] = 255;
+    }
+  }
+  g.putImageData(out, 0, 0);
+  g.fillStyle = parity ? "#fff" : "#000"; g.fillRect(0, H - 16, 16, 16); // marker
+  return c;
+}
+const results = {};
+const canvas = document.createElement("canvas");
+const d = createDeinterlacer(canvas, 0.05);
+const check = document.createElement("canvas"); check.width = W; check.height = H;
+const cg = check.getContext("2d", { willReadFrequently: true });
+let worst = 0, frames = 0, markerOk = 0;
+for (let f = 0; f < 8; f++) {
+  const parity = f & 1;
+  const src = source(f);
+  const packed = pack(src, parity);
+  d.draw(packed);
+  cg.drawImage(canvas, 0, 0);
+  const out = cg.getImageData(0, 0, W, H).data;
+  const ref = src.getContext("2d").getImageData(0, 0, W, H).data;
+  // received rows must reproduce the source exactly
+  let maxErr = 0;
+  for (let y = parity; y < H; y += 2) for (let x = 0; x < W; x += 37) {
+    const i = (y * W + x) * 4;
+    maxErr = Math.max(maxErr, Math.abs(out[i] - ref[i]));
+  }
+  worst = Math.max(worst, maxErr); frames++;
+  if (maxErr === 0) markerOk++;
+}
+results.frames = frames; results.receivedRowsWorstErr = worst; results.parityOkFrames = markerOk;
+document.title = JSON.stringify(results);
+</script></body></html>
