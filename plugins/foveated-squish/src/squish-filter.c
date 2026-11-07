@@ -471,6 +471,24 @@ static void fsq_update(void *data, obs_data_t *s)
 
 /* ------------------------------------------------------------------ lifecycle */
 
+/* Hotkeys: force a level / back to automatic (registered in fsq_create). */
+static const int stv_hotkey_codes[5] = {0, 1, 2, 3, -1};
+static const char *stv_hotkey_names[5] = {"dbpo_fsq_force_full", "dbpo_fsq_force_720", "dbpo_fsq_force_540",
+					  "dbpo_fsq_force_360", "dbpo_fsq_auto"};
+static const char *stv_hotkey_labels[5] = {"HotkeyForce1080", "HotkeyForce720", "HotkeyForce540", "HotkeyForce360",
+					   "HotkeyAuto"};
+
+static void stv_hotkey_cb(void *data, obs_hotkey_id id, obs_hotkey_t *hotkey, bool pressed)
+{
+	UNUSED_PARAMETER(id);
+	UNUSED_PARAMETER(hotkey);
+	struct stv_hotkey *h = data;
+	if (!pressed)
+		return;
+	h->f->stv_forced = h->code;
+	obs_log(LOG_INFO, "starvation level: %s", h->code < 0 ? "automatic" : "forced");
+}
+
 static void *fsq_create(obs_data_t *settings, obs_source_t *context)
 {
 	struct squish_filter *f = bzalloc(sizeof(*f));
@@ -918,23 +936,6 @@ static void analyze_collect(struct squish_filter *f)
 
 
 /* ------------------------------------------------------------------ starvation levels (epic #10) */
-
-static const int stv_hotkey_codes[5] = {0, 1, 2, 3, -1};
-static const char *stv_hotkey_names[5] = {"dbpo_fsq_force_full", "dbpo_fsq_force_720", "dbpo_fsq_force_540",
-					  "dbpo_fsq_force_360", "dbpo_fsq_auto"};
-static const char *stv_hotkey_labels[5] = {"HotkeyForce1080", "HotkeyForce720", "HotkeyForce540", "HotkeyForce360",
-					   "HotkeyAuto"};
-
-static void stv_hotkey_cb(void *data, obs_hotkey_id id, obs_hotkey_t *hotkey, bool pressed)
-{
-	UNUSED_PARAMETER(id);
-	UNUSED_PARAMETER(hotkey);
-	struct stv_hotkey *h = data;
-	if (!pressed)
-		return;
-	h->f->stv_forced = h->code;
-	obs_log(LOG_INFO, "starvation level: %s", h->code < 0 ? "automatic" : "forced");
-}
 
 /* Budget (kbit/s) and congestion from the streaming output; runs twice a second. */
 static void stv_read_stream(struct squish_filter *f)
