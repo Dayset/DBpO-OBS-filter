@@ -79,9 +79,21 @@ static double median3(const double *h, int n)
 	if (n == 2)
 		return (h[0] + h[1]) / 2.0; /* numpy median of two values */
 	double a = h[0], b = h[1], c = h[2];
-	if (a > b) { double t = a; a = b; b = t; }
-	if (b > c) { double t = b; b = c; c = t; }
-	if (a > b) { double t = a; a = b; b = t; }
+	if (a > b) {
+		double t = a;
+		a = b;
+		b = t;
+	}
+	if (b > c) {
+		double t = b;
+		b = c;
+		c = t;
+	}
+	if (a > b) {
+		double t = a;
+		a = b;
+		b = t;
+	}
 	return b;
 }
 

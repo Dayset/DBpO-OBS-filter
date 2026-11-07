@@ -106,12 +106,18 @@ static const struct {
 	const char *key, *label;
 	bool is_signed;
 } color_settings[] = {
-	{"look_brightness", "LookBrightness", true}, {"look_contrast", "LookContrast", true},
-	{"look_gamma", "LookGamma", true},           {"look_saturation", "LookSaturation", true},
-	{"look_vibrance", "LookVibrance", true},     {"look_temperature", "LookTemperature", true},
-	{"look_tint", "LookTint", true},             {"look_hue", "LookHue", true},
-	{"look_highlights", "LookHighlights", true}, {"look_shadows", "LookShadows", true},
-	{"look_bw", "LookBw", false},                {"look_sepia", "LookSepia", false},
+	{"look_brightness", "LookBrightness", true},
+	{"look_contrast", "LookContrast", true},
+	{"look_gamma", "LookGamma", true},
+	{"look_saturation", "LookSaturation", true},
+	{"look_vibrance", "LookVibrance", true},
+	{"look_temperature", "LookTemperature", true},
+	{"look_tint", "LookTint", true},
+	{"look_hue", "LookHue", true},
+	{"look_highlights", "LookHighlights", true},
+	{"look_shadows", "LookShadows", true},
+	{"look_bw", "LookBw", false},
+	{"look_sepia", "LookSepia", false},
 	{"look_night", "LookNight", false},
 };
 #define N_COLOR_SETTINGS 13
@@ -191,7 +197,7 @@ struct squish_filter {
 	int stv_forced; /* -1 = auto, else a code 0..3 */
 	struct stv_controller stv;
 	bool stv_ready;
-	int stv_code;         /* code applied to the last streamed frame */
+	int stv_code;          /* code applied to the last streamed frame */
 	double stv_congestion; /* 0..1 */
 	double stv_budget;     /* kbit/s used */
 	int stv_dropped_prev;
@@ -258,10 +264,10 @@ static void read_config(obs_data_t *s, struct squish_config *cfg)
 	cfg->look.hdr = obs_data_get_double(s, S_LOOK_HDR) / 100.0;
 	cfg->look.bloom = obs_data_get_double(s, S_LOOK_BLOOM) / 100.0;
 	cfg->look.sharpen_plus = obs_data_get_double(s, S_LOOK_SHARPEN_PLUS) / 100.0;
-	double *cv[N_COLOR_SETTINGS] = {&cfg->look.brightness, &cfg->look.contrast,   &cfg->look.gamma,
-					&cfg->look.saturation, &cfg->look.vibrance,   &cfg->look.temperature,
-					&cfg->look.tint,       &cfg->look.hue,        &cfg->look.highlights,
-					&cfg->look.shadows,    &cfg->look.bw,         &cfg->look.sepia,
+	double *cv[N_COLOR_SETTINGS] = {&cfg->look.brightness, &cfg->look.contrast, &cfg->look.gamma,
+					&cfg->look.saturation, &cfg->look.vibrance, &cfg->look.temperature,
+					&cfg->look.tint,       &cfg->look.hue,      &cfg->look.highlights,
+					&cfg->look.shadows,    &cfg->look.bw,       &cfg->look.sepia,
 					&cfg->look.night};
 	for (int i = 0; i < N_COLOR_SETTINGS; i++)
 		*cv[i] = obs_data_get_double(s, color_settings[i].key) / 100.0;
@@ -560,7 +566,8 @@ static void *fsq_create(obs_data_t *settings, obs_source_t *context)
 	for (int i = 0; i < 5; i++) {
 		f->hk[i].f = f;
 		f->hk[i].code = stv_hotkey_codes[i];
-		obs_hotkey_register_source(context, stv_hotkey_names[i], T(stv_hotkey_labels[i]), stv_hotkey_cb, &f->hk[i]);
+		obs_hotkey_register_source(context, stv_hotkey_names[i], T(stv_hotkey_labels[i]), stv_hotkey_cb,
+					   &f->hk[i]);
 	}
 	return f;
 }
@@ -729,8 +736,8 @@ static gs_texrender_t *apply_look(struct squish_filter *f, gs_texrender_t *in, u
 	if (!squish_look_active(l))
 		return in;
 	gs_texrender_t *cur = in;
-	if (squish_color_active(l) && look_pass(f, f->look_col, "LookColor", gs_texrender_get_texture(in), NULL, w, h, w, h,
-						0.0f, 0.0f))
+	if (squish_color_active(l) &&
+	    look_pass(f, f->look_col, "LookColor", gs_texrender_get_texture(in), NULL, w, h, w, h, 0.0f, 0.0f))
 		cur = f->look_col;
 	if (l->sharpen > 0.0 || l->clarity > 0.0 || l->hdr > 0.0 || l->bloom > 0.0) {
 		const uint32_t hw = (w + 1) / 2, hh = (h + 1) / 2;
@@ -933,7 +940,6 @@ static void analyze_collect(struct squish_filter *f)
 	}
 	blog(LOG_INFO, "%s", line);
 }
-
 
 /* ------------------------------------------------------------------ starvation levels (epic #10) */
 
@@ -1153,7 +1159,8 @@ static void fsq_render(void *data, gs_effect_t *unused)
 				stv_metric(f, raw, w, h);
 				stv_code = f->stv_forced >= 0 ? f->stv_forced : f->stv.cur;
 				if (f->stv_squish && L.nslots == 0 && (stv_code == 1 || stv_code == 2)) {
-					const int sq_code = stv_code == 1 ? 4 : 5; /* 720 -> squish 810, 540 -> squish 540 */
+					const int sq_code =
+						stv_code == 1 ? 4 : 5; /* 720 -> squish 810, 540 -> squish 540 */
 					if (stv_squish_cfg(f, &L, sq_code, &stv_c2, &stv_rw, &stv_rh)) {
 						stv_code = sq_code;
 						stv_squished = true;
@@ -1202,9 +1209,11 @@ static void fsq_render(void *data, gs_effect_t *unused)
 				gs_texture_t *lsrc = gs_texrender_get_texture(f->display);
 				bool ok;
 				if (stv_squished) {
-					ok = stv_level_pass(f, lsrc, sq_w, sq_h, sq_w, sq_h, false, stv_code, L.fw, L.fh);
+					ok = stv_level_pass(f, lsrc, sq_w, sq_h, sq_w, sq_h, false, stv_code, L.fw,
+							    L.fh);
 				} else {
-					const uint32_t pict_w = L.nslots > 0 ? L.ow : L.fw, pict_h = L.nslots > 0 ? L.oh : L.fh;
+					const uint32_t pict_w = L.nslots > 0 ? L.ow : L.fw,
+						       pict_h = L.nslots > 0 ? L.oh : L.fh;
 					const struct stv_rect rr = stv_rect(stv_code, (int)pict_w, (int)pict_h);
 					ok = stv_level_pass(f, lsrc, pict_w, pict_h, (uint32_t)rr.w, (uint32_t)rr.h,
 							    L.nslots > 0, stv_code, L.fw, L.fh);
@@ -1465,8 +1474,8 @@ static void describe(struct squish_filter *f, obs_data_t *s, char *info, size_t 
 						      100.0 * want, 100.0 * got, 100.0 * L.floors[i], L.slots[i].w,
 						      L.slots[i].h);
 			else if (got > 0.995)
-				n += (size_t)snprintf(info + n, info_size - n, T("AtlasRegionFull"), name,
-						      L.slots[i].w, L.slots[i].h);
+				n += (size_t)snprintf(info + n, info_size - n, T("AtlasRegionFull"), name, L.slots[i].w,
+						      L.slots[i].h);
 			else
 				n += (size_t)snprintf(info + n, info_size - n, T("AtlasRegionScaled"), name,
 						      100.0 * got, L.slots[i].w, L.slots[i].h);
@@ -1650,10 +1659,10 @@ static bool import_clicked(obs_properties_t *props, obs_property_t *p, void *dat
 		obs_data_set_double(s, S_LOOK_HDR, c.look.hdr * 100.0);
 		obs_data_set_double(s, S_LOOK_BLOOM, c.look.bloom * 100.0);
 		obs_data_set_double(s, S_LOOK_SHARPEN_PLUS, c.look.sharpen_plus * 100.0);
-		const double cvals[N_COLOR_SETTINGS] = {c.look.brightness, c.look.contrast,   c.look.gamma,
-							c.look.saturation, c.look.vibrance,   c.look.temperature,
-							c.look.tint,       c.look.hue,        c.look.highlights,
-							c.look.shadows,    c.look.bw,         c.look.sepia,
+		const double cvals[N_COLOR_SETTINGS] = {c.look.brightness, c.look.contrast, c.look.gamma,
+							c.look.saturation, c.look.vibrance, c.look.temperature,
+							c.look.tint,       c.look.hue,      c.look.highlights,
+							c.look.shadows,    c.look.bw,       c.look.sepia,
 							c.look.night};
 		for (int i = 0; i < N_COLOR_SETTINGS; i++)
 			obs_data_set_double(s, color_settings[i].key, cvals[i] * 100.0);
@@ -1802,7 +1811,7 @@ static obs_properties_t *fsq_properties(void *data)
 		obs_properties_add_text(stv, "starve_info", T("StarveInfo"), OBS_TEXT_INFO);
 		obs_properties_add_text(stv, "starve_readout", readout, OBS_TEXT_INFO);
 		obs_property_t *lp = obs_properties_add_list(stv, S_STV_LOWEST, T("StarveLowest"), OBS_COMBO_TYPE_LIST,
-							    OBS_COMBO_FORMAT_INT);
+							     OBS_COMBO_FORMAT_INT);
 		obs_property_list_add_int(lp, T("Starve.720"), 1);
 		obs_property_list_add_int(lp, T("Starve.540"), 2);
 		obs_property_list_add_int(lp, T("Starve.360"), 3);
@@ -1824,9 +1833,9 @@ static obs_properties_t *fsq_properties(void *data)
 	obs_properties_add_group(props, "share", T("Share"), OBS_GROUP_NORMAL, share);
 
 	plugin_ui_decorate(props);
-	static const char *hint_names[] = {S_ATLAS_NAME, S_ATLAS_PRESET, S_ATLAS_X0, S_ATLAS_Y0,
+	static const char *hint_names[] = {S_ATLAS_NAME, S_ATLAS_PRESET, S_ATLAS_X0,   S_ATLAS_Y0,
 					   S_ATLAS_W,    S_ATLAS_H,      S_ATLAS_SCALE};
-	static const char *hint_keys[] = {"Hint.atlas_name", "Hint.atlas_preset", "Hint.atlas_x", "Hint.atlas_y",
+	static const char *hint_keys[] = {"Hint.atlas_name", "Hint.atlas_preset", "Hint.atlas_x",    "Hint.atlas_y",
 					  "Hint.atlas_w",    "Hint.atlas_h",      "Hint.atlas_scale"};
 	for (int i = 0; i < ATLAS_MAX_REGIONS; i++) {
 		for (size_t k = 0; k < sizeof(hint_names) / sizeof(hint_names[0]); k++) {

@@ -33,12 +33,12 @@ int stv_marker_decode(const double mean_luma[2 * STV_BITS]);
  * (mean |Y_t - Y_t-1| on the 240x135 luma image) and returns the code for the NEXT frame. */
 struct stv_controller_cfg {
 	double budget_kbps;
-	double k;          /* Mbit/s per metric unit (sensitivity), default 1.35 */
-	double alpha;      /* EMA weight, default 1/8 */
-	int down_frames;   /* default 6 */
-	int up_frames;     /* default 60 */
-	int lowest;        /* lowest allowed code (1..3), default 3 */
-	double table[4];   /* demand/budget upper bounds for codes 0..3: 1.5, 3, 6, inf */
+	double k;        /* Mbit/s per metric unit (sensitivity), default 1.35 */
+	double alpha;    /* EMA weight, default 1/8 */
+	int down_frames; /* default 6 */
+	int up_frames;   /* default 60 */
+	int lowest;      /* lowest allowed code (1..3), default 3 */
+	double table[4]; /* demand/budget upper bounds for codes 0..3: 1.5, 3, 6, inf */
 };
 
 struct stv_controller {
@@ -48,7 +48,7 @@ struct stv_controller {
 	double ema;
 	bool have_ema;
 	int cur, want, run;
-	double ratio;      /* last demand / budget, for the readout */
+	double ratio; /* last demand / budget, for the readout */
 };
 
 struct stv_controller_cfg stv_default_cfg(double budget_kbps);

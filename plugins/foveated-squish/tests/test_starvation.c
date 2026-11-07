@@ -18,7 +18,8 @@ int main(void)
 	for (int f = 0; f < 3; f++) {
 		for (int c = 0; c < 6; c++) {
 			struct stv_rect r = stv_rect(c, stv_golden_frames[f][0], stv_golden_frames[f][1]);
-			CHECK(r.w == stv_golden_rects[f][c][0] && r.h == stv_golden_rects[f][c][1], "rect matches Python");
+			CHECK(r.w == stv_golden_rects[f][c][0] && r.h == stv_golden_rects[f][c][1],
+			      "rect matches Python");
 		}
 		int x, y;
 		stv_marker_pos(stv_golden_frames[f][0], stv_golden_frames[f][1], &x, &y);
@@ -55,7 +56,8 @@ int main(void)
 				bad++;
 			stv_controller_step(&ctl, stv_golden_trace[i], 0.0);
 		}
-		CHECK(bad == 0, pass ? "controller 3000 matches Python schedule" : "controller 6000 matches Python schedule");
+		CHECK(bad == 0,
+		      pass ? "controller 3000 matches Python schedule" : "controller 6000 matches Python schedule");
 	}
 
 	/* Congestion lowers the budget: a mild load that is fine at full budget drops a level. */
