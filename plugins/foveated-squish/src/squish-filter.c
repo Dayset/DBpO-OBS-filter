@@ -1419,8 +1419,11 @@ static void describe(struct squish_filter *f, obs_data_t *s, char *info, size_t 
 	int rindex[ATLAS_MAX_REGIONS] = {0};
 	tmp.nregions = read_regions(s, tmp.regions, rindex);
 
-	uint32_t w = 1920, h = 1080;
-	target_size(f, &w, &h);
+	uint32_t w = 1920, h = 1080, tw2, th2;
+	if (target_size(f, &tw2, &th2)) { /* no source size yet (source hidden or not rendering): keep 1080p */
+		w = tw2;
+		h = th2;
+	}
 	struct layout L;
 	compute_layout(&tmp, w, h, &L);
 	if (cfg) {
@@ -1545,8 +1548,11 @@ static void set_slider_limits(struct squish_filter *f, obs_properties_t *props, 
 	tmp.floor = 1.0 / obs_data_get_double(s, S_MAXCOMP);
 	tmp.target = read_target(s);
 	tmp.layout = LAYOUT_FILL;
-	uint32_t w = 1920, h = 1080;
-	target_size(f, &w, &h);
+	uint32_t w = 1920, h = 1080, tw2, th2;
+	if (target_size(f, &tw2, &th2)) { /* no source size yet (source hidden or not rendering): keep 1080p */
+		w = tw2;
+		h = th2;
+	}
 	struct layout L;
 	compute_layout(&tmp, w, h, &L);
 	const double r[2] = {L.c.x.r, L.c.y.r};

@@ -138,6 +138,13 @@ double squish_axis_align(const struct squish_axis *a, unsigned n, unsigned m)
 
 void squish_config_format(const struct squish_config *cfg, char *buf, size_t size)
 {
+	/* No config from a broken layout (e.g. source size 0): the extension would reject "nan" anyway. */
+	if (!isfinite(cfg->x.r) || !isfinite(cfg->y.r) || !isfinite(cfg->ar) || cfg->x.r <= 0 || cfg->y.r <= 0 ||
+	    cfg->ar <= 0) {
+		if (size)
+			buf[0] = '\0';
+		return;
+	}
 	snprintf(buf, size, "FSQ1:rx=%.4g,ry=%.4g,cx=%.4g,cy=%.4g,fx=%.4g,fy=%.4g,px=%.4g,py=%.4g,ar=%.5g", cfg->x.r,
 		 cfg->y.r, cfg->x.c, cfg->y.c, cfg->x.f, cfg->y.f, cfg->x.p, cfg->y.p, cfg->ar);
 	if (cfg->boxed) {
