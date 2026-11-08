@@ -1,11 +1,12 @@
 {
- "commit": "468b4334da0a4182db42060027f12421ce078987",
- "copied": "2026-11-07",
+ "commit": "c337e8999bb8b446fd99f528a215b1f2cc2132f2",
+ "copied": "2026-11-08",
  "from": "research/foveation",
  "sha256": {
   "starvation_math.py": "8cb0e9a87431ae4d415f74d3876c32c7efe22ab3d9a82173ad4fb14a4087b1c7",
   "atlas_math.py": "5d788750a97665f39f54b9189c2f7012573b171fab60ab292669f12d9754ef64",
   "squish_math.py": "30fa88d008a0357c4a8b0b5890dbb21c1581eb23b93a4d1660e7e1a7d5359e74",
-  "starvation_golden.json": "5f3004e5166f8aa799467bc88f5c568d2a3a0e9125bdf1fa23065d1386391d58"
+  "starvation_golden.json": "5f3004e5166f8aa799467bc88f5c568d2a3a0e9125bdf1fa23065d1386391d58",
+  "fieldpack_math.py": "159745a12bde46cb65c482c0ab93507dfa4fffc0af45f06d815844326778287a"
  }
 }

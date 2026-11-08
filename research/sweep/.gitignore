@@ -2,3 +2,4 @@ sources/
 results/
 .venv/
 __pycache__/
+results_quick4/

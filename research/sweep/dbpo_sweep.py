@@ -18,6 +18,11 @@ black elsewhere, marker v2 last. Squeeze q uses the squish mapping with ratio r*
 what the density floor allows (starvation_math.max_q); the row stores the effective q and the requested q_req.
 Viewer = crop + bilinear unsquish (starvation_math.view2), luma only.
 
+Interlace step (issue #19, --pack): at full size (a=0) the picture is sent one field per frame. "field" packs the
+field into the top half (black below); "split" keeps even fields in the top half and odd fields in the bottom half,
+each frame replacing only its own half. Viewer model: ffmpeg bwdif on the received fields (crop -> weave -> bwdif),
+the modern motion-adaptive deinterlacer the extension is measured against. No marker in these runs (marker_pct empty).
+
 Durability: every finished run is appended to results.csv (and its frames to frames.csv), flushed and fsynced
 before the next result is handled. A rerun skips every run_id with status ok; failed runs are retried
 (--skip-failed to keep them). Nothing else holds state.
@@ -47,9 +52,10 @@ import numpy as np  # noqa: E402
 from scipy import sparse  # noqa: E402
 
 import atlas_math as am  # noqa: E402
+import fieldpack_math as fm  # noqa: E402
 import starvation_math as sm  # noqa: E402
 
-SCRIPT_VERSION = "1.0.0"
+SCRIPT_VERSION = "1.1.0"
 W, H, FPS = 1920, 1080, 60
 SAMPLE_STEP, RAND_SEED, RAND_N = 4, 7, 3
 BASE_CFG = "FSQ1:rx=1,ry=1,cx=0.15,cy=0.15,fx=0.5,fy=0.5,px=1,py=1,ar=1.778"
@@ -61,14 +67,16 @@ SCHEMA = ["source", "source_class", "temporal_complexity", "spatial_complexity",
           "picture_h", "q", "centre_ssim", "centre_psnr", "edge_ssim", "edge_psnr", "whole_ssim", "whole_psnr",
           "marker_pct", "mbit_s", "encode_s", "frames_sampled", "ffmpeg_version", "script_version", "source_sha256"]
 EXTRA = ["q_req", "excerpt_start_s", "excerpt_s", "rand_centre_ssim", "rand_whole_ssim", "runtime_s", "status",
-         "error", "run_id", "finished_at"]
+         "error", "run_id", "finished_at", "pack"]
 COLUMNS = SCHEMA + EXTRA
 FRAME_COLS = ["run_id", "frame", "kind", "centre_ssim", "centre_psnr", "edge_ssim", "edge_psnr", "whole_ssim",
               "whole_psnr", "marker_ok"]
 
-PLANS = {  # (excerpt s, bitrates, a, q, encoders)
-    "quick": (10, [1000, 6000], [0, 38, 63], [0, 7], ["x264:veryfast"]),
-    "full": (10, [1000, 2000, 3000, 6000], [0, 25, 38, 50, 63], [0, 7], ["x264:veryfast"]),
+PACKS = ["field", "split"]  # interlace step variants (a = 0 only)
+PLANS = {  # (excerpt s, bitrates, a, q, encoders, interlace packs)
+    "quick": (10, [1000, 6000], [0, 38, 63], [0, 7], ["x264:veryfast"], PACKS),
+    "quick4": (4, [3000, 6000], [0, 16, 25, 38, 50], [0, 7], ["x264:veryfast", "nvenc"], PACKS),
+    "full": (10, [1000, 2000, 3000, 6000], [0, 25, 38, 50, 63], [0, 7], ["x264:veryfast"], PACKS),
 }
 
 # metric regions (luma). The marker strip (bottom right, 160x32) is excluded everywhere: it is not picture.
@@ -331,12 +339,14 @@ def q_effective(a, q, cfg, floor):
     return min(q, sm.max_q(a, cfg, floor))
 
 
-def run_id(src, enc, preset, kb, a, q, cfg, floor):
+def run_id(src, enc, preset, kb, a, q, cfg, floor, pack=""):
     s = f"{src['sha256']}|{src['excerpt_start_s']}|{src['excerpt_s']}|{enc}|{preset}|{kb}|{a}|{q}|{cfg}|{floor}|v1"
+    if pack:
+        s += f"|pack={pack}"
     return hashlib.sha1(s.encode()).hexdigest()[:16]
 
 
-def make_runs(sources, bitrates, a_list, q_list, encs, cfg, floor):
+def make_runs(sources, bitrates, a_list, q_list, encs, cfg, floor, packs=()):
     runs = []
     for s in sources:
         for enc, preset in encs:
@@ -351,6 +361,10 @@ def make_runs(sources, bitrates, a_list, q_list, encs, cfg, floor):
                         runs.append({"run_id": run_id(s, enc, preset, kb, a, qe, cfg, floor), "source_key": s["key"],
                                      "source": s["name"], "source_class": s["class"], "encoder": enc, "preset": preset,
                                      "bitrate_kbps": kb, "a": a, "q": qe, "q_req": q, "cfg": cfg, "floor": floor})
+                for pk in packs:
+                    runs.append({"run_id": run_id(s, enc, preset, kb, 0, 0, cfg, floor, pk), "source_key": s["key"],
+                                 "source": s["name"], "source_class": s["class"], "encoder": enc, "preset": preset,
+                                 "bitrate_kbps": kb, "a": 0, "q": 0, "q_req": 0, "cfg": cfg, "floor": floor, "pack": pk})
     return runs
 
 
@@ -397,8 +411,15 @@ def cmd_plan(args, quiet=False):
         new = stage2_runs(args.out, db, cfg, floor)
         label = "stage2"
     else:
-        name = "quick" if args.quick else "full"
-        ex, kbs, a_l, q_l, encs = PLANS[name]
+        name = "quick" if args.quick else "quick4" if args.quick4 else "full"
+        ex, kbs, a_l, q_l, encs, packs = PLANS[name]
+        if args.pack is not None:
+            packs = [p for p in args.pack.split(",") if p and p != "none"]
+            bad = [p for p in packs if p not in PACKS]
+            if bad:
+                raise SystemExit(f"unknown --pack {bad} (field, split, none)")
+        if name == "quick4" and not args.encoder and not nvenc_available():
+            encs = [e for e in encs if not e.startswith("nvenc")]
         ex = args.excerpt if args.excerpt else ex
         kbs = parse_list(args.bitrate) if args.bitrate else kbs
         a_l = parse_list(args.a) if args.a else a_l
@@ -412,7 +433,7 @@ def cmd_plan(args, quiet=False):
             if not 0 <= q <= sm.Q_MAX:
                 raise SystemExit(f"q={q} outside 0..7")
         sources = scan_sources(args.sources, args.out, ex, args.excerpt_at, args.only)
-        new = make_runs(sources, kbs, a_l, q_l, enc_list(encs, presets), cfg, floor)
+        new = make_runs(sources, kbs, a_l, q_l, enc_list(encs, presets), cfg, floor, packs)
         label = name
     have = {r["run_id"] for r in plan["runs"]}
     added = [r for r in new if r["run_id"] not in have]
@@ -535,6 +556,36 @@ class Geometry:
         return np.clip(self.vy @ crop @ self.vxT + 0.5, 0, 255).astype(np.uint8)
 
 
+class PackGeometry:
+    """Interlace step at full size: one field per frame (fieldpack_math). Stateful: call render() in frame order."""
+
+    def __init__(self, pack):
+        self.pack, self.prev, self.n = pack, None, 0
+
+    def render(self, src):
+        p = self.n & 1
+        self.n += 1
+        if self.pack == "split":
+            self.prev = fm.pack_split(src, p, self.prev, 1)
+            return self.prev
+        return fm.pack(src, p, 1)
+
+    def decode_vf(self):
+        """ffmpeg filter: received fields -> 60 full frames per second through bwdif (one field of look-ahead)."""
+        crop = f"crop={W}:{H // 2}:0:" + ("'if(mod(n,2),%d,0)'" % (H // 2) if self.pack == "split" else "0")
+        return f"{crop},weave=first_field=top,setfield=tff,bwdif=mode=send_field:parity=tff:deint=all,"
+
+    @staticmethod
+    def view(g):
+        return g
+
+
+def nvenc_available():
+    r = subprocess.run([ffbin("ffmpeg"), "-v", "error", "-f", "lavfi", "-i", "testsrc2=s=1920x1080:r=60", "-frames:v", "3",
+                        "-c:v", "h264_nvenc", "-pix_fmt", "yuv420p", "-f", "null", "-"], capture_output=True)
+    return r.returncode == 0
+
+
 def enc_args(enc, preset, kb, threads, nvenc_extra):
     rate = ["-b:v", f"{kb}k", "-maxrate", f"{kb}k", "-bufsize", f"{kb}k"]
     common = ["-g", str(2 * FPS), "-keyint_min", str(2 * FPS), "-bf", "2", "-profile:v", "high"]
@@ -577,7 +628,8 @@ def do_run(job):
                picture_h=sm.rect2(run["a"], W, H)[1], source_sha256=src["sha256"],
                temporal_complexity=meta["temporal_complexity"], spatial_complexity=meta["spatial_complexity"],
                ffmpeg_version=opt["ffmpeg_version"], script_version=SCRIPT_VERSION,
-               excerpt_start_s=src["excerpt_start_s"], excerpt_s=src["excerpt_s"], run_id=run["run_id"])
+               excerpt_start_s=src["excerpt_start_s"], excerpt_s=src["excerpt_s"], run_id=run["run_id"],
+               pack=run.get("pack", ""))
     work = os.path.join(opt["work"], run["run_id"])
     os.makedirs(work, exist_ok=True)
     stream = os.path.join(work, "stream.mkv")
@@ -585,7 +637,8 @@ def do_run(job):
     pdec = penc = pout = elog = None
     locked = False
     try:
-        geo = Geometry(run["a"], run["q"], run["cfg"])
+        pack = run.get("pack", "")
+        geo = PackGeometry(pack) if pack else Geometry(run["a"], run["q"], run["cfg"])
         n = meta["frames"]
         if run["encoder"] == "nvenc" and _SEM is not None:
             _SEM.acquire()
@@ -629,6 +682,7 @@ def do_run(job):
         rnd = set(meta["random"])
         stp = set(meta["step"])
         pout = subprocess.Popen([ffbin("ffmpeg"), "-v", "error", "-nostdin", "-i", stream, "-vf",
+                                 (geo.decode_vf() if pack else "") +
                                  "scale=in_color_matrix=bt709:in_range=tv:out_range=pc,format=gray",
                                  "-f", "rawvideo", "-pix_fmt", "gray", "-"], stdout=subprocess.PIPE, bufsize=1 << 24)
         got = 0
@@ -636,19 +690,19 @@ def do_run(job):
             got = i + 1
             if i not in pos:
                 continue
-            ok = sm.read_state(g) == (run["a"], run["q"])
+            ok = True if pack else sm.read_state(g) == (run["a"], run["q"])
             m = frame_metrics(ref[pos[i]], geo.view(g))
             for kind in (["step"] if i in stp else []) + (["random"] if i in rnd else []):
                 frames.append([run["run_id"], i, kind] + [round(x, 5) for x in m] + [int(ok)])
         pout.wait()
-        if got < n:
+        if got < n - (1 if pack else 0):  # weave drops a last unpaired field
             raise RuntimeError(f"decoded {got}/{n} frames")
         st = [f for f in frames if f[2] == "step"]
         rd = [f for f in frames if f[2] == "random"]
         mean = lambda rows, k: round(float(np.mean([r[k] for r in rows])), 5) if rows else ""  # noqa: E731
         row.update(centre_ssim=mean(st, 3), centre_psnr=mean(st, 4), edge_ssim=mean(st, 5), edge_psnr=mean(st, 6),
                    whole_ssim=mean(st, 7), whole_psnr=mean(st, 8), frames_sampled=len(st),
-                   marker_pct=round(100.0 * sum(f[9] for f in frames) / max(len(frames), 1), 2),
+                   marker_pct="" if pack else round(100.0 * sum(f[9] for f in frames) / max(len(frames), 1), 2),
                    rand_centre_ssim=mean(rd, 3), rand_whole_ssim=mean(rd, 7), status="ok")
     except Exception as e:  # noqa: BLE001
         row["status"] = "failed"
@@ -688,6 +742,25 @@ def load_results(out_dir):
             if d.get("run_id") and d.get("status") in ("ok", "failed"):
                 res[d["run_id"]] = d
     return res
+
+
+def upgrade_header(path, cols):
+    """results.csv written by an older version: rewrite it once with the new header (new columns empty)."""
+    if not os.path.exists(path) or os.path.getsize(path) == 0:
+        return
+    with open(path, newline="", encoding="utf-8") as f:
+        rows = list(csv.reader(f))
+    head = rows[0] if rows else []
+    if head == cols or not head:
+        return
+    out = [cols] + [[dict(zip(head, r)).get(c, "") for c in cols] for r in rows[1:] if len(r) == len(head)]
+    tmp = path + ".tmp"
+    with open(tmp, "w", newline="", encoding="utf-8") as f:
+        csv.writer(f).writerows(out)
+        f.flush()
+        os.fsync(f.fileno())
+    os.replace(tmp, path)
+    log(f"{os.path.basename(path)}: upgraded to the {SCRIPT_VERSION} columns ({len(out) - 1} rows kept)")
 
 
 def append_rows(path, cols, rows):
@@ -740,6 +813,7 @@ def cmd_run(args):
     jobs = [{"run": r, "src": db["sources"][r["source_key"]], "meta": metas[r["source_key"]], "opt": opt}
             for r in pending]
     res_path, fr_path = os.path.join(args.out, "results.csv"), os.path.join(args.out, "frames.csv")
+    upgrade_header(res_path, COLUMNS)
     nj = max(1, min(args.jobs, len(jobs)))
     times = [float(r["runtime_s"]) for r in done.values() if r["status"] == "ok" and r.get("runtime_s")]
     keep_awake(True)
@@ -759,7 +833,7 @@ def cmd_run(args):
         eta = el / finished * left if finished else 0
         tag = "ok " if row["status"] == "ok" else "FAIL"
         msg = (f"[{finished}/{len(jobs)}] {tag} {row['source']} {row['encoder']} {row['bitrate_kbps']}k a={row['a']} "
-               f"q={row['q']} ({row['picture_h']}p)")
+               f"q={row['q']} ({row['picture_h']}p{', interlace ' + row['pack'] if row.get('pack') else ''})")
         if row["status"] == "ok":
             msg += f" centre {row['centre_ssim']} whole {row['whole_ssim']} marker {row['marker_pct']}%"
         else:
@@ -816,14 +890,19 @@ def cmd_report(args):
     for r in ok:
         for k in ("centre_ssim", "whole_ssim", "edge_ssim", "centre_psnr", "marker_pct", "mbit_s", "runtime_s",
                   "temporal_complexity", "spatial_complexity"):
-            r[k] = float(r[k])
+            r[k] = float(r[k]) if r[k] != "" else float("nan")
         for k in ("a", "q", "bitrate_kbps", "picture_h"):
             r[k] = int(r[k])
+        r["pack"] = r.get("pack", "") or ""
     cells = {}
     for r in ok:
         cells.setdefault((r["source"], r["source_class"], r["encoder"], r["bitrate_kbps"], r["excerpt_s"]), []).append(r)
     best_rows = []
     for (src, cls, enc, kb, ex), rs in sorted(cells.items()):
+        packed = [r for r in rs if r["pack"]]
+        rs = [r for r in rs if not r["pack"]]
+        if not rs:
+            continue
         base = next((r for r in rs if r["a"] == 0), None)
         bc = max(rs, key=lambda r: r["centre_ssim"])
         bw = max(rs, key=lambda r: r["whole_ssim"])
@@ -850,6 +929,16 @@ def cmd_report(args):
             b["H3"] = "yes" if b["H3_centre_delta"] > 0 and b["H3_whole_delta"] >= -0.01 else "no"
         else:
             b["H3"] = "n/a"
+        # H7, interlace step: best packed run vs 1080p and vs the best size
+        if packed:
+            bp = max(packed, key=lambda r: r["centre_ssim"])
+            b["interlace_pack"] = bp["pack"]
+            b["interlace_centre_ssim"], b["interlace_whole_ssim"] = bp["centre_ssim"], bp["whole_ssim"]
+            b["interlace_vs_full_pct"] = round(100 * (bp["centre_ssim"] / base["centre_ssim"] - 1), 2) if base else ""
+            b["interlace_vs_best_pct"] = round(100 * (bp["centre_ssim"] / bc["centre_ssim"] - 1), 2)
+            b["H7"] = "yes" if bp["centre_ssim"] >= bc["centre_ssim"] else "no"
+        else:
+            b["H7"] = "n/a"
         best_rows.append(b)
     bcols = list(dict.fromkeys(k for b in best_rows for k in b))
     with open(os.path.join(args.out, "best.csv"), "w", newline="", encoding="utf-8") as f:
@@ -913,7 +1002,12 @@ def cmd_report(args):
     h5 = [b for b in best_rows if b["bitrate_kbps"] <= 3000 and "chosen_beats_full_whole" in b]
     hyp["H5"] = ("not enough data" if not h5 else "supported" if all(b["chosen_beats_full_whole"] for b in h5) else "not supported",
                  f"{sum(b['chosen_beats_full_whole'] for b in h5)}/{len(h5)} cells at <= 3000 kbit/s: the best-centre size also beats 1080p on whole-frame SSIM")
-    low = [r for r in ok if r["marker_pct"] < 99]
+    h7 = [b for b in best_rows if b["H7"] in ("yes", "no")]
+    hyp["H7"] = ("not enough data (add --pack field,split)" if not h7 else
+                 "supported" if sum(b["H7"] == "yes" for b in h7) > len(h7) / 2 else "not supported",
+                 f"{sum(b['H7'] == 'yes' for b in h7)}/{len(h7)} cells: the interlace step (best of field / split, bwdif "
+                 f"viewer) is at least as sharp in the centre as the best picture size")
+    low = [r for r in ok if not r["pack"] and r["marker_pct"] < 99]
     hyp["H6"] = ("supported" if not low else "not supported",
                  f"{len(ok) - len(low)}/{len(ok)} runs read the marker on >= 99% of sampled frames")
 
@@ -943,6 +1037,12 @@ def cmd_report(args):
         cell = lambda b: f"{b['best_centre_h']}p q{b['best_centre_q']} ({b.get('gain_centre_pct', '?'):+}%)" if isinstance(b.get("gain_centre_pct"), float) else f"{b['best_centre_h']}p"  # noqa: E731
         L.append(f"| {src} ({ex}s) | {cls} | {any_b['temporal_complexity']:.2f} | {any_b['spatial_complexity']:.1f} | " +
                  " | ".join(cell(bs[k]) if k in bs else "" for k in kbs) + " |")
+    if h7:
+        L += ["", "## Interlace step (H7): centre SSIM vs 1080p and vs the best size", "",
+              "| source | encoder | kbit/s | best pack | vs 1080p | vs best size |", "|---|---|---|---|---|---|"]
+        for b in h7:
+            L.append(f"| {b['source']} | {b['encoder']} | {b['bitrate_kbps']} | {b['interlace_pack']} | "
+                     f"{b['interlace_vs_full_pct']:+}% | {b['interlace_vs_best_pct']:+}% |")
     L += ["", "## Flagged", ""]
     for r in low:
         L.append(f"- marker {r['marker_pct']}%: {r['source']} {r['encoder']} {r['bitrate_kbps']}k a={r['a']} q={r['q']}")
@@ -1048,7 +1148,7 @@ def cmd_check(args):
         print("  install: winget install Gyan.FFmpeg  (then open a new terminal)")
         return False
     line(shutil.which(ffbin("ffprobe")) is not None or os.path.exists(ffbin("ffprobe")), "ffprobe on PATH")
-    for enc, fatal in (("libx264", True), ("h264_nvenc", "nvenc" in (args.encoder or ""))):
+    for enc, fatal in (("libx264", True), ("h264_nvenc", "nvenc" in (args.encoder or ""))):  # quick4 drops NVENC if missing
         r = subprocess.run([ffbin("ffmpeg"), "-v", "error", "-f", "lavfi", "-i", f"testsrc2=s={W}x{H}:r={FPS}", "-frames:v", "5",
                             "-c:v", enc, "-pix_fmt", "yuv420p", "-f", "null", "-"], capture_output=True, text=True)
         line(r.returncode == 0, f"encoder {enc}" + ("" if r.returncode == 0 else ": " + (r.stderr.strip().splitlines() or ["?"])[0][:160]), fatal)
@@ -1098,6 +1198,8 @@ def main():
     ap.add_argument("--keep", action="store_true", help="keep each run's encoded stream")
     g = ap.add_mutually_exclusive_group()
     g.add_argument("--quick", action="store_true", help="smoke test: 2 bitrates, a 0/38/63, q 0/7 (~10 min)")
+    g.add_argument("--quick4", action="store_true",
+                   help="short check: busiest 4 s, 3000/6000 kbit/s, sizes + interlace step, x264 and NVENC (if present)")
     g.add_argument("--full", action="store_true", help="stage 1 screening grid (default)")
     g.add_argument("--stage2", action="store_true", help="refinement from stage 1 results + NVENC spot check")
     ap.add_argument("--a", help="scale steps, e.g. 0:63:1 or 0,25,38")
@@ -1105,6 +1207,7 @@ def main():
     ap.add_argument("--bitrate", help="kbit/s list/range, e.g. 1000,2000 or 500:8000:500")
     ap.add_argument("--encoder", help="x264, nvenc, x264:<preset>, nvenc:<p1..p7> (comma list)")
     ap.add_argument("--preset", help="x264 presets, e.g. veryfast,medium")
+    ap.add_argument("--pack", help="interlace step variants to add at full size: field,split (none = off)")
     ap.add_argument("--excerpt", type=float, help="excerpt length in s (default 10; 0 = whole clip)")
     ap.add_argument("--excerpt-at", default="busiest", help="busiest | middle | start | <seconds>")
     ap.add_argument("--only", help="comma list of source-name substrings to plan")
@@ -1138,7 +1241,8 @@ def main():
     elif args.cmd == "auto":
         if not cmd_check(args):
             sys.exit(1)
-        explicit = any([args.quick, args.full, args.stage2, args.a, args.q, args.bitrate, args.encoder, args.preset, args.only])
+        explicit = any([args.quick, args.quick4, args.full, args.stage2, args.a, args.q, args.bitrate, args.encoder,
+                        args.preset, args.only, args.pack is not None])
         if explicit or not os.path.exists(os.path.join(args.out, "plan.json")):
             cmd_plan(args)
         ok = cmd_run(args)
