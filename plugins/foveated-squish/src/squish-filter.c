@@ -99,6 +99,7 @@ enum atlas_state {
 #define S_STV_RAMP_DOWN "starve_ramp_down" /* seconds */
 #define S_STV_RAMP_UP "starve_ramp_up"     /* seconds */
 #define S_STV_DEMO "starve_demo"
+#define S_STV_FORCE "starve_force" /* -1 = automatic, else hold detector target 0..5 (testing) */
 #define STV_MX 240
 #define STV_MY 135
 /* Viewer look: sent to viewers in the config string, applied by the browser
@@ -225,8 +226,9 @@ struct squish_filter {
 	bool stv_on, stv_net, stv_squish;
 	int stv_lowest;
 	double stv_bitrate, stv_sens;
-	int stv_forced; /* -1 = auto, else a detector target 0..3 */
-	bool stv_demo;  /* demo loop instead of the detector */
+	int stv_forced;        /* -1 = auto, else a detector target 0..5 */
+	int stv_force_setting; /* last "Hold a level" value applied */
+	bool stv_demo;         /* demo loop instead of the detector */
 	struct stv_demo_state demo;
 	struct stv_ramp ramp;
 	double ramp_down_s, ramp_up_s;
@@ -643,6 +645,7 @@ static void *fsq_create(obs_data_t *settings, obs_source_t *context)
 		return NULL;
 	}
 	f->stv_forced = -1;
+	f->stv_force_setting = -1;
 	stv_ramp_init(&f->ramp);
 	migrate_settings(settings);
 	fsq_update(f, settings);
@@ -1203,6 +1206,13 @@ static void stv_apply_settings(struct squish_filter *f, obs_data_t *s)
 	f->stv_sens = obs_data_get_double(s, S_STV_SENS);
 	f->stv_net = obs_data_get_bool(s, S_STV_NET);
 	f->stv_squish = obs_data_get_bool(s, S_STV_SQUISH);
+	/* "Hold a level": applied when the setting changes, so the hotkeys still work afterwards. */
+	const int force = (int)obs_data_get_int(s, S_STV_FORCE);
+	if (force != f->stv_force_setting) {
+		f->stv_force_setting = force;
+		f->stv_forced = force >= 0 && force < STV_LEVELS ? force : -1;
+		f->stv_demo = demo && force < 0;
+	}
 	struct stv_controller_cfg cfg = stv_default_cfg(f->stv_bitrate > 0.0 ? f->stv_bitrate : 6000.0);
 	cfg.k = f->stv_sens > 0.0 ? f->stv_sens : 1.35;
 	cfg.lowest = f->stv_lowest;
@@ -1670,8 +1680,8 @@ static int apply_visibility(obs_properties_t *props, obs_data_t *s)
 	plugin_ui_show(props, "fine", adv);
 	plugin_ui_show(props, S_LOOK_STRENGTH, look_on && !look_custom);
 	plugin_ui_show(props, "look_hand", look_custom);
-	static const char *stv_adv[] = {S_STV_BITRATE,   S_STV_SENS,    S_STV_NET, S_STV_SQUISH,
-					S_STV_RAMP_DOWN, S_STV_RAMP_UP, S_STV_DEMO};
+	static const char *stv_adv[] = {S_STV_BITRATE,   S_STV_SENS,    S_STV_NET,  S_STV_SQUISH,
+					S_STV_RAMP_DOWN, S_STV_RAMP_UP, S_STV_DEMO, S_STV_FORCE};
 	for (size_t i = 0; i < sizeof(stv_adv) / sizeof(stv_adv[0]); i++)
 		plugin_ui_show(props, stv_adv[i], adv);
 	plugin_ui_show(props, S_IMPORT, adv);
@@ -1974,6 +1984,15 @@ static obs_properties_t *fsq_properties(void *data)
 			obs_properties_add_float_slider(stv, S_STV_RAMP_UP, T("StarveRampUp"), 0.0, 6.0, 0.1);
 		obs_property_float_set_suffix(ru, " s");
 		obs_properties_add_bool(stv, S_STV_DEMO, T("StarveDemo"));
+		obs_property_t *fp = obs_properties_add_list(stv, S_STV_FORCE, T("StarveForce"), OBS_COMBO_TYPE_LIST,
+							     OBS_COMBO_FORMAT_INT);
+		obs_property_list_add_int(fp, T("StarveForce.Auto"), -1);
+		obs_property_list_add_int(fp, T("StarveForce.Full"), 0);
+		obs_property_list_add_int(fp, T("Starve.720"), 1);
+		obs_property_list_add_int(fp, T("Starve.540"), 2);
+		obs_property_list_add_int(fp, T("Starve.360"), 3);
+		obs_property_list_add_int(fp, T("Starve.270"), 4);
+		obs_property_list_add_int(fp, T("Starve.180"), 5);
 		obs_properties_add_group(props, S_STV_ON, T("Starve"), OBS_GROUP_CHECKABLE, stv);
 	}
 
@@ -2063,6 +2082,7 @@ static void fsq_defaults(obs_data_t *s)
 	obs_data_set_default_double(s, S_STV_RAMP_DOWN, 0.5);
 	obs_data_set_default_double(s, S_STV_RAMP_UP, 2.0);
 	obs_data_set_default_bool(s, S_STV_DEMO, false);
+	obs_data_set_default_int(s, S_STV_FORCE, -1);
 	obs_data_set_default_double(s, S_MAXCOMP, 12.5);
 }
 

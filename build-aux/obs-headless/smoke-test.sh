@@ -112,6 +112,20 @@ EOF
 		fi
 	done
 	fi
+	# Starvation levels (optional per plugin): each held level against the Python reference.
+	if [[ -f "$dir/tests/level_check.py" ]]; then
+		python3 "$dir/tests/level_check.py" make >"$work/lin.rgba"
+		for lvl in $(python3 "$dir/tests/level_check.py" levels); do
+			read -r -a lvl_args <<<"$(python3 "$dir/tests/level_check.py" settings "$lvl")"
+			if env OBS_HEADLESS_CANVAS=1920x1080 DISPLAY="$display" timeout 300 "$work/obs-headless" "$so" "$data" "$id" 1920 1080 \
+				"${lvl_args[@]}" <"$work/lin.rgba" >"$work/lout.rgba" 2>"$work/llog.txt"; then
+				result="$(python3 "$dir/tests/level_check.py" check "$work/lout.rgba" "$lvl")" || status=1
+			else
+				result="FAIL (render error)"; status=1
+			fi
+			echo "$name / $id starvation level: $result"
+		done
+	fi
 	done
 	done
 done
