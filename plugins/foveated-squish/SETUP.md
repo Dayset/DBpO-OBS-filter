@@ -45,13 +45,16 @@ Why this order: OBS runs filters from top to bottom. Cleaning, sharpening and bl
 ## The only 4 squish settings to touch
 
 1. **Stream resolution**: pick your stream size, then fix every **CHANGE** line in the info text (close and reopen the filter; they turn OK).
-2. **Full-quality center**: start around **30%**.
-3. **Curve**: **1** is a gradual ramp; low values (0.1–0.5) give a hard step at the center's edge.
-4. **Clean the squeezed area**: start around **20–30**.
+2. **Sharp center size**: start around **30%** (moves in 5% steps).
+3. **Edge squeeze style**: **Sharpest center** (default) gives the center the most bits; **Smoothest edges** keeps a ring around it sharper.
+4. **Clean the squeezed edges**: start around **20–30**.
 
-Leave everything else at default. Use **View → Squeezed zone** to check the center and edges, then switch back to **Squished** before going live. After any change, **copy the config again** and update your stream title.
+That is all the panel shows by default. **Show advanced settings** adds the width/height split, center position,
+a custom curve slider, the edge limit, starvation tuning and config import; hidden settings keep their values.
+While you drag a slider the info text does not update (rebuilding the panel would make the slider let go); it
+refreshes when you change a list or checkbox, or reopen the filter. Leave everything else at default. Use **View → Squeezed zone** to check the center and edges, then switch back to **Squished** before going live. After any change, **copy the config again** and update your stream title.
 
-**NVIDIA Freestyle (Alt+F3 filters):** don't use them on the game while streaming. Sharpen, Clarity and Details add fine detail the encoder has to pay for, so the stream needs more bitrate. Use the filter's **Viewer look** sliders instead: the extension applies the same kind of look in each viewer's browser, so it costs no bitrate.
+**NVIDIA Freestyle (Alt+F3 filters):** don't use them on the game while streaming. Sharpen, Clarity and Details add fine detail the encoder has to pay for, so the stream needs more bitrate. Use the filter's **Look** list instead (Crisp, Vivid, HDR-like, ... plus a strength; **By hand** opens every slider): the extension applies the same kind of look in each viewer's browser, so it costs no bitrate.
 
 ## Center size vs. how much is sacrificed
 
@@ -77,7 +80,7 @@ The filter's info line shows this table for your actual game resolution, with "<
 
 Example: you want a 30% center at full quality and everything else heavily squeezed. Use a 1280×720 canvas, a full-quality center of 30%, and a low curve. Viewers with the extension see a 2560×1440-shaped picture whose center is exactly the game's pixels.
 
-**Curve:** low values (0.1–0.5) squeeze everything outside the center evenly, so there's a hard step at the center's edge. 1 is a linear ramp. High values keep a ring around the center almost sharp and push the squeeze to the far edges. A high curve can only throw away a little in total, so at 75% the curve tops out around 1.5–1.7, and higher slider values have no further effect (the filter lowers the curve automatically). Set **View → Squeezed zone** while you adjust: the preview shows the full-quality center as a green outline and tints the edges red by how hard they are squeezed, live, without reopening the filter.
+**Curve** (Edge squeeze style → Custom curve, or the three presets: Sharpest center = 0.5, Balanced = 1, Smoothest edges = 1.5): low values (0.1–0.5) squeeze everything outside the center evenly, so there's a hard step at the center's edge. 1 is a linear ramp. High values keep a ring around the center almost sharp and push the squeeze to the far edges. A high curve can only throw away a little in total, so at 75% the curve tops out around 1.5–1.7, and higher slider values have no further effect (the filter lowers the curve automatically). Set **View → Squeezed zone** while you adjust: the preview shows the full-quality center as a green outline and tints the edges red by how hard they are squeezed, live, without reopening the filter.
 
 ## Changing the canvas (e.g. to 480p)
 
