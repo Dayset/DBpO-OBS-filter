@@ -378,7 +378,7 @@ float4 PSLookColor(VertData v_in) : TARGET
 	col += color_a.x * 0.5;
 	col = (col - 0.5) * (1.0 + color_a.y) + 0.5;
 	col = saturate(col);
-	col = pow(col, exp2(-color_a.z));
+	col = pow(col, float3(1.0, 1.0, 1.0) * exp2(-color_a.z));
 	if (color_b.w != 0.0) {
 		float ang = color_b.w * 3.14159265358979;
 		float ca = cos(ang);
@@ -399,7 +399,7 @@ float4 PSLookColor(VertData v_in) : TARGET
 	float3 sep = saturate(float3(dot(col, float3(0.393, 0.769, 0.189)), dot(col, float3(0.349, 0.686, 0.168)),
 				     dot(col, float3(0.272, 0.534, 0.131))));
 	col += (sep - col) * color_c.w;
-	float3 night = saturate(pow(col, 0.8) * float3(0.7, 0.85, 1.15));
+	float3 night = saturate(pow(col, float3(0.8, 0.8, 0.8)) * float3(0.7, 0.85, 1.15));
 	col += (night - col) * color_n;
 	return float4(saturate(col), src.a);
 }

@@ -16,6 +16,8 @@
   .slider output { text-align: right; font-variant-numeric: tabular-nums; }
   .hint { color: #6e6e73; font-size: 12px; margin: 2px 0 4px; }
   select { font: inherit; }
+  details { margin: 4px 0; } summary { cursor: pointer; color: #6e6e73; }
+  input[type=range] { width: 100%; }
   @media (prefers-color-scheme: dark) { body { background: #1e1e20; color: #eee; } .status { background: #2c2c30; } .bad { background: #4a2020; } textarea { background: #2c2c30; color: #eee; } }
 </style>
 </head>
@@ -36,11 +38,20 @@
     <legend>Look (like NVIDIA Freestyle)</legend>
     <label>Look: <select id="lookMode">
       <option value="streamer">Streamer's look</option>
-      <option value="mine">My look</option>
       <option value="off">Off</option>
+      <option value="crisp">Crisp</option>
+      <option value="vivid">Vivid</option>
+      <option value="hdr">HDR-like</option>
+      <option value="warm">Warm</option>
+      <option value="cool">Cool</option>
+      <option value="cinema">Cinematic</option>
+      <option value="night">Night</option>
+      <option value="bw">Black &amp; white</option>
+      <option value="mine">By hand</option>
     </select></label>
+    <div id="strengthRow" class="slider"><span>Strength</span><input type="range" id="lookStrength" min="0" max="200" step="10"><output id="lookStrengthOut"></output></div>
     <div id="lookHint" class="hint"></div>
-    <div id="sliders"></div>
+    <details id="lookDetails"><summary>Each value</summary><div id="sliders"></div></details>
     <label><input type="checkbox" id="plainVideos"> Also use my look on normal videos</label>
   </fieldset>
   <fieldset>
@@ -61,7 +72,7 @@
       <option value="periphery">Squeezed edges only</option>
       <option value="all">Whole picture</option>
     </select></label>
-    <div id="enhSliders"></div>
+    <details id="enhDetails"><summary>Each value</summary><div id="enhSliders"></div></details>
     <label><input type="checkbox" id="debug"> Debug overlay (fps, CPU/GPU time, benchmark)</label>
     <label>Compare: <select id="compare">
       <option value="off">Off</option>

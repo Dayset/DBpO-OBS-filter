@@ -190,6 +190,24 @@
 		["bw", "Black & white", false], ["sepia", "Sepia", false], ["night", "Night mode", false],
 	];
 	const NO_LOOK = Object.freeze(Object.fromEntries(LOOK_FIELDS.map(([k]) => [k, 0])));
+	/* Ready looks, same values as the OBS filter's Look list (squish-filter.c LOOK_PRESETS), scaled by a strength. */
+	const LOOK_PRESETS = {
+		crisp: ["Crisp", { sharpen: 0.35, clarity: 0.25 }],
+		vivid: ["Vivid", { sharpen: 0.25, clarity: 0.2, contrast: 0.1, vibrance: 0.35 }],
+		hdr: ["HDR-like", { sharpen: 0.2, clarity: 0.3, hdr: 0.35, vibrance: 0.2, highlights: -0.1, shadows: 0.15 }],
+		warm: ["Warm", { sharpen: 0.2, clarity: 0.1, contrast: 0.05, vibrance: 0.2, temperature: 0.25 }],
+		cool: ["Cool", { sharpen: 0.2, clarity: 0.1, contrast: 0.05, vibrance: 0.15, temperature: -0.25 }],
+		cinema: ["Cinematic", { sharpen: 0.15, clarity: 0.15, bloom: 0.1, contrast: 0.15, saturation: -0.15, temperature: 0.1, shadows: -0.1 }],
+		night: ["Night", { sharpen: 0.2, night: 0.6 }],
+		bw: ["Black & white", { sharpen: 0.25, clarity: 0.2, contrast: 0.15, bw: 1 }],
+	};
+	/** Look for preset name at strength k (1 = as designed). */
+	function presetLook(name, k = 1) {
+		const p = LOOK_PRESETS[name];
+		const out = { ...NO_LOOK };
+		if (p) for (const [key, v] of Object.entries(p[1])) out[key] = Math.max(-1, Math.min(1, v * k));
+		return out;
+	}
 	const COLOR_KEYS = ["brightness", "contrast", "gamma", "saturation", "vibrance", "temperature", "tint", "hue",
 		"highlights", "shadows", "bw", "sepia", "night"];
 
@@ -646,7 +664,7 @@ void main() {
 
 	const api = {
 		MIN_DENSITY, derive, forward, density, inverse, parse, uniforms, FRAGMENT_SHADER, atlasLayout,
-		NO_LOOK, lookActive, colorActive, cleanLook, identity, pageKey, LOOK_BLUR_SHADER, LOOK_DETAILS_SHADER, LOOK_CAS_SHADER,
+		NO_LOOK, LOOK_PRESETS, presetLook, lookActive, colorActive, cleanLook, identity, pageKey, LOOK_BLUR_SHADER, LOOK_DETAILS_SHADER, LOOK_CAS_SHADER,
 		LOOK_COLOR_SHADER, LOOK_FIELDS, packLook, unpackLook,
 		ENH_DEBLOCK_SHADER, ENH_EDGE_SHADER, ENHANCE_FIELDS, NO_ENHANCE, ENHANCE_PRESETS, cleanEnhance, enhanceStages,
 		enhanceActive, readsPerPixel,

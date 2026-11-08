@@ -253,6 +253,24 @@ const chrome = (() => {
 		["bw", "Black & white", false], ["sepia", "Sepia", false], ["night", "Night mode", false],
 	];
 	const NO_LOOK = Object.freeze(Object.fromEntries(LOOK_FIELDS.map(([k]) => [k, 0])));
+	/* Ready looks, same values as the OBS filter's Look list (squish-filter.c LOOK_PRESETS), scaled by a strength. */
+	const LOOK_PRESETS = {
+		crisp: ["Crisp", { sharpen: 0.35, clarity: 0.25 }],
+		vivid: ["Vivid", { sharpen: 0.25, clarity: 0.2, contrast: 0.1, vibrance: 0.35 }],
+		hdr: ["HDR-like", { sharpen: 0.2, clarity: 0.3, hdr: 0.35, vibrance: 0.2, highlights: -0.1, shadows: 0.15 }],
+		warm: ["Warm", { sharpen: 0.2, clarity: 0.1, contrast: 0.05, vibrance: 0.2, temperature: 0.25 }],
+		cool: ["Cool", { sharpen: 0.2, clarity: 0.1, contrast: 0.05, vibrance: 0.15, temperature: -0.25 }],
+		cinema: ["Cinematic", { sharpen: 0.15, clarity: 0.15, bloom: 0.1, contrast: 0.15, saturation: -0.15, temperature: 0.1, shadows: -0.1 }],
+		night: ["Night", { sharpen: 0.2, night: 0.6 }],
+		bw: ["Black & white", { sharpen: 0.25, clarity: 0.2, contrast: 0.15, bw: 1 }],
+	};
+	/** Look for preset name at strength k (1 = as designed). */
+	function presetLook(name, k = 1) {
+		const p = LOOK_PRESETS[name];
+		const out = { ...NO_LOOK };
+		if (p) for (const [key, v] of Object.entries(p[1])) out[key] = Math.max(-1, Math.min(1, v * k));
+		return out;
+	}
 	const COLOR_KEYS = ["brightness", "contrast", "gamma", "saturation", "vibrance", "temperature", "tint", "hue",
 		"highlights", "shadows", "bw", "sepia", "night"];
 
@@ -709,7 +727,7 @@ void main() {
 
 	const api = {
 		MIN_DENSITY, derive, forward, density, inverse, parse, uniforms, FRAGMENT_SHADER, atlasLayout,
-		NO_LOOK, lookActive, colorActive, cleanLook, identity, pageKey, LOOK_BLUR_SHADER, LOOK_DETAILS_SHADER, LOOK_CAS_SHADER,
+		NO_LOOK, LOOK_PRESETS, presetLook, lookActive, colorActive, cleanLook, identity, pageKey, LOOK_BLUR_SHADER, LOOK_DETAILS_SHADER, LOOK_CAS_SHADER,
 		LOOK_COLOR_SHADER, LOOK_FIELDS, packLook, unpackLook,
 		ENH_DEBLOCK_SHADER, ENH_EDGE_SHADER, ENHANCE_FIELDS, NO_ENHANCE, ENHANCE_PRESETS, cleanEnhance, enhanceStages,
 		enhanceActive, readsPerPixel,
@@ -934,6 +952,8 @@ void main() {
   .slider output { text-align: right; font-variant-numeric: tabular-nums; }
   .hint { color: #6e6e73; font-size: 12px; margin: 2px 0 4px; }
   select { font: inherit; }
+  details { margin: 4px 0; } summary { cursor: pointer; color: #6e6e73; }
+  input[type=range] { width: 100%; }
   @media (prefers-color-scheme: dark) { body { background: #1e1e20; color: #eee; } .status { background: #2c2c30; } .bad { background: #4a2020; } textarea { background: #2c2c30; color: #eee; } }
 
 		body,#box{width:min(320px,88vw)}
@@ -954,11 +974,20 @@ void main() {
     <legend>Look (like NVIDIA Freestyle)</legend>
     <label>Look: <select id="lookMode">
       <option value="streamer">Streamer's look</option>
-      <option value="mine">My look</option>
       <option value="off">Off</option>
+      <option value="crisp">Crisp</option>
+      <option value="vivid">Vivid</option>
+      <option value="hdr">HDR-like</option>
+      <option value="warm">Warm</option>
+      <option value="cool">Cool</option>
+      <option value="cinema">Cinematic</option>
+      <option value="night">Night</option>
+      <option value="bw">Black &amp; white</option>
+      <option value="mine">By hand</option>
     </select></label>
+    <div id="strengthRow" class="slider"><span>Strength</span><input type="range" id="lookStrength" min="0" max="200" step="10"><output id="lookStrengthOut"></output></div>
     <div id="lookHint" class="hint"></div>
-    <div id="sliders"></div>
+    <details id="lookDetails"><summary>Each value</summary><div id="sliders"></div></details>
     <label><input type="checkbox" id="plainVideos"> Also use my look on normal videos</label>
   </fieldset>
   <fieldset>
@@ -979,7 +1008,7 @@ void main() {
       <option value="periphery">Squeezed edges only</option>
       <option value="all">Whole picture</option>
     </select></label>
-    <div id="enhSliders"></div>
+    <details id="enhDetails"><summary>Each value</summary><div id="enhSliders"></div></details>
     <label><input type="checkbox" id="debug"> Debug overlay (fps, CPU/GPU time, benchmark)</label>
     <label>Compare: <select id="compare">
       <option value="off">Off</option>
@@ -1008,7 +1037,7 @@ $("enhSliders").innerHTML = FSQ.ENHANCE_FIELDS.map(
 		`<div class="slider"><span>${label}</span><input type="range" id="e_${k}" min="0" max="100" step="1"><output id="e_${k}Out"></output></div>`
 ).join("");
 const ENH_KEYS = FSQ.ENHANCE_FIELDS.map(([k]) => k);
-const defaults = { enabled: true, autoDetect: true, config: "", configPage: "", quality: "auto", lookMode: "streamer", myLook: NO_LOOK, plainVideos: false, enhance: FSQ.NO_ENHANCE, debug: false, compare: "off" };
+const defaults = { enabled: true, autoDetect: true, config: "", configPage: "", quality: "auto", lookMode: "streamer", lookPreset: "", lookStrength: 1, myLook: NO_LOOK, plainVideos: false, enhance: FSQ.NO_ENHANCE, debug: false, compare: "off" };
 let tabKey = ""; // the page this popup was opened on (pasted configs belong to it)
 let current = null; // the config in use (pasted or detected), for showing the streamer's look
 
@@ -1018,26 +1047,35 @@ function lookText(l) {
 	return on.length ? on.join(", ") : "none";
 }
 
-/* Sliders show the streamer's look (read-only) or the viewer's own. */
+/* The Look list: the streamer's look, off, a preset (with a strength) or every value by hand.
+ * A preset is stored as lookMode "mine" + lookPreset, so the page only ever reads myLook. */
 function renderLook(s) {
 	const mode = s.lookMode;
-	$("lookMode").value = mode;
+	const preset = mode === "mine" && s.lookPreset && FSQ.LOOK_PRESETS[s.lookPreset] ? s.lookPreset : "";
+	$("lookMode").value = preset || mode;
 	const mine = FSQ.cleanLook(s.myLook);
 	const shown = mode === "streamer" ? (current ? current.look : NO_LOOK) : mine;
 	for (const k of LOOK_KEYS) {
 		$(k).value = Math.round(shown[k] * 100);
-		$(k).disabled = mode !== "mine";
+		$(k).disabled = !(mode === "mine" && !preset);
 		$(`${k}Out`).textContent = `${Math.round(shown[k] * 100)}%`;
 	}
-	$("sliders").style.opacity = mode === "off" ? "0.4" : "1";
+	const k = Number.isFinite(s.lookStrength) ? s.lookStrength : 1;
+	$("lookStrength").value = Math.round(k * 100);
+	$("lookStrengthOut").textContent = `${Math.round(k * 100)}%`;
+	$("strengthRow").style.display = preset ? "" : "none";
+	$("lookDetails").style.display = mode === "off" ? "none" : "";
+	if (mode === "mine" && !preset) $("lookDetails").open = true;
 	$("plainVideos").checked = s.plainVideos;
 	$("plainVideos").disabled = mode === "off";
 	$("lookHint").textContent =
 		mode === "streamer"
-			? `The streamer's look: ${current ? lookText(current.look) : "no stream config yet"}. Pick "My look" to set your own.`
-			: mode === "mine"
-				? "Your own look, used instead of the streamer's. All at 0 = untouched picture."
-				: "No look: you see the stream exactly as sent.";
+			? `The streamer's look: ${current ? lookText(current.look) : "no stream config yet"}.`
+			: preset
+				? `${FSQ.LOOK_PRESETS[preset][0]} at ${Math.round(k * 100)}%: ${lookText(mine)}.`
+				: mode === "mine"
+					? "Your own values (open Each value). All at 0 = untouched picture."
+					: "No look: you see the stream exactly as sent.";
 }
 
 /* Edge enhancement controls: the preset box shows which preset the current values equal, else "Custom". */
@@ -1113,22 +1151,50 @@ $("clear").onclick = () => chrome.storage.sync.set({ config: "", configPage: "" 
 $("enabled").onchange = (e) => chrome.storage.sync.set({ enabled: e.target.checked }, load);
 $("autoDetect").onchange = (e) => chrome.storage.sync.set({ autoDetect: e.target.checked }, load);
 $("quality").onchange = (e) => chrome.storage.sync.set({ quality: e.target.value }, load);
-$("lookMode").onchange = (e) => chrome.storage.sync.set({ lookMode: e.target.value }, load);
+$("lookMode").onchange = (e) => {
+	const v = e.target.value;
+	if (FSQ.LOOK_PRESETS[v]) {
+		const k = Number($("lookStrength").value) / 100 || 1;
+		chrome.storage.sync.set({ lookMode: "mine", lookPreset: v, lookStrength: k, myLook: FSQ.presetLook(v, k) }, load);
+	} else chrome.storage.sync.set({ lookMode: v, lookPreset: "" }, load);
+};
 $("plainVideos").onchange = (e) => chrome.storage.sync.set({ plainVideos: e.target.checked }, load);
-function saveMyLook() {
+/* Sliders apply live: every drag step goes to local storage (no write limit, the page follows at once);
+ * the final value is saved to sync storage when the slider is released. */
+const live = {};
+function pushLive(key, value) {
+	const first = !(key in live);
+	live[key] = value;
+	if (first)
+		requestAnimationFrame(() => {
+			const v = live[key];
+			delete live[key];
+			chrome.storage.local.set({ [key]: v });
+		});
+}
+function readMyLook() {
 	const look = {};
 	for (const k of LOOK_KEYS) look[k] = Number($(k).value) / 100;
-	chrome.storage.sync.set({ myLook: look });
+	return look;
 }
-// Live while dragging, but at most one write per 0.7 s (sync storage allows 120 a minute).
-let pending = null;
 for (const k of LOOK_KEYS) {
 	$(k).addEventListener("input", () => {
 		$(`${k}Out`).textContent = `${$(k).value}%`;
-		if (!pending) pending = setTimeout(() => ((pending = null), saveMyLook()), 700);
+		pushLive("myLook", readMyLook());
 	});
-	$(k).addEventListener("change", saveMyLook);
+	$(k).addEventListener("change", () => chrome.storage.sync.set({ myLook: readMyLook() }));
 }
+$("lookStrength").addEventListener("input", () => {
+	const k = Number($("lookStrength").value) / 100;
+	$("lookStrengthOut").textContent = `${Math.round(k * 100)}%`;
+	const preset = $("lookMode").value;
+	if (FSQ.LOOK_PRESETS[preset]) pushLive("myLook", FSQ.presetLook(preset, k));
+});
+$("lookStrength").addEventListener("change", () => {
+	const k = Number($("lookStrength").value) / 100;
+	const preset = $("lookMode").value;
+	if (FSQ.LOOK_PRESETS[preset]) chrome.storage.sync.set({ lookStrength: k, myLook: FSQ.presetLook(preset, k) }, load);
+});
 function readEnhance() {
 	const e = { kernel: $("enhKernel").value, area: $("enhArea").value };
 	for (const k of ENH_KEYS) e[k] = Number($(`e_${k}`).value) / 100;
@@ -1141,11 +1207,10 @@ $("enhKernel").onchange = () => chrome.storage.sync.set({ enhance: readEnhance()
 $("enhArea").onchange = () => chrome.storage.sync.set({ enhance: readEnhance() }, load);
 $("debug").onchange = (e) => chrome.storage.sync.set({ debug: e.target.checked }, load);
 $("compare").onchange = (e) => chrome.storage.sync.set({ compare: e.target.value }, load);
-let pendingEnh = null;
 for (const k of ENH_KEYS) {
 	$(`e_${k}`).addEventListener("input", () => {
 		$(`e_${k}Out`).textContent = `${$(`e_${k}`).value}%`;
-		if (!pendingEnh) pendingEnh = setTimeout(() => ((pendingEnh = null), chrome.storage.sync.set({ enhance: readEnhance() })), 700);
+		pushLive("enhance", readEnhance());
 	});
 	$(`e_${k}`).addEventListener("change", () => chrome.storage.sync.set({ enhance: readEnhance() }, load));
 }

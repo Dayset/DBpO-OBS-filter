@@ -85,6 +85,10 @@ enum atlas_state {
 #define S_ATLAS_H "atlas_%d_h"
 #define S_ATLAS_SCALE "atlas_%d_scale"
 #define S_IMPORT "import"
+#define S_ADVANCED "show_advanced"   /* shows the fine controls; values apply either way */
+#define S_CURVE_STYLE "curve_style"  /* 0 = custom (curve sliders), 1..3 = CURVE_STYLES */
+#define S_LOOK_PRESET "look_preset"  /* 0 = off, LOOK_CUSTOM = the sliders, else LOOK_PRESETS */
+#define S_LOOK_STRENGTH "look_strength"
 /* Dynamic resolution when starved (epic #10, research/foveation/STARVATION_SPEC.md) */
 #define S_STV_ON "starve_on"
 #define S_STV_LOWEST "starve_lowest"   /* 1 = 720, 2 = 540, 3 = 360, 4 = 270, 5 = 180 */
@@ -124,6 +128,30 @@ static const struct {
 	{"look_night", "LookNight", false},
 };
 #define N_COLOR_SETTINGS 13
+
+/* Curve styles shown in the main group (squish_profiles.py: 0.5 = sharpest centre, 1.5 = sharpest middle ring). */
+static const double CURVE_STYLES[4] = {0.0, 0.5, 1.0, 1.5};
+
+/* Look presets: sharpen, clarity, hdr, bloom, sharpen+, then the 13 colour values (all 0..1 or -1..1),
+ * scaled by the strength slider. Viewers can still change or switch it off. */
+#define LOOK_CUSTOM 99
+#define N_LOOK_VALUES (5 + N_COLOR_SETTINGS)
+static const struct {
+	int id;
+	const char *label;
+	float v[N_LOOK_VALUES];
+} LOOK_PRESETS[] = {
+	/*                       shp   clr   hdr   blm   shp+  bri   con   gam   sat   vib   tmp   tnt   hue   hil   sha   bw   sep  ngt */
+	{1, "LookPreset.Crisp", {0.35f, 0.25f, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0}},
+	{2, "LookPreset.Vivid", {0.25f, 0.2f, 0, 0, 0, 0, 0.1f, 0, 0, 0.35f, 0, 0, 0, 0, 0, 0, 0, 0}},
+	{3, "LookPreset.Hdr", {0.2f, 0.3f, 0.35f, 0, 0, 0, 0, 0, 0, 0.2f, 0, 0, 0, -0.1f, 0.15f, 0, 0, 0}},
+	{4, "LookPreset.Warm", {0.2f, 0.1f, 0, 0, 0, 0, 0.05f, 0, 0, 0.2f, 0.25f, 0, 0, 0, 0, 0, 0, 0}},
+	{5, "LookPreset.Cool", {0.2f, 0.1f, 0, 0, 0, 0, 0.05f, 0, 0, 0.15f, -0.25f, 0, 0, 0, 0, 0, 0, 0}},
+	{6, "LookPreset.Cinema", {0.15f, 0.15f, 0, 0.1f, 0, 0, 0.15f, 0, -0.15f, 0, 0.1f, 0, 0, 0, -0.1f, 0, 0, 0}},
+	{7, "LookPreset.Night", {0.2f, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0.6f}},
+	{8, "LookPreset.Bw", {0.25f, 0.2f, 0, 0, 0, 0, 0.15f, 0, 0, 0, 0, 0, 0, 0, 0, 1.0f, 0, 0}},
+};
+#define N_LOOK_PRESETS ((int)(sizeof(LOOK_PRESETS) / sizeof(LOOK_PRESETS[0])))
 
 enum layout_mode {
 	LAYOUT_FILL = 0, /* squeeze = canvas / source: the picture fills a standard canvas */
@@ -259,6 +287,7 @@ static const char *fsq_get_name(void *unused)
 static void read_config(obs_data_t *s, struct squish_config *cfg)
 {
 	const bool link = obs_data_get_bool(s, S_LINK);
+	const long style = (long)obs_data_get_int(s, S_CURVE_STYLE);
 	cfg->x.r = obs_data_get_double(s, S_RX) / 100.0;
 	cfg->x.c = obs_data_get_double(s, S_CX) / 200.0;
 	cfg->x.f = obs_data_get_double(s, S_FX) / 100.0;
@@ -267,18 +296,49 @@ static void read_config(obs_data_t *s, struct squish_config *cfg)
 	cfg->y.c = obs_data_get_double(s, link ? S_CX : S_CY) / 200.0;
 	cfg->y.f = obs_data_get_double(s, S_FY) / 100.0;
 	cfg->y.p = obs_data_get_double(s, link ? S_PX : S_PY);
-	cfg->look.sharpen = obs_data_get_double(s, S_LOOK_SHARPEN) / 100.0;
-	cfg->look.clarity = obs_data_get_double(s, S_LOOK_CLARITY) / 100.0;
-	cfg->look.hdr = obs_data_get_double(s, S_LOOK_HDR) / 100.0;
-	cfg->look.bloom = obs_data_get_double(s, S_LOOK_BLOOM) / 100.0;
-	cfg->look.sharpen_plus = obs_data_get_double(s, S_LOOK_SHARPEN_PLUS) / 100.0;
-	double *cv[N_COLOR_SETTINGS] = {&cfg->look.brightness, &cfg->look.contrast, &cfg->look.gamma,
-					&cfg->look.saturation, &cfg->look.vibrance, &cfg->look.temperature,
-					&cfg->look.tint,       &cfg->look.hue,      &cfg->look.highlights,
-					&cfg->look.shadows,    &cfg->look.bw,       &cfg->look.sepia,
-					&cfg->look.night};
+	if (style >= 1 && style <= 3)
+		cfg->x.p = cfg->y.p = CURVE_STYLES[style];
+	double *lv[N_LOOK_VALUES] = {&cfg->look.sharpen,  &cfg->look.clarity,      &cfg->look.hdr,
+				     &cfg->look.bloom,    &cfg->look.sharpen_plus, &cfg->look.brightness,
+				     &cfg->look.contrast, &cfg->look.gamma,        &cfg->look.saturation,
+				     &cfg->look.vibrance, &cfg->look.temperature,  &cfg->look.tint,
+				     &cfg->look.hue,      &cfg->look.highlights,   &cfg->look.shadows,
+				     &cfg->look.bw,       &cfg->look.sepia,        &cfg->look.night};
+	const long preset = (long)obs_data_get_int(s, S_LOOK_PRESET);
+	if (preset == LOOK_CUSTOM) {
+		static const char *keys[5] = {S_LOOK_SHARPEN, S_LOOK_CLARITY, S_LOOK_HDR, S_LOOK_BLOOM,
+					      S_LOOK_SHARPEN_PLUS};
+		for (int i = 0; i < 5; i++)
+			*lv[i] = obs_data_get_double(s, keys[i]) / 100.0;
+		for (int i = 0; i < N_COLOR_SETTINGS; i++)
+			*lv[5 + i] = obs_data_get_double(s, color_settings[i].key) / 100.0;
+		return;
+	}
+	const double k = obs_data_get_double(s, S_LOOK_STRENGTH) / 100.0;
+	for (int i = 0; i < N_LOOK_VALUES; i++)
+		*lv[i] = 0.0;
+	for (int j = 0; j < N_LOOK_PRESETS; j++)
+		if (LOOK_PRESETS[j].id == preset)
+			for (int i = 0; i < N_LOOK_VALUES; i++)
+				*lv[i] = LOOK_PRESETS[j].v[i] * k;
+}
+
+/* Settings saved before the simple panel: keep their hand-set curve and look. */
+static void migrate_settings(obs_data_t *s)
+{
+	if (!obs_data_has_user_value(s, S_CURVE_STYLE) &&
+	    (obs_data_has_user_value(s, S_PX) || obs_data_has_user_value(s, S_PY)))
+		obs_data_set_int(s, S_CURVE_STYLE, 0);
+	if (obs_data_has_user_value(s, S_LOOK_PRESET))
+		return;
+	static const char *keys[5] = {S_LOOK_SHARPEN, S_LOOK_CLARITY, S_LOOK_HDR, S_LOOK_BLOOM, S_LOOK_SHARPEN_PLUS};
+	bool any = false;
+	for (int i = 0; i < 5; i++)
+		any |= obs_data_get_double(s, keys[i]) != 0.0;
 	for (int i = 0; i < N_COLOR_SETTINGS; i++)
-		*cv[i] = obs_data_get_double(s, color_settings[i].key) / 100.0;
+		any |= obs_data_get_double(s, color_settings[i].key) != 0.0;
+	if (any)
+		obs_data_set_int(s, S_LOOK_PRESET, LOOK_CUSTOM);
 }
 
 /* Keep each axis within what the curve can deliver (density >= 8%). */
@@ -584,6 +644,7 @@ static void *fsq_create(obs_data_t *settings, obs_source_t *context)
 	}
 	f->stv_forced = -1;
 	stv_ramp_init(&f->ramp);
+	migrate_settings(settings);
 	fsq_update(f, settings);
 	for (int i = 0; i < STV_HOTKEYS; i++) {
 		f->hk[i].f = f;
@@ -1537,10 +1598,10 @@ static void limit_slider(obs_properties_t *props, obs_data_t *s, const char *nam
 static void set_slider_limits(struct squish_filter *f, obs_properties_t *props, obs_data_t *s, bool manual)
 {
 	if (manual) {
-		limit_slider(props, s, S_CX, 1.0, 99.0, 0.5);
-		limit_slider(props, s, S_CY, 1.0, 99.0, 0.5);
-		limit_slider(props, s, S_PX, 0.1, 10.0, 0.05);
-		limit_slider(props, s, S_PY, 0.1, 10.0, 0.05);
+		limit_slider(props, s, S_CX, 5.0, 95.0, 5.0);
+		limit_slider(props, s, S_CY, 5.0, 95.0, 5.0);
+		limit_slider(props, s, S_PX, 0.1, 10.0, 0.1);
+		limit_slider(props, s, S_PY, 0.1, 10.0, 0.1);
 		return;
 	}
 	struct squish_filter tmp = *f;
@@ -1558,13 +1619,13 @@ static void set_slider_limits(struct squish_filter *f, obs_properties_t *props, 
 	const double r[2] = {L.c.x.r, L.c.y.r};
 	const char *cs[2] = {S_CX, S_CY}, *ps[2] = {S_PX, S_PY};
 	for (int i = 0; i < 2; i++) {
-		double cmax = floor(max_center(r[i], tmp.floor) * 200.0) / 2.0; /* % of the frame, 0.5 steps */
-		if (cmax < 1.0)
-			cmax = 1.0;
+		double cmax = floor(max_center(r[i], tmp.floor) * 100.0); /* % of the frame, 1 % steps */
+		if (cmax < 5.0)
+			cmax = 5.0;
 		double pmax = r[i] < 1.0 ? (1.0 - tmp.floor) * 0.99 / (1.0 - r[i]) - 1.0 : 10.0;
 		pmax = pmax > 10.0 ? 10.0 : pmax < 0.1 ? 0.1 : floor(pmax * 20.0) / 20.0;
-		limit_slider(props, s, cs[i], 1.0, cmax, 0.5);
-		limit_slider(props, s, ps[i], 0.1, pmax, 0.05);
+		limit_slider(props, s, cs[i], 5.0, cmax, 5.0);
+		limit_slider(props, s, ps[i], 0.1, pmax, 0.1);
 	}
 }
 
@@ -1590,34 +1651,56 @@ static void wrap_title(obs_data_t *s, char *cfg, size_t size)
 	snprintf(cfg, size, "%s", out);
 }
 
+/* Which parts of the panel are shown. Everything hidden still applies with its current value. */
+static int apply_visibility(obs_properties_t *props, obs_data_t *s)
+{
+	const bool adv = obs_data_get_bool(s, S_ADVANCED);
+	const bool link = obs_data_get_bool(s, S_LINK);
+	const bool manual = read_target(s) == TARGET_CUSTOM;
+	const bool curve_custom = obs_data_get_int(s, S_CURVE_STYLE) == 0;
+	const bool look_custom = obs_data_get_int(s, S_LOOK_PRESET) == LOOK_CUSTOM;
+	const bool look_on = obs_data_get_int(s, S_LOOK_PRESET) != 0;
+	const bool atlas_on = obs_data_get_bool(s, S_ATLAS_ON);
+	plugin_ui_show(props, S_LINK, adv);
+	plugin_ui_show(props, S_RX, manual);
+	plugin_ui_show(props, S_RY, manual && !link);
+	plugin_ui_show(props, S_CY, adv && !link);
+	plugin_ui_show(props, S_PX, curve_custom);
+	plugin_ui_show(props, S_PY, curve_custom && !link);
+	plugin_ui_show(props, "fine", adv);
+	plugin_ui_show(props, S_LOOK_STRENGTH, look_on && !look_custom);
+	plugin_ui_show(props, "look_hand", look_custom);
+	static const char *stv_adv[] = {S_STV_BITRATE,   S_STV_SENS,    S_STV_NET, S_STV_SQUISH,
+					S_STV_RAMP_DOWN, S_STV_RAMP_UP, S_STV_DEMO};
+	for (size_t i = 0; i < sizeof(stv_adv) / sizeof(stv_adv[0]); i++)
+		plugin_ui_show(props, stv_adv[i], adv);
+	plugin_ui_show(props, S_IMPORT, adv);
+	plugin_ui_show(props, "apply_import", adv);
+	show_region_groups(props, atlas_on);
+	return (adv ? 1 : 0) | (link ? 2 : 0) | (manual ? 4 : 0) | (curve_custom ? 8 : 0) | (look_custom ? 16 : 0) |
+	       (look_on ? 32 : 0) | (atlas_on ? 64 : 0);
+}
+
 static bool cfg_modified(obs_properties_t *props, obs_property_t *p, obs_data_t *s)
 {
-	UNUSED_PARAMETER(p);
 	struct squish_filter *f = obs_properties_get_param(props);
 	if (!f)
 		return false;
-	const bool link = obs_data_get_bool(s, S_LINK);
-	const bool manual = read_target(s) == TARGET_CUSTOM;
-	obs_property_set_visible(obs_properties_get(props, S_RX), manual);
-	obs_property_set_visible(obs_properties_get(props, S_RY), manual && !link);
-	obs_property_set_visible(obs_properties_get(props, S_CY), !link);
-	obs_property_set_visible(obs_properties_get(props, S_PY), !link);
-	const bool atlas_on = obs_data_get_bool(s, S_ATLAS_ON);
-	show_region_groups(props, atlas_on);
 	char info[2048], cfg[512], key[64];
 	describe(f, s, info, sizeof(info), cfg, sizeof(cfg), key, sizeof(key));
 	wrap_title(s, cfg, sizeof(cfg));
 	obs_data_set_string(s, S_CONFIG, cfg);
-	/* Rebuild the view only when its state changes: rebuilding on every
-	 * slider tick detaches the slider being dragged. Live numbers (Exact
-	 * size) refresh on the next state change or when Copy is pressed. */
-	const int vis = (link ? 1 : 0) | (manual ? 2 : 0) | (atlas_on ? 4 : 0);
+	/* Never rebuild the panel from a slider: OBS recreates the widgets and the slider being
+	 * dragged lets go ("sticks"). The info text refreshes on the next list/checkbox change. */
+	if (p && obs_property_get_type(p) == OBS_PROPERTY_FLOAT)
+		return false;
+	const int vis = apply_visibility(props, s);
 	if (vis == f->shown_vis && strcmp(key, f->shown_key) == 0)
 		return false;
 	f->shown_vis = vis;
 	snprintf(f->shown_key, sizeof(f->shown_key), "%s", key);
 	obs_property_set_description(obs_properties_get(props, S_INFO), info);
-	set_slider_limits(f, props, s, manual);
+	set_slider_limits(f, props, s, read_target(s) == TARGET_CUSTOM);
 	return true;
 }
 
@@ -1707,6 +1790,8 @@ static bool import_clicked(obs_properties_t *props, obs_property_t *p, void *dat
 							c.look.night};
 		for (int i = 0; i < N_COLOR_SETTINGS; i++)
 			obs_data_set_double(s, color_settings[i].key, cvals[i] * 100.0);
+		obs_data_set_int(s, S_LOOK_PRESET, LOOK_CUSTOM);
+		obs_data_set_int(s, S_CURVE_STYLE, 0);
 		obs_data_set_string(s, S_IMPORT, "");
 		obs_source_update(f->context, s);
 		f->shown_key[0] = 0; /* force one refresh */
@@ -1737,33 +1822,76 @@ static obs_properties_t *fsq_properties(void *data)
 	obs_property_list_add_int(tgt, "640x360 (360p)", 360);
 	obs_property_list_add_int(tgt, T("Target.Custom"), TARGET_CUSTOM);
 	obs_property_set_modified_callback(tgt, cfg_modified);
+	obs_property_t *adv = obs_properties_add_bool(props, S_ADVANCED, T("Advanced"));
+	obs_property_set_modified_callback(adv, cfg_modified);
 
-	/* The settings most people touch. */
+	/* The settings most people touch: three controls. */
 	obs_properties_t *main = obs_properties_create();
-	obs_property_t *pr = obs_properties_add_bool(main, S_LINK, T("Link"));
+	obs_property_t *pr = obs_properties_add_float_slider(main, S_CX, T("CenterWidth"), 5.0, 95.0, 5.0);
 	obs_property_set_modified_callback(pr, cfg_modified);
-	const char *main_sliders[][2] = {{S_RX, "SqueezeWidth"},
-					 {S_RY, "SqueezeHeight"},
-					 {S_CX, "CenterWidth"},
-					 {S_CY, "CenterHeight"}};
-	const double main_ranges[][3] = {{10, 100, 0.5}, {10, 100, 0.5}, {1, 99, 0.5}, {1, 99, 0.5}};
-	for (int i = 0; i < 4; i++) {
-		pr = obs_properties_add_float_slider(main, main_sliders[i][0], T(main_sliders[i][1]), main_ranges[i][0],
-						     main_ranges[i][1], main_ranges[i][2]);
-		obs_property_set_modified_callback(pr, cfg_modified);
-	}
-	pr = obs_properties_add_float_slider(main, S_PX, T("CurveX"), 0.1, 10.0, 0.05);
+	pr = obs_properties_add_list(main, S_CURVE_STYLE, T("CurveStyle"), OBS_COMBO_TYPE_LIST, OBS_COMBO_FORMAT_INT);
+	obs_property_list_add_int(pr, T("CurveStyle.Sharp"), 1);
+	obs_property_list_add_int(pr, T("CurveStyle.Balanced"), 2);
+	obs_property_list_add_int(pr, T("CurveStyle.Smooth"), 3);
+	obs_property_list_add_int(pr, T("CurveStyle.Custom"), 0);
 	obs_property_set_modified_callback(pr, cfg_modified);
-	pr = obs_properties_add_float_slider(main, S_PY, T("CurveY"), 0.1, 10.0, 0.05);
+	pr = obs_properties_add_float_slider(main, S_PX, T("CurveX"), 0.1, 10.0, 0.1);
 	obs_property_set_modified_callback(pr, cfg_modified);
-	obs_properties_add_float_slider(main, S_CLEAN, T("Clean"), 0.0, 100.0, 1.0);
+	pr = obs_properties_add_float_slider(main, S_PY, T("CurveY"), 0.1, 10.0, 0.1);
+	obs_property_set_modified_callback(pr, cfg_modified);
+	obs_properties_add_float_slider(main, S_CLEAN, T("Clean"), 0.0, 100.0, 10.0);
 	obs_properties_add_group(props, "main", T("Main"), OBS_GROUP_NORMAL, main);
 
-	/* Rarely needed. */
+	obs_property_t *v =
+		obs_properties_add_list(props, S_VIEW, T("View"), OBS_COMBO_TYPE_LIST, OBS_COMBO_FORMAT_INT);
+	obs_property_list_add_int(v, T("View.Squished"), VIEW_SQUISHED);
+	obs_property_list_add_int(v, T("View.Unsquished"), VIEW_UNSQUISHED);
+	obs_property_list_add_int(v, T("View.Zone"), VIEW_ZONE);
+	plugin_ui_add_view_warning(props, v);
+
+	/* Viewer look: one preset and one strength; the sliders only for "By hand". */
+	obs_properties_t *look = obs_properties_create();
+	obs_properties_add_text(look, "look_info", T("LookInfo"), OBS_TEXT_INFO);
+	pr = obs_properties_add_list(look, S_LOOK_PRESET, T("LookPreset"), OBS_COMBO_TYPE_LIST, OBS_COMBO_FORMAT_INT);
+	obs_property_list_add_int(pr, T("LookPreset.Off"), 0);
+	for (int i = 0; i < N_LOOK_PRESETS; i++)
+		obs_property_list_add_int(pr, T(LOOK_PRESETS[i].label), LOOK_PRESETS[i].id);
+	obs_property_list_add_int(pr, T("LookPreset.Custom"), LOOK_CUSTOM);
+	obs_property_set_modified_callback(pr, cfg_modified);
+	pr = obs_properties_add_float_slider(look, S_LOOK_STRENGTH, T("LookStrength"), 0.0, 200.0, 10.0);
+	obs_property_float_set_suffix(pr, " %");
+	obs_property_set_modified_callback(pr, cfg_modified);
+	obs_properties_t *hand = obs_properties_create();
+	const char *look_sliders[][2] = {{S_LOOK_SHARPEN, "LookSharpen"},
+					 {S_LOOK_CLARITY, "LookClarity"},
+					 {S_LOOK_HDR, "LookHdr"},
+					 {S_LOOK_BLOOM, "LookBloom"},
+					 {S_LOOK_SHARPEN_PLUS, "LookSharpenPlus"}};
+	for (int i = 0; i < 5; i++) {
+		pr = obs_properties_add_float_slider(hand, look_sliders[i][0], T(look_sliders[i][1]), 0.0, 100.0, 5.0);
+		obs_property_set_modified_callback(pr, cfg_modified);
+	}
+	for (int i = 0; i < N_COLOR_SETTINGS; i++) {
+		pr = obs_properties_add_float_slider(hand, color_settings[i].key, T(color_settings[i].label),
+						     color_settings[i].is_signed ? -100.0 : 0.0, 100.0, 5.0);
+		obs_property_set_modified_callback(pr, cfg_modified);
+	}
+	obs_properties_add_group(look, "look_hand", T("LookHand"), OBS_GROUP_NORMAL, hand);
+	obs_properties_add_group(props, "look", T("Look"), OBS_GROUP_NORMAL, look);
+
+	/* Fine controls: only with "Show advanced settings". */
 	obs_properties_t *fine = obs_properties_create();
+	pr = obs_properties_add_bool(fine, S_LINK, T("Link"));
+	obs_property_set_modified_callback(pr, cfg_modified);
+	pr = obs_properties_add_float_slider(fine, S_RX, T("SqueezeWidth"), 10.0, 100.0, 1.0);
+	obs_property_set_modified_callback(pr, cfg_modified);
+	pr = obs_properties_add_float_slider(fine, S_RY, T("SqueezeHeight"), 10.0, 100.0, 1.0);
+	obs_property_set_modified_callback(pr, cfg_modified);
+	pr = obs_properties_add_float_slider(fine, S_CY, T("CenterHeight"), 5.0, 95.0, 5.0);
+	obs_property_set_modified_callback(pr, cfg_modified);
 	const char *fine_sliders[][2] = {{S_FX, "FocusX"}, {S_FY, "FocusY"}};
 	for (int i = 0; i < 2; i++) {
-		pr = obs_properties_add_float_slider(fine, fine_sliders[i][0], T(fine_sliders[i][1]), 1.0, 99.0, 0.5);
+		pr = obs_properties_add_float_slider(fine, fine_sliders[i][0], T(fine_sliders[i][1]), 5.0, 95.0, 5.0);
 		obs_property_set_modified_callback(pr, cfg_modified);
 	}
 	pr = obs_properties_add_list(fine, S_MAXCOMP, T("MaxCompression"), OBS_COMBO_TYPE_LIST, OBS_COMBO_FORMAT_FLOAT);
@@ -1776,30 +1904,6 @@ static obs_properties_t *fsq_properties(void *data)
 	obs_properties_add_bool(fine, S_PREFILTER, T("Prefilter"));
 	obs_properties_add_group(props, "fine", T("Fine"), OBS_GROUP_NORMAL, fine);
 
-	obs_property_t *v =
-		obs_properties_add_list(props, S_VIEW, T("View"), OBS_COMBO_TYPE_LIST, OBS_COMBO_FORMAT_INT);
-	obs_property_list_add_int(v, T("View.Squished"), VIEW_SQUISHED);
-	obs_property_list_add_int(v, T("View.Unsquished"), VIEW_UNSQUISHED);
-	obs_property_list_add_int(v, T("View.Zone"), VIEW_ZONE);
-	plugin_ui_add_view_warning(props, v);
-
-	obs_properties_t *look = obs_properties_create();
-	obs_properties_add_text(look, "look_info", T("LookInfo"), OBS_TEXT_INFO);
-	const char *look_sliders[][2] = {{S_LOOK_SHARPEN, "LookSharpen"},
-					 {S_LOOK_CLARITY, "LookClarity"},
-					 {S_LOOK_HDR, "LookHdr"},
-					 {S_LOOK_BLOOM, "LookBloom"},
-					 {S_LOOK_SHARPEN_PLUS, "LookSharpenPlus"}};
-	for (int i = 0; i < 5; i++) {
-		pr = obs_properties_add_float_slider(look, look_sliders[i][0], T(look_sliders[i][1]), 0.0, 100.0, 1.0);
-		obs_property_set_modified_callback(pr, cfg_modified);
-	}
-	for (int i = 0; i < N_COLOR_SETTINGS; i++) {
-		pr = obs_properties_add_float_slider(look, color_settings[i].key, T(color_settings[i].label),
-						     color_settings[i].is_signed ? -100.0 : 0.0, 100.0, 1.0);
-		obs_property_set_modified_callback(pr, cfg_modified);
-	}
-	obs_properties_add_group(props, "look", T("Look"), OBS_GROUP_NORMAL, look);
 	/* Keep sharp (HUD areas): rectangles of the source kept at about 1:1 in a side strip.
 	 * One master switch, then one switch-group per region; they stay hidden until the master is on. */
 	obs_properties_t *atlas = obs_properties_create();
@@ -1898,7 +2002,7 @@ static obs_properties_t *fsq_properties(void *data)
 		}
 	}
 	obs_data_t *cur = obs_source_get_settings(f->context);
-	show_region_groups(props, obs_data_get_bool(cur, S_ATLAS_ON));
+	apply_visibility(props, cur);
 	plugin_ui_show(props, "view_warning", obs_data_get_int(cur, S_VIEW) != VIEW_SQUISHED);
 	obs_data_release(cur);
 	return props;
@@ -1916,6 +2020,10 @@ static void fsq_defaults(obs_data_t *s)
 	obs_data_set_default_double(s, S_FY, 50.0);
 	obs_data_set_default_double(s, S_PX, 0.5);
 	obs_data_set_default_double(s, S_PY, 0.5);
+	obs_data_set_default_int(s, S_CURVE_STYLE, 1);
+	obs_data_set_default_int(s, S_LOOK_PRESET, 0);
+	obs_data_set_default_double(s, S_LOOK_STRENGTH, 100.0);
+	obs_data_set_default_bool(s, S_ADVANCED, false);
 	obs_data_set_default_bool(s, S_PREFILTER, true);
 	obs_data_set_default_double(s, S_CLEAN, 50.0);
 	obs_data_set_default_int(s, S_VIEW, VIEW_SQUISHED);
