@@ -63,10 +63,11 @@ TOL = 2                         # pixels of slack on the slot edges
 
 
 def settings():
-    parts = [f"atlas_count={len(REGIONS)}"]
+    """Settings as the panel stores them: master switch, then per region on / left / top / width / height (%)."""
+    parts = ["atlas_on=true", "atlas_blank=true"]
     for i, (_, _, (x0, y0, x1, y1), scale, _) in enumerate(REGIONS):
-        parts += [f"atlas_{i}_x0={x0:.4f}", f"atlas_{i}_y0={y0:.4f}", f"atlas_{i}_x1={x1:.4f}",
-                  f"atlas_{i}_y1={y1:.4f}", f"atlas_{i}_scale={scale:.1f}"]
+        parts += [f"atlas_{i}_on=true", f"atlas_{i}_x={x0:.4f}", f"atlas_{i}_y={y0:.4f}", f"atlas_{i}_w={x1 - x0:.4f}",
+                  f"atlas_{i}_h={y1 - y0:.4f}", f"atlas_{i}_scale={scale:.1f}"]
     return " ".join(parts)
 
 
