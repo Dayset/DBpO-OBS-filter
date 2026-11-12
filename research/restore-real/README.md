@@ -140,3 +140,22 @@ Full frame with the center masked back to bilinear (`center_mask6000_results.jso
 | ternary 6000 + unsharp 0.25 | 27.73 | 27.73 | 27.87 |
 
 Reading: the model does cost center PSNR, by about 0.2–0.3 dB, with SSIM unchanged. Unsharp costs far more in the center, about 1.7–2 dB, and pushes center edges past the original (1.14–1.15). Masking the center back to bilinear recovers the center at almost no full-frame cost for the float and ternary models (+0.01 dB). With unsharp it recovers about 0.12–0.14 dB. The center is only about 9% of the frame, so the full-frame metric hides the center loss.
+
+## Final comparison at 1500 kbit/s (matched starvation, the 6000 kbit/s channel at 1080p), four windows
+
+Baseline = plain 960×540 stream at 1500 kbit/s. `final_compare.py`; raw in `final1500_report.json`. Float model `f1500.pt` trained on the 1500 kbit/s squish input (loss 0.096); ternary `restorer.pt`. Centre = the 1:1 box of Foveated Squish; centre-masked arms take the centre from bilinear.
+
+| Arm | PSNR dB | Δ vs plain | SSIM | Centre PSNR dB | Δ centre | Centre SSIM | Centre edge |
+|---|---|---|---|---|---|---|---|
+| plain 1500 (baseline) | 21.68 | — | 0.547 | 20.29 | — | 0.420 | 0.38 |
+| squish, bilinear | 23.27 | +1.59 | 0.643 | 23.32 | +3.03 | 0.641 | 0.65 |
+| ternary | 23.42 | +1.74 | 0.658 | 23.33 | +3.05 | 0.654 | 0.73 |
+| ternary, centre masked | 23.41 | +1.74 | 0.656 | 23.32 | +3.03 | 0.641 | 0.65 |
+| ternary + unsharp 0.25 | 23.29 | +1.61 | 0.656 | 23.01 | +2.73 | 0.651 | 0.81 |
+| ternary + unsharp 0.25, centre masked | 23.31 | +1.64 | 0.655 | 23.32 | +3.03 | 0.641 | 0.65 |
+| float | 23.45 | +1.78 | 0.662 | 23.36 | +3.08 | 0.657 | 0.73 |
+| float, centre masked | 23.45 | +1.77 | 0.661 | 23.32 | +3.03 | 0.641 | 0.65 |
+| float + unsharp 0.25 | 23.30 | +1.63 | 0.661 | 23.04 | +2.75 | 0.654 | 0.81 |
+| float + unsharp 0.25, centre masked | 23.33 | +1.66 | 0.660 | 23.32 | +3.03 | 0.641 | 0.65 |
+
+Reading: every squish arm beats plain 1500 on full-frame PSNR and SSIM and on centre PSNR. At this budget the float model is the best arm (+1.78 dB). Unsharp 0.25 costs about 0.15 dB full-frame and 0.3–0.4 dB in the centre, and raises centre edge sharpness (0.73 → 0.81). Unlike at 6000 kbit/s, the model does not lower centre PSNR here (+0.03 to +0.04 dB over bilinear), so centre masking costs almost nothing (about 0.005 dB full frame). These are measured PSNR/SSIM; perceived quality is not measured.

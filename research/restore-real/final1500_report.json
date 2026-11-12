@@ -1,0 +1,104 @@
+{
+ "rows": [
+  {
+   "arm": "plain_1500k",
+   "psnr": 21.6755,
+   "ssim": 0.5474,
+   "c_psnr": 20.2877,
+   "c_ssim": 0.4201,
+   "c_edge": 0.3782,
+   "d_psnr_vs_plain": 0.0,
+   "d_cpsnr_vs_plain": 0.0
+  },
+  {
+   "arm": "sq1500_bilinear",
+   "psnr": 23.2682,
+   "ssim": 0.6431,
+   "c_psnr": 23.317,
+   "c_ssim": 0.6411,
+   "c_edge": 0.6465,
+   "d_psnr_vs_plain": 1.593,
+   "d_cpsnr_vs_plain": 3.029
+  },
+  {
+   "arm": "ternary",
+   "psnr": 23.4151,
+   "ssim": 0.6575,
+   "c_psnr": 23.333,
+   "c_ssim": 0.6543,
+   "c_edge": 0.7265,
+   "d_psnr_vs_plain": 1.74,
+   "d_cpsnr_vs_plain": 3.045
+  },
+  {
+   "arm": "ternary_centermasked",
+   "psnr": 23.4136,
+   "ssim": 0.6563,
+   "c_psnr": 23.317,
+   "c_ssim": 0.6411,
+   "c_edge": 0.6465,
+   "d_psnr_vs_plain": 1.738,
+   "d_cpsnr_vs_plain": 3.029
+  },
+  {
+   "arm": "ternary_unsharp0.25",
+   "psnr": 23.2858,
+   "ssim": 0.6564,
+   "c_psnr": 23.0137,
+   "c_ssim": 0.6514,
+   "c_edge": 0.8093,
+   "d_psnr_vs_plain": 1.61,
+   "d_cpsnr_vs_plain": 2.726
+  },
+  {
+   "arm": "ternary_unsharp0.25_centermasked",
+   "psnr": 23.3136,
+   "ssim": 0.6554,
+   "c_psnr": 23.317,
+   "c_ssim": 0.6411,
+   "c_edge": 0.6465,
+   "d_psnr_vs_plain": 1.638,
+   "d_cpsnr_vs_plain": 3.029
+  },
+  {
+   "arm": "float",
+   "psnr": 23.4527,
+   "ssim": 0.6623,
+   "c_psnr": 23.3627,
+   "c_ssim": 0.6569,
+   "c_edge": 0.727,
+   "d_psnr_vs_plain": 1.777,
+   "d_cpsnr_vs_plain": 3.075
+  },
+  {
+   "arm": "float_centermasked",
+   "psnr": 23.4484,
+   "ssim": 0.6609,
+   "c_psnr": 23.317,
+   "c_ssim": 0.6411,
+   "c_edge": 0.6465,
+   "d_psnr_vs_plain": 1.773,
+   "d_cpsnr_vs_plain": 3.029
+  },
+  {
+   "arm": "float_unsharp0.25",
+   "psnr": 23.3043,
+   "ssim": 0.6609,
+   "c_psnr": 23.0362,
+   "c_ssim": 0.6542,
+   "c_edge": 0.8113,
+   "d_psnr_vs_plain": 1.629,
+   "d_cpsnr_vs_plain": 2.748
+  },
+  {
+   "arm": "float_unsharp0.25_centermasked",
+   "psnr": 23.3301,
+   "ssim": 0.6598,
+   "c_psnr": 23.317,
+   "c_ssim": 0.6411,
+   "c_edge": 0.6465,
+   "d_psnr_vs_plain": 1.655,
+   "d_cpsnr_vs_plain": 3.029
+  }
+ ]
+}

@@ -33,8 +33,10 @@ def lr_at(step):
 
 def train(kind, work, steps):
     torch.manual_seed(0); torch.set_num_threads(2)
-    ref = rr.mm(os.environ["REF_RGB"], (N, rr.H, rr.W, 3)); unsq = rr.mm(f"{work}/unsq6000.u8", (N, rr.H, rr.W, 3))
-    name = {"ternary": "t6000.pt", "float": "f6000.pt"}[kind]
+    ref = rr.mm(os.environ["REF_RGB"], (N, rr.H, rr.W, 3))
+    unsq = rr.mm(f"{work}/{os.environ.get('T_INPUT', 'unsq6000.u8')}", (N, rr.H, rr.W, 3))
+    tag = os.environ.get("T_TAG", "6000")
+    name = {"ternary": f"t{tag}.pt", "float": f"f{tag}.pt"}[kind]
     ck = f"{work}/{name}"
     net = make(kind); params = sum(p.numel() for p in net.parameters())
     opt = torch.optim.Adam(net.parameters(), lr=2e-3)
