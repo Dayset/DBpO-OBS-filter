@@ -77,11 +77,12 @@ def save(path, model, opt, sched, step, rng):
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--level", default="540", choices=list(SCALE))
-    ap.add_argument("--steps", type=int, default=2000)
+    ap.add_argument("--steps", type=int, default=2000, help="total schedule length (cosine decay)")
+    ap.add_argument("--until", type=int, help="stop this invocation at this step (default: --steps)")
     ap.add_argument("--bs", type=int, default=12)
     ap.add_argument("--crop", type=int, default=40)
     ap.add_argument("--lr", type=float, default=2e-3)
-    ap.add_argument("--every", type=int, default=250)
+    ap.add_argument("--every", type=int, default=100)
     ap.add_argument("--export", help="write the RSTR v1 file here when training finishes")
     a = ap.parse_args()
     torch.set_num_threads(2)
@@ -98,15 +99,19 @@ def main():
         model.load_state_dict(ck["model"]); opt.load_state_dict(ck["opt"]); sched.load_state_dict(ck["sched"])
         rng.bit_generator.state, step = ck["rng"], ck["step"]
         print(f"resumed from step {step}", flush=True)
-    while step < a.steps:
+    until = a.until or a.steps
+    log = open(os.path.join(OUT, f"loss_L{a.level}.csv"), "a")
+    while step < until:
         x, y = batch(lo, gt, rng, k, a.bs, a.crop)
         out = model(x)
         loss = F.l1_loss(out, y) + 2.0 * F.l1_loss(sobel(out), sobel(y))
         opt.zero_grad(); loss.backward(); opt.step(); sched.step(); step += 1
-        if step % 50 == 0:
-            print(f"step {step} loss {loss.item():.4f}", flush=True)
-        if step % a.every == 0 or step == a.steps:
+        log.write(f"{step},{loss.item():.6f}\n")
+        if step % a.every == 0 or step == until:
+            log.flush()
             save(ckpt, model, opt, sched, step, rng)
+            print(f"step {step} loss {loss.item():.4f}", flush=True)
+    log.close()
     print(f"params {sum(p.numel() for p in model.parameters())}", flush=True)
     if a.export:
         sd = {f"{n.split('.')[0]}.{'w' if n.endswith('weight') else 'b'}": p.detach().numpy()
