@@ -117,3 +117,26 @@ Training: `train6000.py` (10k, 1500 steps each, target = reference). Eval: `eval
 | float 6000 + unsharp 0.25 | 27.80 | 0.860 | 0.90 |
 
 Reading: training on the matching 6000 kbit/s input helps. The ternary model gains about 0.4 dB over the 1500-trained one, and the float model is 0.13 dB above the ternary at the same size. Both trail plain 6000 on PSNR by 0.3–0.5 dB but have higher SSIM. Unsharp 0.25 again costs PSNR for sharper outer edges.
+
+## Center box vs full frame, 6000 kbit/s (four windows, mean)
+
+The center box is the sharp 1:1 region of Foveated Squish (30% × 30% of the frame, about 9% of its area). `center_metrics.py` and `center_mask_eval.py`; raw in `center6000_results.json` and `center_mask6000_results.json`.
+
+| Arm | Center PSNR dB | Center SSIM | Center edge sharpness |
+|---|---|---|---|
+| squish 6000, bilinear (exact 1:1 center) | 30.16 | 0.910 | 0.92 |
+| float 6000 | 29.96 | 0.912 | 1.00 |
+| ternary 6000 | 29.84 | 0.911 | 1.01 |
+| float 6000 + unsharp 0.25 | 28.29 | 0.897 | 1.14 |
+| ternary 6000 + unsharp 0.25 | 28.11 | 0.895 | 1.15 |
+
+Full frame with the center masked back to bilinear (`center_mask6000_results.json`):
+
+| Arm | Full PSNR dB | unmasked | masked |
+|---|---|---|---|
+| float 6000 | 28.18 | 28.18 | 28.19 |
+| float 6000 + unsharp 0.25 | 27.80 | 27.80 | 27.92 |
+| ternary 6000 | 28.05 | 28.05 | 28.07 |
+| ternary 6000 + unsharp 0.25 | 27.73 | 27.73 | 27.87 |
+
+Reading: the model does cost center PSNR, by about 0.2–0.3 dB, with SSIM unchanged. Unsharp costs far more in the center, about 1.7–2 dB, and pushes center edges past the original (1.14–1.15). Masking the center back to bilinear recovers the center at almost no full-frame cost for the float and ternary models (+0.01 dB). With unsharp it recovers about 0.12–0.14 dB. The center is only about 9% of the frame, so the full-frame metric hides the center loss.

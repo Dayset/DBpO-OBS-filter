@@ -1,0 +1,50 @@
+{
+ "center_box": [
+  189,
+  351,
+  336,
+  624
+ ],
+ "arms": {
+  "plain_6000k": {
+   "psnr": 26.8552,
+   "ssim": 0.8223,
+   "edge": 0.845
+  },
+  "sq6000_bilinear": {
+   "psnr": 30.1567,
+   "ssim": 0.9104,
+   "edge": 0.924
+  },
+  "float6000": {
+   "psnr": 29.9605,
+   "ssim": 0.9115,
+   "edge": 1.0005
+  },
+  "float6000_unsharp0.25": {
+   "psnr": 28.291,
+   "ssim": 0.8974,
+   "edge": 1.1398
+  },
+  "ternary6000": {
+   "psnr": 29.836,
+   "ssim": 0.9105,
+   "edge": 1.0107
+  },
+  "ternary6000_unsharp0.25": {
+   "psnr": 28.1062,
+   "ssim": 0.8953,
+   "edge": 1.1498
+  },
+  "ternary1500": {
+   "psnr": 29.0415,
+   "ssim": 0.8953,
+   "edge": 1.0102
+  },
+  "ternary1500_unsharp0.25": {
+   "psnr": 27.6412,
+   "ssim": 0.8838,
+   "edge": 1.1427
+  }
+ }
+}
