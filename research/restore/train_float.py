@@ -8,6 +8,7 @@ out/ckpt_L{level}.pt every --every steps; rerunning the same command resumes fro
 Loss as in the prototype: L1 + 2 x L1 on Sobel gradient magnitude.
 """
 import argparse
+import json
 import os
 import sys
 
@@ -78,6 +79,34 @@ def export_dict(model, fmt):
     return sd
 
 
+class Frames:
+    """Lazy read-only view over .npy shards (memmap), so memory stays flat whatever the dataset size.
+    frames[i] is one (H, W, 3) uint8 frame; len() and shape work as for one array."""
+
+    def __init__(self, paths):
+        self.arrs = [np.load(p, mmap_mode="r") for p in paths]
+        self.cum = np.cumsum([0] + [len(a) for a in self.arrs])
+        self.shape = (int(self.cum[-1]),) + self.arrs[0].shape[1:]
+
+    def __len__(self):
+        return self.shape[0]
+
+    def __getitem__(self, i):
+        k = np.searchsorted(self.cum, i, side="right") - 1
+        return self.arrs[k][i - self.cum[k]]
+
+
+def load_shards(manifest, level):
+    """Frames for the shards of one level in a restore_data.py manifest (paths relative to its folder)."""
+    base = os.path.dirname(manifest)
+    shards = [x for x in json.load(open(manifest))["shards"] if x["level"] == level]
+    if not shards:
+        raise SystemExit(f"no shards for level {level} in {manifest}")
+    lo = Frames([os.path.join(base, x["lo"]) for x in shards])
+    gt = Frames([os.path.join(base, x["gt"]) for x in shards])
+    return lo, gt
+
+
 def load_pairs(level):
     lo = np.concatenate([np.load(f"{OUT}/pairs/clip{c}_L{level}.npy")[:T] for c in TRAIN_CLIPS])
     gt = np.concatenate([np.load(f"{OUT}/gt/clip{c}.npy")[:T] for c in TRAIN_CLIPS])
@@ -89,8 +118,8 @@ def batch(lo, gt, rng, k, bs, crop):
     xs, ys = [], []
     for i in rng.integers(0, len(lo), bs):
         y0, x0 = rng.integers(0, lo.shape[1] - crop), rng.integers(0, lo.shape[2] - crop)
-        xs.append(lo[i, y0:y0 + crop, x0:x0 + crop])
-        ys.append(gt[i, y0 * k:(y0 + crop) * k, x0 * k:(x0 + crop) * k])
+        xs.append(lo[i][y0:y0 + crop, x0:x0 + crop])
+        ys.append(gt[i][y0 * k:(y0 + crop) * k, x0 * k:(x0 + crop) * k])
     to_t = lambda a: torch.from_numpy(np.stack(a).astype(np.float32) / 255).permute(0, 3, 1, 2)
     return to_t(xs), to_t(ys)
 
@@ -112,11 +141,12 @@ def main():
     ap.add_argument("--lr", type=float, default=2e-3)
     ap.add_argument("--every", type=int, default=100)
     ap.add_argument("--format", default="float", choices=["float", "ternary"])
+    ap.add_argument("--data", help="restore_data.py manifest to train on instead of the synthetic pairs")
     ap.add_argument("--export", help="write the RSTR v1 file here when training finishes")
     a = ap.parse_args()
     torch.set_num_threads(2)
     k = SCALE[a.level]
-    lo, gt = load_pairs(a.level)
+    lo, gt = load_shards(a.data, a.level) if a.data else load_pairs(a.level)
     tag = "" if a.format == "float" else "_" + a.format
     ckpt = os.path.join(OUT, f"ckpt_L{a.level}{tag}.pt")
     torch.manual_seed(0)
