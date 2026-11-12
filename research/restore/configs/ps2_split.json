@@ -1,0 +1,7 @@
+{"source": "research/restore/out/ps2/ref.u8",
+ "frames": 600, "size": [1080, 1920],
+ "clip_sha256_16": "f52627aed49a9e7f",
+ "hashes_16": {"calm1": "1b4f680c0d7afd48", "spin": "5382301be201755e", "calm2": "ba3d6eea9135920d", "all": "ff6290c38509f1e6"},
+ "train": [[0, 300]],
+ "test": [[300, 420], [420, 600]],
+ "note": "train = calm1 (0-179) + first half of the spin (180-299); test = second half of the spin (300-419) + calm2 (420-599). No test frame is used for training."}
