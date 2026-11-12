@@ -1,0 +1,298 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Restorer WebGL2 bench</title>
+<style>
+  body { font: 14px system-ui, sans-serif; margin: 16px; color: #111; background: #fff; }
+  button { font: inherit; padding: 8px 14px; }
+  pre { background: #f4f4f4; padding: 8px; white-space: pre-wrap; word-break: break-all; }
+</style>
+</head>
+<body>
+<h3>Edge restorer, WebGL2 forward pass (issue #26, WP 26.1)</h3>
+<p>Self-test: runs the golden case from <code>golden/</code> (generated from <code>research/restore/restore_math.py</code>) and checks it against <code>restore_golden.json</code> within 1/255.</p>
+<button id="go">Run golden self-test</button>
+<pre id="log"></pre>
+<script>
+"use strict";
+// Layout: conv activations are stacked layers of H rows (layer l = channels 4l..4l+3).
+// Conv weights live in a texture: column ig*9+t holds the 4 input weights of tap t for one output row;
+// column nIG*9 holds the bias in .r. Row = oc.
+// Final pass: pixel shuffle (k) + bicubic base (cv2 INTER_CUBIC, a=-0.75, replicate border) + clip.
+
+const VS = `#version 300 es
+void main() {
+  float x = float((gl_VertexID & 1) * 4 - 1);
+  float y = float((gl_VertexID >> 1) * 4 - 1);
+  gl_Position = vec4(x, y, 0.0, 1.0);
+}`;
+
+const CONV_FS = `#version 300 es
+precision highp float; precision highp int;
+uniform sampler2D uIn; uniform sampler2D uW;
+uniform int uH; uniform int uNIG; uniform int uLayer; uniform int uRelu;
+out vec4 o;
+void main() {
+  int x = int(gl_FragCoord.x);
+  int y = int(gl_FragCoord.y) - uLayer * uH;
+  int W = textureSize(uIn, 0).x;
+  int row = uLayer * 4;
+  int bcol = uNIG * 9;
+  vec4 acc = vec4(texelFetch(uW, ivec2(bcol, row), 0).r,
+                  texelFetch(uW, ivec2(bcol, row + 1), 0).r,
+                  texelFetch(uW, ivec2(bcol, row + 2), 0).r,
+                  texelFetch(uW, ivec2(bcol, row + 3), 0).r);
+  for (int ig = 0; ig < 8; ig++) {
+    if (ig >= uNIG) break;
+    for (int dy = -1; dy <= 1; dy++) {
+      for (int dx = -1; dx <= 1; dx++) {
+        int xx = x + dx, yy = y + dy;
+        if (xx < 0 || xx >= W || yy < 0 || yy >= uH) continue;
+        vec4 v = texelFetch(uIn, ivec2(xx, yy + ig * uH), 0);
+        int col = ig * 9 + (dy + 1) * 3 + (dx + 1);
+        acc.x += dot(texelFetch(uW, ivec2(col, row), 0), v);
+        acc.y += dot(texelFetch(uW, ivec2(col, row + 1), 0), v);
+        acc.z += dot(texelFetch(uW, ivec2(col, row + 2), 0), v);
+        acc.w += dot(texelFetch(uW, ivec2(col, row + 3), 0), v);
+      }
+    }
+  }
+  if (uRelu != 0) acc = max(acc, 0.0);
+  o = acc;
+}`;
+
+const FINAL_FS = `#version 300 es
+precision highp float; precision highp int;
+uniform sampler2D uC; uniform sampler2D uImg; uniform int uK;
+out vec4 o;
+float cubic(float x) {
+  x = abs(x);
+  const float a = -0.75;
+  if (x <= 1.0) return ((a + 2.0) * x - (a + 3.0)) * x * x + 1.0;
+  if (x < 2.0) return (((x - 5.0) * x + 8.0) * x - 4.0) * a;
+  return 0.0;
+}
+void main() {
+  ivec2 P = ivec2(gl_FragCoord.xy);
+  ivec2 isz = textureSize(uImg, 0);
+  int H = isz.y, W = isz.x;
+  int h = P.y / uK, w = P.x / uK;
+  int comp = (P.y - h * uK) * uK + (P.x - w * uK);
+  vec3 res;
+  for (int c = 0; c < 3; c++) res[c] = texelFetch(uC, ivec2(w, c * H + h), 0)[comp];
+  vec2 fs = (vec2(P) + 0.5) / float(uK) - 0.5;
+  ivec2 i0 = ivec2(floor(fs));
+  vec2 t = fs - vec2(i0);
+  vec3 base = vec3(0.0);
+  for (int dy = -1; dy <= 2; dy++) {
+    float wy = cubic(float(dy) - t.y);
+    for (int dx = -1; dx <= 2; dx++) {
+      float wx = cubic(float(dx) - t.x);
+      ivec2 q = clamp(i0 + ivec2(dx, dy), ivec2(0), ivec2(W - 1, H - 1));
+      base += wy * wx * texelFetch(uImg, q, 0).rgb;
+    }
+  }
+  o = vec4(clamp(res + base, 0.0, 1.0), 1.0);
+}`;
+
+// Unsharp mask: out + amt*(out - gauss(out, sigma 1.5)), 7x7 kernel, replicate border. Not part of the weights.
+const SHARP_FS = `#version 300 es
+precision highp float; precision highp int;
+uniform sampler2D uIn; uniform float uAmt;
+out vec4 o;
+void main() {
+  ivec2 P = ivec2(gl_FragCoord.xy);
+  ivec2 sz = textureSize(uIn, 0);
+  vec3 c = texelFetch(uIn, P, 0).rgb;
+  vec3 blur = vec3(0.0); float ws = 0.0;
+  for (int dy = -3; dy <= 3; dy++) {
+    for (int dx = -3; dx <= 3; dx++) {
+      float g = exp(-float(dx * dx + dy * dy) / (2.0 * 1.5 * 1.5));
+      ivec2 q = clamp(P + ivec2(dx, dy), ivec2(0), sz - 1);
+      blur += g * texelFetch(uIn, q, 0).rgb; ws += g;
+    }
+  }
+  o = vec4(c + uAmt * (c - blur / ws), 1.0);
+}`;
+
+// ---- RSTR v1 reader (SPEC §4); little-endian host assumed for f32 ----
+function parseRSTR(buf) {
+  const dv = new DataView(buf);
+  const dec = new TextDecoder();
+  if (dec.decode(new Uint8Array(buf, 0, 4)) !== "RSTR") throw new Error("bad magic");
+  const hlen = dv.getUint32(8, true);
+  const header = JSON.parse(dec.decode(new Uint8Array(buf, 12, hlen)));
+  const base = 12 + hlen;
+  const t = {};
+  for (const e of header.tensors) {
+    const off = base + e.offset, n = e.shape.reduce((a, b) => a * b, 1);
+    const data = e.dtype === "f32"
+      ? new Float32Array(buf.slice(off, off + e.nbytes))
+      : Float32Array.from(new Int8Array(buf, off, n), (v) => v * e.scale);
+    t[e.name] = { shape: e.shape, data };
+  }
+  return t;
+}
+
+function compile(gl, type, src) {
+  const s = gl.createShader(type);
+  gl.shaderSource(s, src); gl.compileShader(s);
+  if (!gl.getShaderParameter(s, gl.COMPILE_STATUS)) throw new Error(gl.getShaderInfoLog(s));
+  return s;
+}
+
+function program(gl, fs) {
+  const p = gl.createProgram();
+  gl.attachShader(p, compile(gl, gl.VERTEX_SHADER, VS));
+  gl.attachShader(p, compile(gl, gl.FRAGMENT_SHADER, fs));
+  gl.linkProgram(p);
+  if (!gl.getProgramParameter(p, gl.LINK_STATUS)) throw new Error(gl.getProgramInfoLog(p));
+  const u = {};
+  const n = gl.getProgramParameter(p, gl.ACTIVE_UNIFORMS);
+  for (let i = 0; i < n; i++) { const info = gl.getActiveUniform(p, i); u[info.name] = gl.getUniformLocation(p, info.name); }
+  return { p, u };
+}
+
+function makeTex(gl, w, h, data) {
+  const tex = gl.createTexture();
+  gl.bindTexture(gl.TEXTURE_2D, tex);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+  gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA32F, w, h, 0, gl.RGBA, gl.FLOAT, data || null);
+  return { tex, w, h };
+}
+
+// Pack a conv {w: (Cout,Cin,3,3), b} into the weight texture described above.
+function convTex(gl, c) {
+  const [cout, cin] = c.w.shape;
+  const nIG = Math.ceil(cin / 4), nOG = Math.ceil(cout / 4);
+  const W = nIG * 9 + 1, H = nOG * 4;
+  const d = new Float32Array(W * H * 4);
+  for (let oc = 0; oc < cout; oc++) {
+    for (let ic = 0; ic < cin; ic++) for (let t = 0; t < 9; t++)
+      d[((oc * W) + (ic >> 2) * 9 + t) * 4 + (ic & 3)] = c.w.data[(oc * cin + ic) * 9 + t];
+    d[(oc * W + nIG * 9) * 4] = c.b.data[oc];
+  }
+  return { ...makeTex(gl, W, H, d), nIG, nOG };
+}
+
+function setup(canvas, net) {
+  const gl = canvas.getContext("webgl2");
+  if (!gl) throw new Error("WebGL2 not available");
+  if (!gl.getExtension("EXT_color_buffer_float")) throw new Error("EXT_color_buffer_float not available");
+  const vao = gl.createVertexArray();
+  const fbo = gl.createFramebuffer();
+  const R = {
+    gl, vao, fbo,
+    conv: program(gl, CONV_FS), final: program(gl, FINAL_FS), sharp: program(gl, SHARP_FS),
+    convs: [1, 2, 3, 4].map((k) => ({ ...convTex(gl, { w: net[`conv${k}.w`], b: net[`conv${k}.b`] }), relu: k < 4 })),
+  };
+  return R;
+}
+
+function runPass(R, prog, dst, layers, layerH, setUniforms) {
+  const { gl } = R;
+  gl.bindFramebuffer(gl.FRAMEBUFFER, R.fbo);
+  gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, dst.tex, 0);
+  if (gl.checkFramebufferStatus(gl.FRAMEBUFFER) !== gl.FRAMEBUFFER_COMPLETE) throw new Error("framebuffer incomplete");
+  gl.useProgram(prog.p);
+  gl.bindVertexArray(R.vao);
+  for (let l = 0; l < layers; l++) {
+    gl.viewport(0, l * layerH, dst.w, layerH);
+    setUniforms(l);
+    gl.drawArrays(gl.TRIANGLES, 0, 3);
+  }
+}
+
+function bindTex(gl, unit, tex, loc) {
+  gl.activeTexture(gl.TEXTURE0 + unit);
+  gl.bindTexture(gl.TEXTURE_2D, tex.tex);
+  gl.uniform1i(loc, unit);
+}
+
+// img: Float32Array H·W·3 in [0,1]. Returns Float32Array (H·k)·(W·k)·3.
+function forward(R, img, W, H, k, amt = 0) {
+  const { gl } = R;
+  const packed = new Float32Array(W * H * 4);
+  for (let i = 0; i < W * H; i++) { packed[i * 4] = img[i * 3]; packed[i * 4 + 1] = img[i * 3 + 1]; packed[i * 4 + 2] = img[i * 3 + 2]; }
+  const tImg = makeTex(gl, W, H, packed);
+
+  let src = tImg;
+  for (const c of R.convs) {
+    const dst = makeTex(gl, W, c.nOG * H, null);
+    runPass(R, R.conv, dst, c.nOG, H, (l) => {
+      bindTex(gl, 0, src, R.conv.u.uIn);
+      bindTex(gl, 1, c, R.conv.u.uW);
+      gl.uniform1i(R.conv.u.uH, H);
+      gl.uniform1i(R.conv.u.uNIG, c.nIG);
+      gl.uniform1i(R.conv.u.uLayer, l);
+      gl.uniform1i(R.conv.u.uRelu, c.relu ? 1 : 0);
+    });
+    src = dst;
+  }
+
+  const tOut = makeTex(gl, W * k, H * k, null);
+  runPass(R, R.final, tOut, 1, H * k, () => {
+    bindTex(gl, 0, src, R.final.u.uC);
+    bindTex(gl, 1, tImg, R.final.u.uImg);
+    gl.uniform1i(R.final.u.uK, k);
+  });
+
+  let res = tOut;
+  if (amt > 0) {
+    res = makeTex(gl, W * k, H * k, null);
+    runPass(R, R.sharp, res, 1, H * k, () => {
+      bindTex(gl, 0, tOut, R.sharp.u.uIn);
+      gl.uniform1f(R.sharp.u.uAmt, amt);
+    });
+  }
+
+  const rgba = new Float32Array(W * k * H * k * 4);
+  gl.bindFramebuffer(gl.FRAMEBUFFER, R.fbo);
+  gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, res.tex, 0);
+  gl.readPixels(0, 0, W * k, H * k, gl.RGBA, gl.FLOAT, rgba);
+  const out = new Float32Array(W * k * H * k * 3);
+  for (let i = 0; i < W * k * H * k; i++) { out[i * 3] = rgba[i * 4]; out[i * 3 + 1] = rgba[i * 4 + 1]; out[i * 3 + 2] = rgba[i * 4 + 2]; }
+  return out;
+}
+
+// Golden check: 160×90 input, k=2, unsharp off. Samples are keyed "y,x,c" in restore_golden.json.
+function checkGolden(R, img, ref) {
+  const W = ref.input_shape[1], H = ref.input_shape[0], k = ref.output_shape[0] / H;
+  const out = forward(R, img, W, H, k, 0);
+  let maxd = 0;
+  for (const [key, v] of Object.entries(ref.samples)) {
+    const [y, x, c] = key.split(",").map(Number);
+    maxd = Math.max(maxd, Math.abs(out[(y * ref.output_shape[1] + x) * 3 + c] - v));
+  }
+  return { maxAbsDiff: maxd, tolerance: 1 / 255, pass: maxd <= 1 / 255 };
+}
+
+window.RestorerGL = { parseRSTR, setup, forward, checkGolden };
+
+async function selfTest() {
+  const log = document.getElementById("log");
+  log.textContent = "";
+  const say = (s) => { log.textContent += s + "\n"; };
+  try {
+    const [wbuf, ibuf, ref] = await Promise.all([
+      fetch("golden/weights_w20_s2.rstr").then((r) => r.arrayBuffer()),
+      fetch("golden/input_160x90.f32").then((r) => r.arrayBuffer()),
+      fetch("golden/restore_golden.json").then((r) => r.json()),
+    ]);
+    const R = setup(document.createElement("canvas"), parseRSTR(wbuf));
+    const res = checkGolden(R, new Float32Array(ibuf), ref);
+    say(`max |diff| vs restore_golden.json samples: ${res.maxAbsDiff.toExponential(3)} (tolerance 1/255 = ${res.tolerance.toFixed(5)})`);
+    say(res.pass ? "PASS" : "FAIL");
+  } catch (e) {
+    say("ERROR: " + e.message);
+  }
+}
+document.getElementById("go").addEventListener("click", selfTest);
+</script>
+</body>
+</html>
