@@ -86,7 +86,22 @@ def score(pred255, gt255):
                 edge_sharpness=float(gp[edge].mean() / gg[edge].mean()))
 
 
-def eval_cell(kbps, level, weights=None, tag=""):
+def restore_fast(img, t, s):
+    """restore_math.restore with the convolutions in torch (same weights, same cv2 base, same pixel shuffle).
+    Used for the 50k / 200k sizes, where the numpy reference is too slow for the test range (issue #25)."""
+    import torch
+    import torch.nn.functional as F
+    import restore_math as rm
+    h, w = img.shape[:2]
+    y = torch.from_numpy(img.transpose(2, 0, 1).astype(np.float32))[None]
+    for k in (1, 2, 3):
+        y = F.relu(F.conv2d(y, torch.from_numpy(t[f"conv{k}.w"]), torch.from_numpy(t[f"conv{k}.b"]), padding=1))
+    y = F.conv2d(y, torch.from_numpy(t["conv4.w"]), torch.from_numpy(t["conv4.b"]), padding=1)[0].numpy()
+    base = cv2.resize(img, (w * s, h * s), interpolation=cv2.INTER_CUBIC).transpose(2, 0, 1)
+    return np.clip(rm.pixel_shuffle(y, s) + base, 0, 1).transpose(1, 2, 0)
+
+
+def eval_cell(kbps, level, weights=None, tag="", fast=False):
     import restore_math as rm
     import starvation_bench as sb  # noqa: F401 (imported here so score() can use it)
     key = f"{tag}{kbps}/{level}"
@@ -108,7 +123,7 @@ def eval_cell(kbps, level, weights=None, tag=""):
             arms = {"stream": lo.astype(np.float32)}
         else:
             lo_f = lo.astype(np.float32) / 255
-            rest = rm.restore(lo_f, model, SCALE[level]) * 255
+            rest = (restore_fast if fast else rm.restore)(lo_f, model, SCALE[level]) * 255
             arms = {"bicubic": cv2.resize(lo, (W, H), interpolation=cv2.INTER_CUBIC).astype(np.float32),
                     "restore": np.clip(rest, 0, 255),
                     "restore+unsharp1.0": unsharp(rest / 255, 1.0) * 255}
@@ -133,8 +148,9 @@ if __name__ == "__main__":
     v.add_argument("--level", required=True, choices=list(SIZES))
     v.add_argument("--weights", help="restorer file in out/ (default restorer_L<level>.rstr)")
     v.add_argument("--tag", default="", help="prefix for result keys, e.g. ft/")
+    v.add_argument("--fast", action="store_true", help="torch convolutions (same maths as restore_math, for big sizes)")
     a = ap.parse_args()
     if a.cmd == "encode":
         encode(a.kbps, a.level)
     elif a.cmd == "eval":
-        eval_cell(a.kbps, a.level, a.weights, a.tag)
+        eval_cell(a.kbps, a.level, a.weights, a.tag, a.fast)
