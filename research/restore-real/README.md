@@ -159,3 +159,17 @@ Baseline = plain 960×540 stream at 1500 kbit/s. `final_compare.py`; raw in `fin
 | float + unsharp 0.25, centre masked | 23.33 | +1.66 | 0.660 | 23.32 | +3.03 | 0.641 | 0.65 |
 
 Reading: every squish arm beats plain 1500 on full-frame PSNR and SSIM and on centre PSNR. At this budget the float model is the best arm (+1.78 dB). Unsharp 0.25 costs about 0.15 dB full-frame and 0.3–0.4 dB in the centre, and raises centre edge sharpness (0.73 → 0.81). Unlike at 6000 kbit/s, the model does not lower centre PSNR here (+0.03 to +0.04 dB over bilinear), so centre masking costs almost nothing (about 0.005 dB full frame). These are measured PSNR/SSIM; perceived quality is not measured.
+
+## VMAF estimate, 1500 kbit/s (one 2 s window, frames 453–572, brief)
+
+Netflix VMAF v0.6.1 (`model/vmaf_v0.6.1.json`), built from the Netflix repo with the libvmaf CLI, scored at 960×540 against the reference. One window only, so this is an estimate. Per-arm JSON in `vmaf/`.
+
+| Arm | VMAF (mean) |
+|---|---|
+| plain 1500 (baseline) | 24.69 |
+| squish, bilinear | 39.12 |
+| float | 47.54 |
+| float + unsharp 0.25 | 51.36 |
+| float, centre masked | 46.35 |
+
+Reading: every squish arm beats plain by a wide margin on VMAF, which agrees with the PSNR result. Unlike PSNR, VMAF rates unsharp 0.25 higher than the unsharp-free float model (+3.8), and it rates the centre-masked variant 1.2 lower. This is one window scored at native 960×540, not at a 1080p viewing size, so treat the numbers as indicative.
