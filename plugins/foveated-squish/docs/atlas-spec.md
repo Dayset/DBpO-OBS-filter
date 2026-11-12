@@ -48,11 +48,13 @@ The region also appears inside the squished picture. The atlas option `blank dup
 
 | Case | Example | Length |
 |---|---|---|
-| Today (no regions) | `FSQ1:rx=0.75,ry=0.75,cx=0.15,cy=0.15,fx=0.5,fy=0.5,px=1,py=1,ar=1.7778` | 76 |
-| 2 regions, boxed, 2 look keys (typical) | to be measured in #5 | target ≤ 140 |
-| 4 regions, boxed, all look keys (worst) | to be measured in #5 | recorded there |
+| Today (no regions) | `FSQ1:rx=0.75,ry=0.75,cx=0.15,cy=0.15,fx=0.5,fy=0.5,px=1,py=1,ar=1.7778` | 70 |
+| Boxed, no regions | the golden string with `ox=0,oy=0,bw=0.800,bh=1` added | 93 |
+| 2 regions, boxed, 2 look keys (typical) | `FSQ1:rx=0.75,ry=0.75,cx=0.15,cy=0.15,fx=0.5,fy=0.5,px=1,py=1,ar=1.778,ox=0,oy=0,bw=0.800,bh=1,gx=0.800,gy=0.850,gz=1.000,gv=1.000,gs=1.000,hx=0.000,hy=0.000,hz=0.200,hv=0.150,hs=1.000,ls=1.000,lc=0.500` | 228 — over the 140 budget |
+| 4 regions, boxed, 3 look keys (worst) | 4 regions (`g`..`j`) and `ls,lc,lh` added to the typical string | 318+ — over the 140 budget |
 
-Lengths are measured by the Python reference (#3), not estimated by hand.
+**Finding (measured):** the 140-character budget is not met by a typical configuration. Each region costs 30 characters, the boxed layout 23 and each look key 9. Options for the owner to choose between (not yet decided): drop keys that equal the parser default (`ox`, `oy`, `bh`, `px`, `py`), write region values with 2 decimals, or move regions into a packed integer field. Until one is chosen, the Twitch-title budget is a known gap.
+Lengths were counted directly from the strings above (Python `len`), not estimated by hand.
 
 ## 6. Viewer composition
 
@@ -93,4 +95,5 @@ Reference values for each case are checked by the Python implementation in #3.
 - [x] Worked examples for 1080p (from 1440p source), 720p and 360p with slot rectangles.
 - [x] String-length table (today, typical, worst case). Typical and worst values are filled by #3.
 - [x] Open questions listed for #4.
-- [ ] Repo owner review before #5, #6 and #8 start.
+- [ ] Repo owner review before #5, #6 and #8 start. (Not done here: needs the owner.)
+- [ ] String-length budget (≤ 140 chars typical): NOT met, see the finding in section 5.
