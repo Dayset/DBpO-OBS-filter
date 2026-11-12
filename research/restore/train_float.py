@@ -142,29 +142,37 @@ def main():
     ap.add_argument("--every", type=int, default=100)
     ap.add_argument("--format", default="float", choices=["float", "ternary"])
     ap.add_argument("--data", help="restore_data.py manifest to train on instead of the synthetic pairs")
+    ap.add_argument("--seed", type=int, default=0)
+    ap.add_argument("--edge_w", type=float, default=2.0, help="weight of the Sobel-gradient loss term")
+    ap.add_argument("--name", help="checkpoint / loss-log name (default L{level} plus format tag)")
+    ap.add_argument("--config", help="JSON file of defaults for these options (command-line flags override it)")
+    pre, _ = ap.parse_known_args()
+    if pre.config:
+        ap.set_defaults(**json.load(open(pre.config)))
     ap.add_argument("--export", help="write the RSTR v1 file here when training finishes")
     a = ap.parse_args()
     torch.set_num_threads(2)
     k = SCALE[a.level]
     lo, gt = load_shards(a.data, a.level) if a.data else load_pairs(a.level)
     tag = "" if a.format == "float" else "_" + a.format
-    ckpt = os.path.join(OUT, f"ckpt_L{a.level}{tag}.pt")
-    torch.manual_seed(0)
+    name = a.name or f"L{a.level}{tag}"
+    ckpt = os.path.join(OUT, f"ckpt_{name}.pt")
+    torch.manual_seed(a.seed)
     model = Restorer(k, a.format)
     opt = torch.optim.Adam(model.parameters(), lr=a.lr)
     sched = torch.optim.lr_scheduler.CosineAnnealingLR(opt, a.steps)
-    rng, step = np.random.default_rng(0), 0
+    rng, step = np.random.default_rng(a.seed), 0
     if os.path.exists(ckpt):
         ck = torch.load(ckpt, weights_only=False)
         model.load_state_dict(ck["model"]); opt.load_state_dict(ck["opt"]); sched.load_state_dict(ck["sched"])
         rng.bit_generator.state, step = ck["rng"], ck["step"]
         print(f"resumed from step {step}", flush=True)
     until = a.until or a.steps
-    log = open(os.path.join(OUT, f"loss_L{a.level}{tag}.csv"), "a")
+    log = open(os.path.join(OUT, f"loss_{name}.csv"), "a")
     while step < until:
         x, y = batch(lo, gt, rng, k, a.bs, a.crop)
         out = model(x)
-        loss = F.l1_loss(out, y) + 2.0 * F.l1_loss(sobel(out), sobel(y))
+        loss = F.l1_loss(out, y) + a.edge_w * F.l1_loss(sobel(out), sobel(y))
         opt.zero_grad(); loss.backward(); opt.step(); sched.step(); step += 1
         log.write(f"{step},{loss.item():.6f}\n")
         if step % a.every == 0 or step == until:

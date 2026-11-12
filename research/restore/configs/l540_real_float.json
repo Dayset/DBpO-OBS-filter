@@ -1,0 +1,2 @@
+{"name": "real_L540", "level": "540", "format": "float", "steps": 2000, "bs": 12, "crop": 40, "lr": 0.002,
+ "every": 100, "seed": 0, "edge_w": 2.0, "data": "research/restore/out/data/manifest.json"}
