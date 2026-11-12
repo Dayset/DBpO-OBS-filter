@@ -23,6 +23,7 @@ import sys
 
 import cv2
 import numpy as np
+from skimage.metrics import structural_similarity
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, os.path.join(HERE, "..", "..", "plugins", "perceptual-color-reduction", "tests"))
@@ -62,6 +63,69 @@ def x264_roundtrip(frames, crf=28):
     return np.frombuffer(dec, np.uint8).reshape(n, h, w, 3).copy(), len(enc) * 8
 
 
+def sobel_mag(x):
+    """Sobel gradient magnitude of the channel mean, x: (N, H, W) float32."""
+    gx = np.stack([cv2.Sobel(f, cv2.CV_32F, 1, 0, ksize=3) for f in x]) / 8
+    gy = np.stack([cv2.Sobel(f, cv2.CV_32F, 0, 1, ksize=3) for f in x]) / 8
+    return np.sqrt(gx * gx + gy * gy + 1e-8)
+
+
+def metrics(pred, gt):
+    """pred, gt: (T, H, W, 3) float32 in [0, 1]. PSNR and SSIM averaged over frames; edge sharpness is the
+    gradient ratio on the top 10% GT edge pixels (1.0 = sharp original)."""
+    p = np.clip(pred, 0, 1)
+    psnr = np.mean([10 * np.log10(1 / max(np.mean((a - b) ** 2), 1e-10)) for a, b in zip(p, gt)])
+    ssim = np.mean([structural_similarity(a, b, channel_axis=2, data_range=1.0) for a, b in zip(p, gt)])
+    gp = sobel_mag(p.mean(-1))
+    gg = sobel_mag(gt.mean(-1))
+    edge = gg > np.percentile(gg, 90)
+    sharp = gp[edge].mean() / gg[edge].mean()
+    return {"psnr": round(float(psnr), 3), "ssim": round(float(ssim), 4), "edge_sharpness": round(float(sharp), 3)}
+
+
+def load_pair(cid, lv):
+    gt = np.load(f"{OUT}/gt/clip{cid}.npy")[:T].astype(np.float32) / 255
+    lo = np.load(f"{OUT}/pairs/clip{cid}_L{lv}.npy").astype(np.float32) / 255
+    return lo, gt
+
+
+def unsharp(x, amt=1.0):
+    return np.stack([np.clip(f + amt * (f - cv2.GaussianBlur(f, (0, 0), 1.5)), 0, 1) for f in x])
+
+
+def bicubic(lo, lv):
+    s = SCALE[lv]
+    return np.stack([cv2.resize(f, (W, H), interpolation=cv2.INTER_CUBIC) for f in lo])
+
+
+RESULTS = os.path.join(HERE, "results.json")
+
+
+def evaluate(arms, test, levels, fn_for):
+    """Mean over test clips of each metric, per (level, arm). Writes results.json; skips finished cells."""
+    res = json.load(open(RESULTS)) if os.path.exists(RESULTS) else {}
+    for lv in levels:
+        for arm in arms:
+            key = f"{lv}/{arm}"
+            if key in res:
+                continue
+            ms = []
+            for cid in test:
+                lo, gt = load_pair(cid, lv)
+                ms.append(metrics(fn_for(arm, lo, lv), gt))
+            res[key] = {k: round(float(np.mean([m[k] for m in ms])), 4) for k in ms[0]}
+            print(key, res[key], flush=True)
+            json.dump(res, open(RESULTS, "w"), indent=2)
+    return res
+
+
+def baseline(test, levels):
+    def fn(arm, lo, lv):
+        up = bicubic(lo, lv)
+        return up if arm == "bicubic" else unsharp(up, 1.0)
+    return evaluate(["bicubic", "bicubic+unsharp1.0"], test, levels, fn)
+
+
 def ids(spec):
     a, _, b = spec.partition("-")
     return range(int(a), int(b or a) + 1)
@@ -96,6 +160,11 @@ if __name__ == "__main__":
     m = sub.add_parser("make")
     m.add_argument("--clips", required=True)
     m.add_argument("--levels", default="540,360")
+    b = sub.add_parser("baseline")
+    b.add_argument("--clips", default="0-3")
+    b.add_argument("--levels", default="540,360")
     a = ap.parse_args()
     if a.cmd == "make":
         make(list(ids(a.clips)), a.levels.split(","))
+    elif a.cmd == "baseline":
+        baseline(list(ids(a.clips)), a.levels.split(","))

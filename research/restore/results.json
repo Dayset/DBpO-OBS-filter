@@ -1,0 +1,22 @@
+{
+  "540/bicubic": {
+    "psnr": 32.7968,
+    "ssim": 0.8927,
+    "edge_sharpness": 0.7177
+  },
+  "540/bicubic+unsharp1.0": {
+    "psnr": 32.1553,
+    "ssim": 0.876,
+    "edge_sharpness": 0.977
+  },
+  "360/bicubic": {
+    "psnr": 30.741,
+    "ssim": 0.8761,
+    "edge_sharpness": 0.506
+  },
+  "360/bicubic+unsharp1.0": {
+    "psnr": 30.4277,
+    "ssim": 0.8645,
+    "edge_sharpness": 0.626
+  }
+}
