@@ -1,0 +1,144 @@
+{
+ "windows": [
+  {
+   "start_s": 5.8,
+   "arms": {
+    "plain_6000k": {
+     "psnr": 28.5574,
+     "ssim": 0.8509,
+     "outer_psnr": 28.7683,
+     "outer_edge_sharpness": 0.8113
+    },
+    "sq6000_bilinear": {
+     "psnr": 27.4248,
+     "ssim": 0.8413,
+     "outer_psnr": 27.2262,
+     "outer_edge_sharpness": 0.6438
+    },
+    "t1500": {
+     "psnr": 27.7617,
+     "ssim": 0.8481,
+     "outer_psnr": 27.6468,
+     "outer_edge_sharpness": 0.7672
+    },
+    "f6000_u025": {
+     "psnr": 27.886,
+     "ssim": 0.8608,
+     "outer_psnr": 27.84,
+     "outer_edge_sharpness": 0.9004
+    },
+    "f6000": {
+     "psnr": 28.2642,
+     "ssim": 0.863,
+     "outer_psnr": 28.1218,
+     "outer_edge_sharpness": 0.7931
+    }
+   }
+  },
+  {
+   "start_s": 6.53,
+   "arms": {
+    "plain_6000k": {
+     "psnr": 28.5364,
+     "ssim": 0.853,
+     "outer_psnr": 28.746,
+     "outer_edge_sharpness": 0.8147
+    },
+    "sq6000_bilinear": {
+     "psnr": 27.2952,
+     "ssim": 0.8394,
+     "outer_psnr": 27.0994,
+     "outer_edge_sharpness": 0.6393
+    },
+    "t1500": {
+     "psnr": 27.6507,
+     "ssim": 0.847,
+     "outer_psnr": 27.5388,
+     "outer_edge_sharpness": 0.7655
+    },
+    "f6000_u025": {
+     "psnr": 27.7744,
+     "ssim": 0.8596,
+     "outer_psnr": 27.7302,
+     "outer_edge_sharpness": 0.901
+    },
+    "f6000": {
+     "psnr": 28.153,
+     "ssim": 0.862,
+     "outer_psnr": 28.0135,
+     "outer_edge_sharpness": 0.7927
+    }
+   }
+  },
+  {
+   "start_s": 6.92,
+   "arms": {
+    "plain_6000k": {
+     "psnr": 28.5621,
+     "ssim": 0.8523,
+     "outer_psnr": 28.7722,
+     "outer_edge_sharpness": 0.8136
+    },
+    "sq6000_bilinear": {
+     "psnr": 27.3376,
+     "ssim": 0.8393,
+     "outer_psnr": 27.1422,
+     "outer_edge_sharpness": 0.6407
+    },
+    "t1500": {
+     "psnr": 27.6781,
+     "ssim": 0.8466,
+     "outer_psnr": 27.5655,
+     "outer_edge_sharpness": 0.7649
+    },
+    "f6000_u025": {
+     "psnr": 27.794,
+     "ssim": 0.8591,
+     "outer_psnr": 27.7489,
+     "outer_edge_sharpness": 0.8992
+    },
+    "f6000": {
+     "psnr": 28.1721,
+     "ssim": 0.8614,
+     "outer_psnr": 28.0319,
+     "outer_edge_sharpness": 0.7916
+    }
+   }
+  },
+  {
+   "start_s": 7.55,
+   "arms": {
+    "plain_6000k": {
+     "psnr": 28.4863,
+     "ssim": 0.8518,
+     "outer_psnr": 28.6969,
+     "outer_edge_sharpness": 0.8136
+    },
+    "sq6000_bilinear": {
+     "psnr": 27.2696,
+     "ssim": 0.8389,
+     "outer_psnr": 27.0743,
+     "outer_edge_sharpness": 0.6394
+    },
+    "t1500": {
+     "psnr": 27.6177,
+     "ssim": 0.8466,
+     "outer_psnr": 27.5064,
+     "outer_edge_sharpness": 0.7653
+    },
+    "f6000_u025": {
+     "psnr": 27.7321,
+     "ssim": 0.8591,
+     "outer_psnr": 27.6885,
+     "outer_edge_sharpness": 0.9006
+    },
+    "f6000": {
+     "psnr": 28.1141,
+     "ssim": 0.8614,
+     "outer_psnr": 27.9751,
+     "outer_edge_sharpness": 0.7924
+    }
+   }
+  }
+ ]
+}

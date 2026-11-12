@@ -101,3 +101,19 @@ Reading: longer training trades SSIM for edge sharpness and does not improve PSN
 | squish 6000 + ternary + unsharp 0.25 | 27.38 | 0.846 | 0.864 |
 
 Reading: at 6000 kbit/s the squish arm trails the plain stream on PSNR and SSIM. The squish advantage seen at 1,500 kbit/s does not carry to this budget. The ternary model still improves on bilinear (+0.35 dB, +0.007 SSIM, outer edges +0.12). Adding unsharp 0.25 gives back about 0.3 dB but sharpens outer edges past the plain stream's level. The 1,500 kbit/s model was not trained on 6,000 kbit/s output, so these numbers are an out-of-distribution check, not a trained result.
+
+## Models trained on 6000 kbit/s squish input (four windows, full frame, mean)
+
+Training: `train6000.py` (10k, 1500 steps each, target = reference). Eval: `eval6000_models.py`. Raw: `eval6000_float_and_1500.json`, `eval6000_ternary6000.json`.
+
+| Arm | PSNR dB | SSIM | Outer edge sharpness |
+|---|---|---|---|
+| plain 6000 kbit/s | 28.54 | 0.852 | 0.81 |
+| squish 6000, bilinear | 27.33 | 0.840 | 0.64 |
+| ternary trained on 1500 input | 27.68 | 0.847 | 0.77 |
+| ternary trained on 6000 input | 28.05 | 0.858 | 0.78 |
+| ternary 6000 + unsharp 0.25 | 27.73 | 0.857 | 0.88 |
+| float trained on 6000 input | 28.18 | 0.862 | 0.79 |
+| float 6000 + unsharp 0.25 | 27.80 | 0.860 | 0.90 |
+
+Reading: training on the matching 6000 kbit/s input helps. The ternary model gains about 0.4 dB over the 1500-trained one, and the float model is 0.13 dB above the ternary at the same size. Both trail plain 6000 on PSNR by 0.3–0.5 dB but have higher SSIM. Unsharp 0.25 again costs PSNR for sharper outer edges.

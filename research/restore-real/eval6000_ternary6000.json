@@ -1,0 +1,120 @@
+{
+ "windows": [
+  {
+   "start_s": 5.8,
+   "arms": {
+    "plain_6000k": {
+     "psnr": 28.5574,
+     "ssim": 0.8509,
+     "outer_psnr": 28.7683,
+     "outer_edge_sharpness": 0.8113
+    },
+    "sq6000_bilinear": {
+     "psnr": 27.4248,
+     "ssim": 0.8413,
+     "outer_psnr": 27.2262,
+     "outer_edge_sharpness": 0.6438
+    },
+    "t6000": {
+     "psnr": 28.1414,
+     "ssim": 0.8594,
+     "outer_psnr": 27.9989,
+     "outer_edge_sharpness": 0.777
+    },
+    "t6000_u025": {
+     "psnr": 27.8184,
+     "ssim": 0.8577,
+     "outer_psnr": 27.7827,
+     "outer_edge_sharpness": 0.8811
+    }
+   }
+  },
+  {
+   "start_s": 6.53,
+   "arms": {
+    "plain_6000k": {
+     "psnr": 28.5364,
+     "ssim": 0.853,
+     "outer_psnr": 28.746,
+     "outer_edge_sharpness": 0.8147
+    },
+    "sq6000_bilinear": {
+     "psnr": 27.2952,
+     "ssim": 0.8394,
+     "outer_psnr": 27.0994,
+     "outer_edge_sharpness": 0.6393
+    },
+    "t6000": {
+     "psnr": 28.0293,
+     "ssim": 0.8583,
+     "outer_psnr": 27.8902,
+     "outer_edge_sharpness": 0.776
+    },
+    "t6000_u025": {
+     "psnr": 27.7087,
+     "ssim": 0.8565,
+     "outer_psnr": 27.6752,
+     "outer_edge_sharpness": 0.8808
+    }
+   }
+  },
+  {
+   "start_s": 6.92,
+   "arms": {
+    "plain_6000k": {
+     "psnr": 28.5621,
+     "ssim": 0.8523,
+     "outer_psnr": 28.7722,
+     "outer_edge_sharpness": 0.8136
+    },
+    "sq6000_bilinear": {
+     "psnr": 27.3376,
+     "ssim": 0.8393,
+     "outer_psnr": 27.1422,
+     "outer_edge_sharpness": 0.6407
+    },
+    "t6000": {
+     "psnr": 28.0509,
+     "ssim": 0.8578,
+     "outer_psnr": 27.9111,
+     "outer_edge_sharpness": 0.7755
+    },
+    "t6000_u025": {
+     "psnr": 27.7281,
+     "ssim": 0.856,
+     "outer_psnr": 27.6937,
+     "outer_edge_sharpness": 0.8798
+    }
+   }
+  },
+  {
+   "start_s": 7.55,
+   "arms": {
+    "plain_6000k": {
+     "psnr": 28.4863,
+     "ssim": 0.8518,
+     "outer_psnr": 28.6969,
+     "outer_edge_sharpness": 0.8136
+    },
+    "sq6000_bilinear": {
+     "psnr": 27.2696,
+     "ssim": 0.8389,
+     "outer_psnr": 27.0743,
+     "outer_edge_sharpness": 0.6394
+    },
+    "t6000": {
+     "psnr": 27.9911,
+     "ssim": 0.8578,
+     "outer_psnr": 27.8526,
+     "outer_edge_sharpness": 0.7759
+    },
+    "t6000_u025": {
+     "psnr": 27.6656,
+     "ssim": 0.8559,
+     "outer_psnr": 27.6328,
+     "outer_edge_sharpness": 0.8807
+    }
+   }
+  }
+ ]
+}
