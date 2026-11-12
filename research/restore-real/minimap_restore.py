@@ -17,19 +17,25 @@ Y0, Y1, X0, X1 = 340, 515, 10, 198
 BH, BW = Y1 - Y0, X1 - X0
 N = 906
 
+TOTAL = int(os.environ.get("MM_TOTAL", "1500"))   # cosine schedule length
+CKPT = os.environ.get("MM_CKPT", "mm_restorer.pt")
+
+def lr_at(step):
+    return 2e-3 * 0.5 * (1 + np.cos(np.pi * min(step, TOTAL) / TOTAL))
+
 def train(work, steps):
     torch.manual_seed(0); torch.set_num_threads(2)
     ref = rr.mm(os.environ["REF_RGB"], (N, rr.H, rr.W, 3)); unsq = rr.mm(f"{work}/unsq.u8", (N, rr.H, rr.W, 3))
-    ck = f"{work}/mm_restorer.pt"
+    ck = f"{work}/{CKPT}"
     net = rr.Restorer(); params = sum(p.numel() for p in net.parameters())
     opt = torch.optim.Adam(net.parameters(), lr=2e-3)
-    sched = torch.optim.lr_scheduler.CosineAnnealingLR(opt, 1500)
     start = 0
     if os.path.exists(ck):
-        s = torch.load(ck); net.load_state_dict(s["net"]); opt.load_state_dict(s["opt"]); sched.load_state_dict(s["sched"]); start = s["step"]
+        s = torch.load(ck, weights_only=False); net.load_state_dict(s["net"]); opt.load_state_dict(s["opt"]); start = s["step"]
     rng = np.random.default_rng(start)
     crop, bs = 64, 16
     for step in range(start, start + steps):
+        for g in opt.param_groups: g["lr"] = float(lr_at(step))
         fi = rng.choice(rr.TRAIN, bs)
         xs, ys = [], []
         for f in fi:
@@ -40,10 +46,10 @@ def train(work, steps):
         y = torch.from_numpy(np.stack(ys).astype(np.float32) / 255).permute(0, 3, 1, 2)
         out = net(x)
         loss = F.l1_loss(out, y) + 2.0 * F.l1_loss(rr.sobel(out.mean(1, keepdim=True)), rr.sobel(y.mean(1, keepdim=True)))
-        opt.zero_grad(); loss.backward(); opt.step(); sched.step()
+        opt.zero_grad(); loss.backward(); opt.step()
         if (step + 1) % 500 == 0: print(f"step {step+1} loss {loss.item():.4f}", flush=True)
-    torch.save({"net": net.state_dict(), "opt": opt.state_dict(), "sched": sched.state_dict(), "step": start + steps}, ck)
-    json.dump({"params": params, "steps_done": start + steps}, open(f"{work}/mm_train_info.json", "w"))
+    torch.save({"net": net.state_dict(), "opt": opt.state_dict(), "step": start + steps}, ck)
+    json.dump({"params": params, "steps_done": start + steps, "total": TOTAL, "ckpt": CKPT}, open(f"{work}/mm_train_info.json", "w"))
     print("saved", start + steps, "params", params, flush=True)
 
 def box_metrics(pred, gt):  # luma (N,BH,BW) in [0,1]
@@ -71,7 +77,7 @@ def run_eval(work, idx):
     gt_box = rr.luma(ref[s:e, Y0:Y1, X0:X1].astype(np.float32) / 255)
     sq = unsq[s:e].astype(np.float32) / 255
     full = rr.Restorer(); full.load_state_dict(torch.load(f"{work}/restorer.pt")["net"]); full.eval()
-    mm = rr.Restorer(); mm.load_state_dict(torch.load(f"{work}/mm_restorer.pt")["net"]); mm.eval()
+    mm = rr.Restorer(); mm.load_state_dict(torch.load(f"{work}/{CKPT}")["net"]); mm.eval()
     full_out = run_restorer(full, sq)[:, Y0:Y1, X0:X1]
     mm_out = run_restorer(mm, sq[:, Y0:Y1, X0:X1])
     box = lambda a: a[:, Y0:Y1, X0:X1]
@@ -85,7 +91,7 @@ def run_eval(work, idx):
     out = {"start_s": round(s / rr.FPS, 2), "arms": {}}
     for k, v in arms.items():
         out["arms"][k] = box_metrics(v, gt_box)
-    json.dump(out, open(f"{work}/mm_eval_{idx}.json", "w"), indent=1)
+    json.dump(out, open(f"{work}/mm_eval_{idx}{CKPT.replace('.pt','')}.json" if CKPT!="mm_restorer.pt" else f"{work}/mm_eval_{idx}.json", "w"), indent=1)
     print(json.dumps(out, indent=1), flush=True)
 
 def report(work):
@@ -115,7 +121,7 @@ def run_sweep(work, idx):
     s = starts[idx]; e = s + rr.WIN
     gt_box = rr.luma(ref[s:e, Y0:Y1, X0:X1].astype(np.float32) / 255)
     sq_box = unsq[s:e, Y0:Y1, X0:X1].astype(np.float32) / 255
-    mm = rr.Restorer(); mm.load_state_dict(torch.load(f"{work}/mm_restorer.pt")["net"]); mm.eval()
+    mm = rr.Restorer(); mm.load_state_dict(torch.load(f"{work}/{CKPT}")["net"]); mm.eval()
     base = np.clip(run_restorer(mm, sq_box), 0, 1)
     out = {"start_s": round(s / rr.FPS, 2), "arms": {"minimap_ternary": box_metrics(rr.luma(base), gt_box)}}
     for a in AMOUNTS:

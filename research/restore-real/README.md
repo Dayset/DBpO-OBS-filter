@@ -76,3 +76,15 @@ Sweep in `minimap_unsharp_sweep.json` (`minimap_restore.py sweep`, sigma 1.5).
 | + unsharp 1.0 | 20.92 | 0.421 | 0.457 |
 
 Reading: unsharp on top of the minimap model raises edge sharpness monotonically (+23% at 1.0) but lowers PSNR and SSIM at every amount. This does not match the full-frame result in the epic (#20), where unsharp stacked and PSNR rose. Keep the two cases separate; on the minimap, unsharp trades fidelity for crispness.
+
+## Minimap model, longer training (6,000 steps, same data)
+
+Same split and box, cosine schedule over 6,000 steps (`MM_TOTAL=6000 MM_CKPT=mm_long.pt`). Training loss stays flat (0.1167 at 1,500 steps, 0.1150 at 6,000), so the model has converged to what this clip can teach it. Raw per-window results: `mm_eval_<i>mm_long.json` (not committed; summary below).
+
+| Arm (mean, four windows) | PSNR dB | SSIM | Edge sharpness |
+|---|---|---|---|
+| squish, bilinear | 21.39 | 0.426 | 0.317 |
+| minimap ternary, 1,500 steps | 21.30 | 0.434 | 0.372 |
+| minimap ternary, 6,000 steps | 21.27 | 0.423 | 0.394 |
+
+Reading: longer training trades SSIM for edge sharpness and does not improve PSNR. At 6,000 steps the SSIM is below the bilinear baseline. More steps on this single clip do not buy a better model; the limit is the data (about 10 s of training footage from one game), not the step count. A full-scale minimap model needs more captures across facilities, lighting, and map zoom.
