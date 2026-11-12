@@ -64,3 +64,24 @@ Recommendation for UI.4: benchmark **A, B, C, D** side by side on the same clips
 - Which game UIs can the user capture losslessly (PlanetSide 2 is the only one with footage in the repo so far)?
 - Does the streamer want restoration at all, or only the atlas? The atlas needs no viewer install.
 - Should the element models be trained on the streamer's own skin, with the share code carrying a skin ID?
+
+## 8. Measured baseline (UI.2, synthetic HUD)
+
+`research/ui-restore/ui_baseline.py` (raw numbers in `ui_baseline.json`). Source: `bitrate_harness.clip_frames("fps_pan")`, 30 frames, 960×540, HUD from `hud()`. Streams: x264 veryfast CBR at 250 and 300 kbit/s. Cells are PSNR dB / SSIM inside each element box.
+
+| Budget | Arm | Health bar | Minimap | Text strip |
+|---|---|---|---|---|
+| 250kbps | full_540 | 33.62 / 0.946 | 35.68 / 0.962 | 25.37 / 0.782 |
+| 250kbps | 360p_bicubic | 24.76 / 0.782 | 34.37 / 0.964 | 22.45 / 0.667 |
+| 250kbps | 360p_bicubic_unsharp | 23.27 / 0.683 | 34.26 / 0.950 | 21.88 / 0.608 |
+| 300kbps | full_540 | 35.28 / 0.960 | 36.63 / 0.968 | 26.55 / 0.804 |
+| 300kbps | 360p_bicubic | 24.48 / 0.791 | 35.12 / 0.966 | 22.56 / 0.689 |
+| 300kbps | 360p_bicubic_unsharp | 22.90 / 0.681 | 34.52 / 0.950 | 22.29 / 0.661 |
+
+Reading:
+- **Health bar** is the most fragile: 360p bicubic loses about 11 dB against the full-size stream at the same bitrate (35.3 vs 24.5 dB at 300 kbit/s).
+- **Text strip** loses about 4–5 dB at 360p. This is the element most likely to fail for digit readability, so OCR (UI.4) is needed before any conclusion.
+- **Minimap** barely moves: its content is smooth and large, so downscaling costs little. It is the least likely to need per-element restoration.
+- **Unsharp hurts** at 360p on every element. The general restorer from #20 (which removes ringing before sharpening) is the only sharpening tested so far that could help, so UI.3 must compare against plain bicubic, not against unsharp.
+
+Caveat: these are synthetic HUD boxes with hard, flat edges. Real game UI has anti-aliased text and gradients, so the health and text drops are probably pessimistic or optimistic in different ways. Re-measure on captured UI before drawing the go/no-go.
