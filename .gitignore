@@ -30,3 +30,4 @@ __pycache__/
 # Exclude CMake build number cache
 /cmake/.CMakeBuildNumber
 /viewer/unsquish-extension/dist/
+research/restore/out/
