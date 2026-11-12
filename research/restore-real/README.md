@@ -62,3 +62,17 @@ Same split, same four windows, same squish arm; metrics inside the minimap box o
 | squish + minimap ternary | 21.27-21.31 | 0.432-0.435 | 0.370-0.373 |
 
 Reading: the minimap model gets the edge sharpness of unsharp (+17% over bilinear), with better SSIM than either. It is about 0.08 dB below bilinear in PSNR, and the full-frame model is about even on PSNR. The minimap model is +0.03 edge sharpness over the full-frame model on every window. This is one clip and four windows; the minimap is translucent over the scene, which limits what a box-only model can recover.
+
+## Unsharp on top of the minimap model (box, four windows, mean)
+
+Sweep in `minimap_unsharp_sweep.json` (`minimap_restore.py sweep`, sigma 1.5).
+
+| Arm | PSNR dB | SSIM | Edge sharpness |
+|---|---|---|---|
+| minimap ternary | 21.30 | 0.434 | 0.372 |
+| + unsharp 0.4 | 21.18 | 0.430 | 0.406 |
+| + unsharp 0.6 | 21.10 | 0.427 | 0.423 |
+| + unsharp 0.8 | 21.01 | 0.424 | 0.440 |
+| + unsharp 1.0 | 20.92 | 0.421 | 0.457 |
+
+Reading: unsharp on top of the minimap model raises edge sharpness monotonically (+23% at 1.0) but lowers PSNR and SSIM at every amount. This does not match the full-frame result in the epic (#20), where unsharp stacked and PSNR rose. Keep the two cases separate; on the minimap, unsharp trades fidelity for crispness.

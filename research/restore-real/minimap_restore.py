@@ -100,3 +100,28 @@ if __name__ == "__main__":
     if cmd == "train": train(sys.argv[2], int(sys.argv[3]))
     elif cmd == "eval": run_eval(sys.argv[2], int(sys.argv[3]))
     elif cmd == "report": report(sys.argv[2])
+
+
+AMOUNTS = (0.4, 0.6, 0.8, 1.0)
+
+def unsharp(x, amt):
+    return np.clip(x + amt * (x - np.stack([cv2.GaussianBlur(f, (0, 0), 1.5) for f in x])), 0, 1)
+
+def run_sweep(work, idx):
+    """Minimap model output, then unsharp (sigma 1.5) at several amounts, same box metrics."""
+    torch.set_num_threads(2)
+    ref = rr.mm(os.environ["REF_RGB"], (N, rr.H, rr.W, 3)); unsq = rr.mm(f"{work}/unsq.u8", (N, rr.H, rr.W, 3))
+    starts, _ = rr.windows(work)
+    s = starts[idx]; e = s + rr.WIN
+    gt_box = rr.luma(ref[s:e, Y0:Y1, X0:X1].astype(np.float32) / 255)
+    sq_box = unsq[s:e, Y0:Y1, X0:X1].astype(np.float32) / 255
+    mm = rr.Restorer(); mm.load_state_dict(torch.load(f"{work}/mm_restorer.pt")["net"]); mm.eval()
+    base = np.clip(run_restorer(mm, sq_box), 0, 1)
+    out = {"start_s": round(s / rr.FPS, 2), "arms": {"minimap_ternary": box_metrics(rr.luma(base), gt_box)}}
+    for a in AMOUNTS:
+        out["arms"][f"minimap_ternary+unsharp{a}"] = box_metrics(rr.luma(unsharp(base, a)), gt_box)
+    json.dump(out, open(f"{work}/mm_sweep_{idx}.json", "w"), indent=1)
+    print(json.dumps(out, indent=1), flush=True)
+
+if __name__ == "__main__" and sys.argv[1] == "sweep":
+    run_sweep(sys.argv[2], int(sys.argv[3]))

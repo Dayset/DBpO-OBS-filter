@@ -1,0 +1,125 @@
+{
+ "windows": [
+  {
+   "start_s": 5.8,
+   "arms": {
+    "minimap_ternary": {
+     "psnr": 21.2739,
+     "ssim": 0.4325,
+     "edge_sharpness": 0.3732
+    },
+    "minimap_ternary+unsharp0.4": {
+     "psnr": 21.1528,
+     "ssim": 0.4286,
+     "edge_sharpness": 0.4077
+    },
+    "minimap_ternary+unsharp0.6": {
+     "psnr": 21.0742,
+     "ssim": 0.4259,
+     "edge_sharpness": 0.4248
+    },
+    "minimap_ternary+unsharp0.8": {
+     "psnr": 20.9856,
+     "ssim": 0.4229,
+     "edge_sharpness": 0.4418
+    },
+    "minimap_ternary+unsharp1.0": {
+     "psnr": 20.8884,
+     "ssim": 0.4195,
+     "edge_sharpness": 0.4584
+    }
+   }
+  },
+  {
+   "start_s": 6.53,
+   "arms": {
+    "minimap_ternary": {
+     "psnr": 21.2905,
+     "ssim": 0.4337,
+     "edge_sharpness": 0.3725
+    },
+    "minimap_ternary+unsharp0.4": {
+     "psnr": 21.1707,
+     "ssim": 0.4298,
+     "edge_sharpness": 0.4064
+    },
+    "minimap_ternary+unsharp0.6": {
+     "psnr": 21.0929,
+     "ssim": 0.4271,
+     "edge_sharpness": 0.4233
+    },
+    "minimap_ternary+unsharp0.8": {
+     "psnr": 21.005,
+     "ssim": 0.424,
+     "edge_sharpness": 0.4399
+    },
+    "minimap_ternary+unsharp1.0": {
+     "psnr": 20.9087,
+     "ssim": 0.4205,
+     "edge_sharpness": 0.4563
+    }
+   }
+  },
+  {
+   "start_s": 6.92,
+   "arms": {
+    "minimap_ternary": {
+     "psnr": 21.3123,
+     "ssim": 0.4343,
+     "edge_sharpness": 0.3728
+    },
+    "minimap_ternary+unsharp0.4": {
+     "psnr": 21.1923,
+     "ssim": 0.4304,
+     "edge_sharpness": 0.4072
+    },
+    "minimap_ternary+unsharp0.6": {
+     "psnr": 21.1142,
+     "ssim": 0.4277,
+     "edge_sharpness": 0.4242
+    },
+    "minimap_ternary+unsharp0.8": {
+     "psnr": 21.0261,
+     "ssim": 0.4246,
+     "edge_sharpness": 0.4411
+    },
+    "minimap_ternary+unsharp1.0": {
+     "psnr": 20.9295,
+     "ssim": 0.4212,
+     "edge_sharpness": 0.4576
+    }
+   }
+  },
+  {
+   "start_s": 7.55,
+   "arms": {
+    "minimap_ternary": {
+     "psnr": 21.3148,
+     "ssim": 0.4345,
+     "edge_sharpness": 0.3704
+    },
+    "minimap_ternary+unsharp0.4": {
+     "psnr": 21.1947,
+     "ssim": 0.4306,
+     "edge_sharpness": 0.4042
+    },
+    "minimap_ternary+unsharp0.6": {
+     "psnr": 21.1167,
+     "ssim": 0.4279,
+     "edge_sharpness": 0.421
+    },
+    "minimap_ternary+unsharp0.8": {
+     "psnr": 21.0289,
+     "ssim": 0.4248,
+     "edge_sharpness": 0.4375
+    },
+    "minimap_ternary+unsharp1.0": {
+     "psnr": 20.9326,
+     "ssim": 0.4214,
+     "edge_sharpness": 0.4538
+    }
+   }
+  }
+ ],
+ "note": "minimap box, sigma 1.5, amounts 0.4-1.0 on top of minimap ternary output"
+}
