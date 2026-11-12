@@ -78,5 +78,65 @@
     "psnr": 30.9245,
     "ssim": 0.8627,
     "edge_sharpness": 1.0222
+  },
+  "540/ternary+unsharp0": {
+    "psnr": 33.9262,
+    "ssim": 0.8993,
+    "edge_sharpness": 0.7755
+  },
+  "540/ternary+unsharp0.4": {
+    "psnr": 33.6527,
+    "ssim": 0.8934,
+    "edge_sharpness": 0.9133
+  },
+  "540/ternary+unsharp0.6": {
+    "psnr": 33.2955,
+    "ssim": 0.8895,
+    "edge_sharpness": 0.9795
+  },
+  "540/ternary+unsharp0.8": {
+    "psnr": 32.862,
+    "ssim": 0.8855,
+    "edge_sharpness": 1.043
+  },
+  "540/ternary+unsharp1.0": {
+    "psnr": 32.3777,
+    "ssim": 0.8813,
+    "edge_sharpness": 1.1042
+  },
+  "540/ternary+unsharp1.2": {
+    "psnr": 31.8775,
+    "ssim": 0.877,
+    "edge_sharpness": 1.164
+  },
+  "360/ternary+unsharp0": {
+    "psnr": 31.6245,
+    "ssim": 0.8806,
+    "edge_sharpness": 0.6355
+  },
+  "360/ternary+unsharp0.4": {
+    "psnr": 31.458,
+    "ssim": 0.8745,
+    "edge_sharpness": 0.7318
+  },
+  "360/ternary+unsharp0.6": {
+    "psnr": 31.291,
+    "ssim": 0.8708,
+    "edge_sharpness": 0.777
+  },
+  "360/ternary+unsharp0.8": {
+    "psnr": 31.0865,
+    "ssim": 0.867,
+    "edge_sharpness": 0.8207
+  },
+  "360/ternary+unsharp1.0": {
+    "psnr": 30.8535,
+    "ssim": 0.8631,
+    "edge_sharpness": 0.8622
+  },
+  "360/ternary+unsharp1.2": {
+    "psnr": 30.6065,
+    "ssim": 0.8591,
+    "edge_sharpness": 0.902
   }
 }
