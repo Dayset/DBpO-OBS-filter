@@ -158,19 +158,20 @@ def main():
     name = a.name or f"L{a.level}{tag}"
     ckpt = os.path.join(OUT, f"ckpt_{name}.pt")
     torch.manual_seed(a.seed)
-    model = Restorer(k, a.format)
+    dev = "cuda" if torch.cuda.is_available() else "cpu"
+    model = Restorer(k, a.format).to(dev)
     opt = torch.optim.Adam(model.parameters(), lr=a.lr)
     sched = torch.optim.lr_scheduler.CosineAnnealingLR(opt, a.steps)
     rng, step = np.random.default_rng(a.seed), 0
     if os.path.exists(ckpt):
-        ck = torch.load(ckpt, weights_only=False)
+        ck = torch.load(ckpt, weights_only=False, map_location=dev)
         model.load_state_dict(ck["model"]); opt.load_state_dict(ck["opt"]); sched.load_state_dict(ck["sched"])
         rng.bit_generator.state, step = ck["rng"], ck["step"]
         print(f"resumed from step {step}", flush=True)
     until = a.until or a.steps
     log = open(os.path.join(OUT, f"loss_{name}.csv"), "a")
     while step < until:
-        x, y = batch(lo, gt, rng, k, a.bs, a.crop)
+        x, y = (t.to(dev) for t in batch(lo, gt, rng, k, a.bs, a.crop))
         out = model(x)
         loss = F.l1_loss(out, y) + a.edge_w * F.l1_loss(sobel(out), sobel(y))
         opt.zero_grad(); loss.backward(); opt.step(); sched.step(); step += 1
@@ -180,7 +181,7 @@ def main():
             save(ckpt, model, opt, sched, step, rng)
             print(f"step {step} loss {loss.item():.4f}", flush=True)
     log.close()
-    print(f"params {sum(p.numel() for p in model.parameters())}", flush=True)
+    print(f"device {dev}, params {sum(p.numel() for p in model.parameters())}", flush=True)
     if a.export:
         rm.export_state(export_dict(model, a.format), a.export, "f32")
         print("exported", a.export, flush=True)
