@@ -86,10 +86,10 @@ def score(pred255, gt255):
                 edge_sharpness=float(gp[edge].mean() / gg[edge].mean()))
 
 
-def eval_cell(kbps, level):
+def eval_cell(kbps, level, weights=None, tag=""):
     import restore_math as rm
     import starvation_bench as sb  # noqa: F401 (imported here so score() can use it)
-    key = f"{kbps}/{level}"
+    key = f"{tag}{kbps}/{level}"
     res = json.load(open(RESULTS)) if os.path.exists(RESULTS) else {}
     if key + "/" + ("stream" if level == "1080" else "restore+unsharp1.0") in res:
         print(key, "already done", flush=True)
@@ -97,7 +97,8 @@ def eval_cell(kbps, level):
     mkv = cell_path(kbps, level)
     w, h = SIZES[level]
     ref = ref_frames()
-    weights = None if level == "1080" else rm.load(os.path.join(HERE, "out", f"restorer_L{level}.rstr"))
+    wfile = weights or f"restorer_L{level}.rstr"
+    model = None if level == "1080" else rm.load(os.path.join(HERE, "out", wfile))
     rows = {}
     for i, lo in enumerate(rf.frames(mkv, w, h)):
         if i not in TEST:
@@ -107,7 +108,7 @@ def eval_cell(kbps, level):
             arms = {"stream": lo.astype(np.float32)}
         else:
             lo_f = lo.astype(np.float32) / 255
-            rest = rm.restore(lo_f, weights, SCALE[level]) * 255
+            rest = rm.restore(lo_f, model, SCALE[level]) * 255
             arms = {"bicubic": cv2.resize(lo, (W, H), interpolation=cv2.INTER_CUBIC).astype(np.float32),
                     "restore": np.clip(rest, 0, 255),
                     "restore+unsharp1.0": unsharp(rest / 255, 1.0) * 255}
@@ -130,8 +131,10 @@ if __name__ == "__main__":
     v = sub.add_parser("eval")
     v.add_argument("--kbps", type=int, required=True, choices=[3000, 6000])
     v.add_argument("--level", required=True, choices=list(SIZES))
+    v.add_argument("--weights", help="restorer file in out/ (default restorer_L<level>.rstr)")
+    v.add_argument("--tag", default="", help="prefix for result keys, e.g. ft/")
     a = ap.parse_args()
     if a.cmd == "encode":
         encode(a.kbps, a.level)
     elif a.cmd == "eval":
-        eval_cell(a.kbps, a.level)
+        eval_cell(a.kbps, a.level, a.weights, a.tag)

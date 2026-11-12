@@ -143,6 +143,7 @@ def main():
     ap.add_argument("--format", default="float", choices=["float", "ternary"])
     ap.add_argument("--data", help="restore_data.py manifest to train on instead of the synthetic pairs")
     ap.add_argument("--seed", type=int, default=0)
+    ap.add_argument("--init", help="start from this checkpoint's weights (fine-tuning); ignored if the run resumes")
     ap.add_argument("--edge_w", type=float, default=2.0, help="weight of the Sobel-gradient loss term")
     ap.add_argument("--name", help="checkpoint / loss-log name (default L{level} plus format tag)")
     ap.add_argument("--config", help="JSON file of defaults for these options (command-line flags override it)")
@@ -163,6 +164,9 @@ def main():
     opt = torch.optim.Adam(model.parameters(), lr=a.lr)
     sched = torch.optim.lr_scheduler.CosineAnnealingLR(opt, a.steps)
     rng, step = np.random.default_rng(a.seed), 0
+    if a.init and not os.path.exists(ckpt):
+        model.load_state_dict(torch.load(a.init, weights_only=False, map_location=dev)["model"])
+        print(f"fine-tuning from {a.init}", flush=True)
     if os.path.exists(ckpt):
         ck = torch.load(ckpt, weights_only=False, map_location=dev)
         model.load_state_dict(ck["model"]); opt.load_state_dict(ck["opt"]); sched.load_state_dict(ck["sched"])

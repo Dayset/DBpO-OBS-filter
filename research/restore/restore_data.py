@@ -32,6 +32,15 @@ SCALE = {"540": 2, "360": 3}
 MAX_COUNT = 60
 
 
+def dims(level, gt):
+    """Stream size and target size. gt 960 (default): target is the 960x540 picture, stream = picture / scale.
+    gt 1080: target is the full 1920x1080 frame, stream = 960x540 (x2) or 640x360 (x3) (issue #23)."""
+    if gt == 1080:
+        return {"540": (960, 540), "360": (640, 360)}[level], (W, H)
+    s = SCALE[level]
+    return (PW // s, PH // s), (PW, PH)
+
+
 def frame_count(src):
     return os.path.getsize(src) // (W * H * 3)
 
@@ -40,50 +49,51 @@ def tag(start, count, level, kbps):
     return f"{start:06d}_{count}_L{level}_{kbps}"
 
 
-def load_manifest():
-    p = os.path.join(OUT, "manifest.json")
+def load_manifest(out):
+    p = os.path.join(out, "manifest.json")
     return json.load(open(p)) if os.path.exists(p) else {"shards": []}
 
 
-def save_manifest(m):
-    os.makedirs(OUT, exist_ok=True)
-    tmp = os.path.join(OUT, "manifest.json.tmp")
+def save_manifest(m, out):
+    os.makedirs(out, exist_ok=True)
+    tmp = os.path.join(out, "manifest.json.tmp")
     json.dump(m, open(tmp, "w"), indent=2)
-    os.replace(tmp, os.path.join(OUT, "manifest.json"))
+    os.replace(tmp, os.path.join(out, "manifest.json"))
 
 
-def build(src, start, count, level, kbps):
+def build(src, start, count, level, kbps, gt=960, out=OUT):
     if count > MAX_COUNT:
         raise SystemExit(f"--count must be <= {MAX_COUNT}")
     n = frame_count(src)
     if start + count > n:
         raise SystemExit(f"range {start}+{count} exceeds {n} frames in {src}")
-    s = SCALE[level]
-    lw, lh = PW // s, PH // s
+    (lw, lh), (gw, gh) = dims(level, gt)
     t = tag(start, count, level, kbps)
-    m = load_manifest()
-    gt_path = os.path.join(OUT, f"gt_{start:06d}_{count}.npy")
-    lo_path = os.path.join(OUT, f"lo_{t}.npy")
+    m = load_manifest(out)
+    prefix = "gt" if gt == 960 else "gt1080"
+    gt_path = os.path.join(out, f"{prefix}_{start:06d}_{count}.npy")
+    lo_path = os.path.join(out, f"lo_{t}.npy")
     if any(x["tag"] == t for x in m["shards"]) and os.path.exists(lo_path) and os.path.exists(gt_path):
         print(f"{t}: already built", flush=True)
         return
     ref = np.memmap(src, np.uint8, "r", shape=(n, H, W, 3))
-    gt = np.stack([cv2.resize(np.asarray(ref[i]), (PW, PH), interpolation=cv2.INTER_AREA)
-                   for i in range(start, start + count)])
-    lo_frames = (cv2.resize(f, (lw, lh), interpolation=cv2.INTER_AREA) for f in gt)
-    os.makedirs(OUT, exist_ok=True)
-    mkv = os.path.join(OUT, f"tmp_{t}.mkv")
+    gt_frames = np.stack([np.asarray(ref[i]) if (gw, gh) == (W, H) else
+                          cv2.resize(np.asarray(ref[i]), (gw, gh), interpolation=cv2.INTER_AREA)
+                          for i in range(start, start + count)])
+    lo_frames = (cv2.resize(f, (lw, lh), interpolation=cv2.INTER_AREA) for f in gt_frames)
+    os.makedirs(out, exist_ok=True)
+    mkv = os.path.join(out, f"tmp_{t}.mkv")
     rf.encode(lo_frames, lw, lh, kbps, mkv)
     lo = np.stack(list(rf.frames(mkv, lw, lh)))
     assert len(lo) == count, (len(lo), count)
     bits = os.path.getsize(mkv) * 8 / count
     os.remove(mkv)
-    np.save(gt_path, gt)
+    np.save(gt_path, gt_frames)
     np.save(lo_path, lo)
     m["shards"] = [x for x in m["shards"] if x["tag"] != t] + [dict(
-        tag=t, start=start, count=count, level=level, kbps=kbps, bits_per_frame=round(bits),
+        tag=t, start=start, count=count, level=level, kbps=kbps, gt_size=[gw, gh], bits_per_frame=round(bits),
         gt=os.path.basename(gt_path), lo=os.path.basename(lo_path))]
-    save_manifest(m)
+    save_manifest(m, out)
     print(f"{t}: {count} frames, {bits:.0f} bits/frame", flush=True)
 
 
@@ -96,5 +106,7 @@ if __name__ == "__main__":
     b.add_argument("--count", type=int, default=MAX_COUNT)
     b.add_argument("--level", default="540", choices=list(SCALE))
     b.add_argument("--kbps", type=int, required=True)
+    b.add_argument("--gt", type=int, default=960, choices=[960, 1080])
+    b.add_argument("--out", default=OUT)
     a = ap.parse_args()
-    build(a.src, a.start, a.count, a.level, a.kbps)
+    build(a.src, a.start, a.count, a.level, a.kbps, a.gt, a.out)
