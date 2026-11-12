@@ -88,3 +88,16 @@ Same split and box, cosine schedule over 6,000 steps (`MM_TOTAL=6000 MM_CKPT=mm_
 | minimap ternary, 6,000 steps | 21.27 | 0.423 | 0.394 |
 
 Reading: longer training trades SSIM for edge sharpness and does not improve PSNR. At 6,000 steps the SSIM is below the bilinear baseline. More steps on this single clip do not buy a better model; the limit is the data (about 10 s of training footage from one game), not the step count. A full-scale minimap model needs more captures across facilities, lighting, and map zoom.
+
+## Squish at 6000 kbit/s with ternary and unsharp 0.25 (four windows, full frame, mean)
+
+`squish6000_eval.py`; raw in `sq6000_results.json`. The ternary model is the 1,500 kbit/s full-frame model, applied out of distribution. Plain stream is the 960×540 6000 kbit/s stream.
+
+| Arm | PSNR dB | SSIM | Outer edge sharpness |
+|---|---|---|---|
+| plain 6000 kbit/s | 28.54 | 0.852 | 0.813 |
+| squish 6000, bilinear | 27.33 | 0.840 | 0.641 |
+| squish 6000 + ternary | 27.68 | 0.847 | 0.766 |
+| squish 6000 + ternary + unsharp 0.25 | 27.38 | 0.846 | 0.864 |
+
+Reading: at 6000 kbit/s the squish arm trails the plain stream on PSNR and SSIM. The squish advantage seen at 1,500 kbit/s does not carry to this budget. The ternary model still improves on bilinear (+0.35 dB, +0.007 SSIM, outer edges +0.12). Adding unsharp 0.25 gives back about 0.3 dB but sharpens outer edges past the plain stream's level. The 1,500 kbit/s model was not trained on 6,000 kbit/s output, so these numbers are an out-of-distribution check, not a trained result.

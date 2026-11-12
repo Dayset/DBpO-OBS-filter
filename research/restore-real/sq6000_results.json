@@ -1,0 +1,121 @@
+{
+ "windows": [
+  {
+   "start_s": 5.8,
+   "arms": {
+    "plain_6000k": {
+     "psnr": 28.5574,
+     "ssim": 0.8509,
+     "outer_psnr": 28.7683,
+     "outer_edge_sharpness": 0.8113
+    },
+    "sq6000_bilinear": {
+     "psnr": 27.4248,
+     "ssim": 0.8413,
+     "outer_psnr": 27.2262,
+     "outer_edge_sharpness": 0.6438
+    },
+    "sq6000_ternary": {
+     "psnr": 27.7617,
+     "ssim": 0.8481,
+     "outer_psnr": 27.6468,
+     "outer_edge_sharpness": 0.7672
+    },
+    "sq6000_ternary_unsharp0.25": {
+     "psnr": 27.4639,
+     "ssim": 0.8474,
+     "outer_psnr": 27.4387,
+     "outer_edge_sharpness": 0.8652
+    }
+   }
+  },
+  {
+   "start_s": 6.53,
+   "arms": {
+    "plain_6000k": {
+     "psnr": 28.5364,
+     "ssim": 0.853,
+     "outer_psnr": 28.746,
+     "outer_edge_sharpness": 0.8147
+    },
+    "sq6000_bilinear": {
+     "psnr": 27.2952,
+     "ssim": 0.8394,
+     "outer_psnr": 27.0994,
+     "outer_edge_sharpness": 0.6393
+    },
+    "sq6000_ternary": {
+     "psnr": 27.6507,
+     "ssim": 0.847,
+     "outer_psnr": 27.5388,
+     "outer_edge_sharpness": 0.7655
+    },
+    "sq6000_ternary_unsharp0.25": {
+     "psnr": 27.3575,
+     "ssim": 0.8463,
+     "outer_psnr": 27.3349,
+     "outer_edge_sharpness": 0.8643
+    }
+   }
+  },
+  {
+   "start_s": 6.92,
+   "arms": {
+    "plain_6000k": {
+     "psnr": 28.5621,
+     "ssim": 0.8523,
+     "outer_psnr": 28.7722,
+     "outer_edge_sharpness": 0.8136
+    },
+    "sq6000_bilinear": {
+     "psnr": 27.3376,
+     "ssim": 0.8393,
+     "outer_psnr": 27.1422,
+     "outer_edge_sharpness": 0.6407
+    },
+    "sq6000_ternary": {
+     "psnr": 27.6781,
+     "ssim": 0.8466,
+     "outer_psnr": 27.5655,
+     "outer_edge_sharpness": 0.7649
+    },
+    "sq6000_ternary_unsharp0.25": {
+     "psnr": 27.3831,
+     "ssim": 0.8459,
+     "outer_psnr": 27.3598,
+     "outer_edge_sharpness": 0.8631
+    }
+   }
+  },
+  {
+   "start_s": 7.55,
+   "arms": {
+    "plain_6000k": {
+     "psnr": 28.4863,
+     "ssim": 0.8518,
+     "outer_psnr": 28.6969,
+     "outer_edge_sharpness": 0.8136
+    },
+    "sq6000_bilinear": {
+     "psnr": 27.2696,
+     "ssim": 0.8389,
+     "outer_psnr": 27.0743,
+     "outer_edge_sharpness": 0.6394
+    },
+    "sq6000_ternary": {
+     "psnr": 27.6177,
+     "ssim": 0.8466,
+     "outer_psnr": 27.5064,
+     "outer_edge_sharpness": 0.7653
+    },
+    "sq6000_ternary_unsharp0.25": {
+     "psnr": 27.3206,
+     "ssim": 0.8459,
+     "outer_psnr": 27.2992,
+     "outer_edge_sharpness": 0.864
+    }
+   }
+  }
+ ],
+ "note": "squish 6000 kbit/s; ternary model trained on 1500 kbit/s squish output"
+}
