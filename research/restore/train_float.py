@@ -44,16 +44,17 @@ class TernaryConv2d(nn.Conv2d):
 
 
 class Restorer(nn.Module):
-    """SPEC.md §3: three 3x3 convs (ReLU), conv to 3*k^2, pixel shuffle, add the bicubic base."""
+    """SPEC.md §3: three 3x3 convs (ReLU), conv to 3*k^2, pixel shuffle, add the bicubic base.
+    width sets the channel count C (issue #25 size ladder); the depth and receptive field stay the same."""
 
-    def __init__(self, k, fmt="float"):
+    def __init__(self, k, fmt="float", width=C):
         super().__init__()
-        self.k = k
+        self.k, self.width = k, width
         conv = TernaryConv2d if fmt == "ternary" else nn.Conv2d
-        self.conv1 = conv(3, C, 3, padding=1)
-        self.conv2 = conv(C, C, 3, padding=1)
-        self.conv3 = conv(C, C, 3, padding=1)
-        self.conv4 = conv(C, 3 * k * k, 3, padding=1)
+        self.conv1 = conv(3, width, 3, padding=1)
+        self.conv2 = conv(width, width, 3, padding=1)
+        self.conv3 = conv(width, width, 3, padding=1)
+        self.conv4 = conv(width, 3 * k * k, 3, padding=1)
 
     def forward(self, x):
         h = F.relu(self.conv3(F.relu(self.conv2(F.relu(self.conv1(x))))))
@@ -75,7 +76,7 @@ def export_dict(model, fmt):
         w = m.ternary_weight() if fmt == "ternary" else m.weight
         sd[f"{name}.w"] = w.detach().numpy()
         sd[f"{name}.b"] = m.bias.detach().numpy()
-    sd["_width"] = C
+    sd["_width"] = model.width
     return sd
 
 
@@ -143,6 +144,7 @@ def main():
     ap.add_argument("--format", default="float", choices=["float", "ternary"])
     ap.add_argument("--data", help="restore_data.py manifest to train on instead of the synthetic pairs")
     ap.add_argument("--seed", type=int, default=0)
+    ap.add_argument("--width", type=int, default=C, help="channels C (default 20 = the 10k model)")
     ap.add_argument("--init", help="start from this checkpoint's weights (fine-tuning); ignored if the run resumes")
     ap.add_argument("--edge_w", type=float, default=2.0, help="weight of the Sobel-gradient loss term")
     ap.add_argument("--name", help="checkpoint / loss-log name (default L{level} plus format tag)")
@@ -160,7 +162,7 @@ def main():
     ckpt = os.path.join(OUT, f"ckpt_{name}.pt")
     torch.manual_seed(a.seed)
     dev = "cuda" if torch.cuda.is_available() else "cpu"
-    model = Restorer(k, a.format).to(dev)
+    model = Restorer(k, a.format, a.width).to(dev)
     opt = torch.optim.Adam(model.parameters(), lr=a.lr)
     sched = torch.optim.lr_scheduler.CosineAnnealingLR(opt, a.steps)
     rng, step = np.random.default_rng(a.seed), 0
