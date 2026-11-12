@@ -48,3 +48,17 @@ for i in 0 1 2 3; do $B eval $WORK $i; done   # about 1 min each
 $B report $WORK
 ```
 Raw outputs: `results.json` (windows, arms, parameters, motion scores) and `bitrate.json`.
+
+## Minimap-only vs full-frame restorer (approved crop x 10-197, y 340-514)
+
+Same split, same four windows, same squish arm; metrics inside the minimap box only (`minimap_restore.py`, raw in `minimap_results.json`). The minimap model is the same ternary 10k net (9,969 params), trained on box crops only.
+
+| Arm | PSNR dB (windows 0-3) | SSIM | Edge sharpness |
+|---|---|---|---|
+| plain 1500 kbit/s | 19.67-19.71 | 0.292-0.294 | 0.265-0.267 |
+| squish, bilinear | 21.38-21.41 | 0.425-0.427 | 0.315-0.318 |
+| squish + unsharp 1.0 | 21.30-21.33 | 0.426 | 0.372-0.374 |
+| squish + full-frame ternary | 21.37-21.40 | 0.430-0.432 | 0.339-0.341 |
+| squish + minimap ternary | 21.27-21.31 | 0.432-0.435 | 0.370-0.373 |
+
+Reading: the minimap model gets the edge sharpness of unsharp (+17% over bilinear), with better SSIM than either. It is about 0.08 dB below bilinear in PSNR, and the full-frame model is about even on PSNR. The minimap model is +0.03 edge sharpness over the full-frame model on every window. This is one clip and four windows; the minimap is translucent over the scene, which limits what a box-only model can recover.

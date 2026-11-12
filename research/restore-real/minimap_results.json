@@ -1,0 +1,131 @@
+{
+ "box": [
+  340,
+  515,
+  10,
+  198
+ ],
+ "params": 9969,
+ "windows": [
+  {
+   "start_s": 5.8,
+   "arms": {
+    "plain_1500k": {
+     "psnr": 19.6719,
+     "ssim": 0.2921,
+     "edge_sharpness": 0.2655
+    },
+    "sq_bilinear": {
+     "psnr": 21.377,
+     "ssim": 0.4252,
+     "edge_sharpness": 0.3176
+    },
+    "sq_unsharp1.0": {
+     "psnr": 21.296,
+     "ssim": 0.4244,
+     "edge_sharpness": 0.3749
+    },
+    "sq_fullframe_ternary": {
+     "psnr": 21.3729,
+     "ssim": 0.4303,
+     "edge_sharpness": 0.3413
+    },
+    "sq_minimap_ternary": {
+     "psnr": 21.2739,
+     "ssim": 0.4325,
+     "edge_sharpness": 0.3732
+    }
+   }
+  },
+  {
+   "start_s": 6.53,
+   "arms": {
+    "plain_1500k": {
+     "psnr": 19.687,
+     "ssim": 0.2929,
+     "edge_sharpness": 0.2672
+    },
+    "sq_bilinear": {
+     "psnr": 21.3883,
+     "ssim": 0.4265,
+     "edge_sharpness": 0.3172
+    },
+    "sq_unsharp1.0": {
+     "psnr": 21.3107,
+     "ssim": 0.4256,
+     "edge_sharpness": 0.3733
+    },
+    "sq_fullframe_ternary": {
+     "psnr": 21.3855,
+     "ssim": 0.4314,
+     "edge_sharpness": 0.3407
+    },
+    "sq_minimap_ternary": {
+     "psnr": 21.2905,
+     "ssim": 0.4337,
+     "edge_sharpness": 0.3725
+    }
+   }
+  },
+  {
+   "start_s": 6.92,
+   "arms": {
+    "plain_1500k": {
+     "psnr": 19.6873,
+     "ssim": 0.2922,
+     "edge_sharpness": 0.2653
+    },
+    "sq_bilinear": {
+     "psnr": 21.4072,
+     "ssim": 0.4269,
+     "edge_sharpness": 0.3173
+    },
+    "sq_unsharp1.0": {
+     "psnr": 21.3282,
+     "ssim": 0.426,
+     "edge_sharpness": 0.3744
+    },
+    "sq_fullframe_ternary": {
+     "psnr": 21.4049,
+     "ssim": 0.432,
+     "edge_sharpness": 0.3409
+    },
+    "sq_minimap_ternary": {
+     "psnr": 21.3123,
+     "ssim": 0.4343,
+     "edge_sharpness": 0.3728
+    }
+   }
+  },
+  {
+   "start_s": 7.55,
+   "arms": {
+    "plain_1500k": {
+     "psnr": 19.7103,
+     "ssim": 0.2938,
+     "edge_sharpness": 0.2671
+    },
+    "sq_bilinear": {
+     "psnr": 21.4013,
+     "ssim": 0.4269,
+     "edge_sharpness": 0.3156
+    },
+    "sq_unsharp1.0": {
+     "psnr": 21.3221,
+     "ssim": 0.426,
+     "edge_sharpness": 0.3717
+    },
+    "sq_fullframe_ternary": {
+     "psnr": 21.4029,
+     "ssim": 0.4321,
+     "edge_sharpness": 0.3388
+    },
+    "sq_minimap_ternary": {
+     "psnr": 21.3148,
+     "ssim": 0.4345,
+     "edge_sharpness": 0.3704
+    }
+   }
+  }
+ ]
+}
