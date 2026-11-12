@@ -126,18 +126,20 @@ def baseline(test, levels):
     return evaluate(["bicubic", "bicubic+unsharp1.0"], test, levels, fn)
 
 
-def eval_cnn(test, levels, amounts=(0, 0.4, 0.6, 0.8, 1.0, 1.2)):
+def eval_cnn(test, levels, amounts=(0, 0.4, 0.6, 0.8, 1.0, 1.2), fmt="float"):
     """CNN (numpy reference, restore_math.restore) with unsharp amount 0 = plain CNN. Needs
-    out/restorer_L{level}.rstr from train_float.py --export."""
+    out/restorer_L{level}[_ternary].rstr from train_float.py --export."""
     import restore_math as rm
-    weights = {lv: rm.load(f"{OUT}/restorer_L{lv}.rstr") for lv in levels}
+    tag = "" if fmt == "float" else "_" + fmt
+    weights = {lv: rm.load(f"{OUT}/restorer_L{lv}{tag}.rstr") for lv in levels}
 
     def fn(arm, lo, lv):
         out = np.stack([rm.restore(f, weights[lv], SCALE[lv]) for f in lo])
         amt = float(arm.split("unsharp")[1])
         return unsharp(out, amt) if amt else out
 
-    return evaluate([f"cnn+unsharp{a}" for a in amounts], test, levels, fn)
+    arm = "cnn" if fmt == "float" else fmt
+    return evaluate([f"{arm}+unsharp{a}" for a in amounts], test, levels, fn)
 
 
 def ids(spec):
@@ -180,10 +182,11 @@ if __name__ == "__main__":
     e = sub.add_parser("eval")
     e.add_argument("--clips", default="0-3")
     e.add_argument("--levels", default="540,360")
+    e.add_argument("--format", default="float", choices=["float", "ternary"])
     a = ap.parse_args()
     if a.cmd == "make":
         make(list(ids(a.clips)), a.levels.split(","))
     elif a.cmd == "baseline":
         baseline(list(ids(a.clips)), a.levels.split(","))
     elif a.cmd == "eval":
-        eval_cnn(list(ids(a.clips)), a.levels.split(","))
+        eval_cnn(list(ids(a.clips)), a.levels.split(","), fmt=a.format)

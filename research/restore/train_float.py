@@ -27,16 +27,32 @@ KX = torch.tensor([[-1.0, 0, 1], [-2, 0, 2], [-1, 0, 1]]).view(1, 1, 3, 3) / 8
 KY = KX.transpose(2, 3)
 
 
+class TernaryConv2d(nn.Conv2d):
+    """BitNet b1.58-style (issue #22.5): weights rounded to {-s, 0, +s} per layer in the forward
+    pass, s = mean |w|; straight-through gradients to the float weights."""
+
+    def ternary_weight(self):
+        w = self.weight
+        s = w.abs().mean().clamp(min=1e-5)
+        return torch.clamp(torch.round(w / s), -1, 1) * s
+
+    def forward(self, x):
+        w = self.weight
+        wq = self.ternary_weight()
+        return F.conv2d(x, w + (wq - w).detach(), self.bias, self.stride, self.padding)
+
+
 class Restorer(nn.Module):
     """SPEC.md §3: three 3x3 convs (ReLU), conv to 3*k^2, pixel shuffle, add the bicubic base."""
 
-    def __init__(self, k):
+    def __init__(self, k, fmt="float"):
         super().__init__()
         self.k = k
-        self.conv1 = nn.Conv2d(3, C, 3, padding=1)
-        self.conv2 = nn.Conv2d(C, C, 3, padding=1)
-        self.conv3 = nn.Conv2d(C, C, 3, padding=1)
-        self.conv4 = nn.Conv2d(C, 3 * k * k, 3, padding=1)
+        conv = TernaryConv2d if fmt == "ternary" else nn.Conv2d
+        self.conv1 = conv(3, C, 3, padding=1)
+        self.conv2 = conv(C, C, 3, padding=1)
+        self.conv3 = conv(C, C, 3, padding=1)
+        self.conv4 = conv(C, 3 * k * k, 3, padding=1)
 
     def forward(self, x):
         h = F.relu(self.conv3(F.relu(self.conv2(F.relu(self.conv1(x))))))
@@ -48,6 +64,18 @@ def sobel(x):
     g = x.mean(1, keepdim=True)
     gx, gy = F.conv2d(g, KX, padding=1), F.conv2d(g, KY, padding=1)
     return torch.sqrt(gx * gx + gy * gy + 1e-8)
+
+
+def export_dict(model, fmt):
+    """Float weights, or the ternary-rounded weights for --format ternary (what the forward pass uses)."""
+    sd = {}
+    for name in ("conv1", "conv2", "conv3", "conv4"):
+        m = getattr(model, name)
+        w = m.ternary_weight() if fmt == "ternary" else m.weight
+        sd[f"{name}.w"] = w.detach().numpy()
+        sd[f"{name}.b"] = m.bias.detach().numpy()
+    sd["_width"] = C
+    return sd
 
 
 def load_pairs(level):
@@ -83,14 +111,16 @@ def main():
     ap.add_argument("--crop", type=int, default=40)
     ap.add_argument("--lr", type=float, default=2e-3)
     ap.add_argument("--every", type=int, default=100)
+    ap.add_argument("--format", default="float", choices=["float", "ternary"])
     ap.add_argument("--export", help="write the RSTR v1 file here when training finishes")
     a = ap.parse_args()
     torch.set_num_threads(2)
     k = SCALE[a.level]
     lo, gt = load_pairs(a.level)
-    ckpt = os.path.join(OUT, f"ckpt_L{a.level}.pt")
+    tag = "" if a.format == "float" else "_" + a.format
+    ckpt = os.path.join(OUT, f"ckpt_L{a.level}{tag}.pt")
     torch.manual_seed(0)
-    model = Restorer(k)
+    model = Restorer(k, a.format)
     opt = torch.optim.Adam(model.parameters(), lr=a.lr)
     sched = torch.optim.lr_scheduler.CosineAnnealingLR(opt, a.steps)
     rng, step = np.random.default_rng(0), 0
@@ -100,7 +130,7 @@ def main():
         rng.bit_generator.state, step = ck["rng"], ck["step"]
         print(f"resumed from step {step}", flush=True)
     until = a.until or a.steps
-    log = open(os.path.join(OUT, f"loss_L{a.level}.csv"), "a")
+    log = open(os.path.join(OUT, f"loss_L{a.level}{tag}.csv"), "a")
     while step < until:
         x, y = batch(lo, gt, rng, k, a.bs, a.crop)
         out = model(x)
@@ -114,10 +144,7 @@ def main():
     log.close()
     print(f"params {sum(p.numel() for p in model.parameters())}", flush=True)
     if a.export:
-        sd = {f"{n.split('.')[0]}.{'w' if n.endswith('weight') else 'b'}": p.detach().numpy()
-              for n, p in model.state_dict().items()}
-        sd["_width"] = C
-        rm.export_state(sd, a.export, "f32")
+        rm.export_state(export_dict(model, a.format), a.export, "f32")
         print("exported", a.export, flush=True)
 
 
