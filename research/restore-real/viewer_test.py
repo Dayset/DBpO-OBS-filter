@@ -34,8 +34,8 @@ def make_arms(ref_path, work, idx):
     print("arms done window", idx, s, flush=True)
 
 def upscale_label(frame, label):
-    im = cv2.resize(frame, (OUT_W, OUT_H), interpolation=cv2.INTER_CUBIC)
-    cv2.putText(im, label, (40, 90), cv2.FONT_HERSHEY_SIMPLEX, 2.5, (255, 255, 0), 5, cv2.LINE_AA)
+    im = cv2.resize(cv2.cvtColor(frame, cv2.COLOR_RGB2BGR), (OUT_W, OUT_H), interpolation=cv2.INTER_CUBIC)
+    cv2.putText(im, label, (40, 90), cv2.FONT_HERSHEY_SIMPLEX, 2.5, (0, 255, 255), 5, cv2.LINE_AA)
     return im
 
 def render_trials(work, outdir):
