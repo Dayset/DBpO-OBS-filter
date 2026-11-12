@@ -1,0 +1,2 @@
+{"name": "smoke", "level": "540", "format": "float", "steps": 20, "bs": 4, "crop": 40, "lr": 0.002,
+ "every": 10, "seed": 0, "edge_w": 2.0, "data": "research/restore/out/data/manifest.json"}

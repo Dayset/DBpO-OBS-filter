@@ -1,0 +1,178 @@
+{
+  "540/bicubic": {
+    "psnr": 32.7968,
+    "ssim": 0.8927,
+    "edge_sharpness": 0.7177
+  },
+  "540/bicubic+unsharp1.0": {
+    "psnr": 32.1553,
+    "ssim": 0.876,
+    "edge_sharpness": 0.977
+  },
+  "360/bicubic": {
+    "psnr": 30.741,
+    "ssim": 0.8761,
+    "edge_sharpness": 0.506
+  },
+  "360/bicubic+unsharp1.0": {
+    "psnr": 30.4277,
+    "ssim": 0.8645,
+    "edge_sharpness": 0.626
+  },
+  "540/cnn+unsharp0": {
+    "psnr": 34.411,
+    "ssim": 0.9035,
+    "edge_sharpness": 0.789
+  },
+  "540/cnn+unsharp0.4": {
+    "psnr": 34.0307,
+    "ssim": 0.8974,
+    "edge_sharpness": 0.932
+  },
+  "540/cnn+unsharp0.6": {
+    "psnr": 33.596,
+    "ssim": 0.8934,
+    "edge_sharpness": 0.999
+  },
+  "540/cnn+unsharp0.8": {
+    "psnr": 33.0895,
+    "ssim": 0.8891,
+    "edge_sharpness": 1.0625
+  },
+  "540/cnn+unsharp1.0": {
+    "psnr": 32.547,
+    "ssim": 0.8848,
+    "edge_sharpness": 1.124
+  },
+  "540/cnn+unsharp1.2": {
+    "psnr": 32.0033,
+    "ssim": 0.8805,
+    "edge_sharpness": 1.1827
+  },
+  "360/cnn+unsharp0": {
+    "psnr": 32.5535,
+    "ssim": 0.8876,
+    "edge_sharpness": 0.7007
+  },
+  "360/cnn+unsharp0.4": {
+    "psnr": 32.255,
+    "ssim": 0.8806,
+    "edge_sharpness": 0.8185
+  },
+  "360/cnn+unsharp0.6": {
+    "psnr": 31.9728,
+    "ssim": 0.8763,
+    "edge_sharpness": 0.873
+  },
+  "360/cnn+unsharp0.8": {
+    "psnr": 31.6483,
+    "ssim": 0.872,
+    "edge_sharpness": 0.9247
+  },
+  "360/cnn+unsharp1.0": {
+    "psnr": 31.2895,
+    "ssim": 0.8674,
+    "edge_sharpness": 0.975
+  },
+  "360/cnn+unsharp1.2": {
+    "psnr": 30.9245,
+    "ssim": 0.8627,
+    "edge_sharpness": 1.0222
+  },
+  "540/ternary+unsharp0": {
+    "psnr": 33.9262,
+    "ssim": 0.8993,
+    "edge_sharpness": 0.7755
+  },
+  "540/ternary+unsharp0.4": {
+    "psnr": 33.6527,
+    "ssim": 0.8934,
+    "edge_sharpness": 0.9133
+  },
+  "540/ternary+unsharp0.6": {
+    "psnr": 33.2955,
+    "ssim": 0.8895,
+    "edge_sharpness": 0.9795
+  },
+  "540/ternary+unsharp0.8": {
+    "psnr": 32.862,
+    "ssim": 0.8855,
+    "edge_sharpness": 1.043
+  },
+  "540/ternary+unsharp1.0": {
+    "psnr": 32.3777,
+    "ssim": 0.8813,
+    "edge_sharpness": 1.1042
+  },
+  "540/ternary+unsharp1.2": {
+    "psnr": 31.8775,
+    "ssim": 0.877,
+    "edge_sharpness": 1.164
+  },
+  "360/ternary+unsharp0": {
+    "psnr": 31.6245,
+    "ssim": 0.8806,
+    "edge_sharpness": 0.6355
+  },
+  "360/ternary+unsharp0.4": {
+    "psnr": 31.458,
+    "ssim": 0.8745,
+    "edge_sharpness": 0.7318
+  },
+  "360/ternary+unsharp0.6": {
+    "psnr": 31.291,
+    "ssim": 0.8708,
+    "edge_sharpness": 0.777
+  },
+  "360/ternary+unsharp0.8": {
+    "psnr": 31.0865,
+    "ssim": 0.867,
+    "edge_sharpness": 0.8207
+  },
+  "360/ternary+unsharp1.0": {
+    "psnr": 30.8535,
+    "ssim": 0.8631,
+    "edge_sharpness": 0.8622
+  },
+  "360/ternary+unsharp1.2": {
+    "psnr": 30.6065,
+    "ssim": 0.8591,
+    "edge_sharpness": 0.902
+  },
+  "cbr250/full": {
+    "psnr": 33.7923,
+    "ssim": 0.8882,
+    "edge_sharpness": 0.7315,
+    "kbps_produced": 227.0
+  },
+  "cbr250/shrink": {
+    "psnr": 33.629,
+    "ssim": 0.8998,
+    "edge_sharpness": 0.7493,
+    "kbps_produced": 188.5
+  },
+  "cbr250/restore": {
+    "psnr": 32.7557,
+    "ssim": 0.8898,
+    "edge_sharpness": 1.1703,
+    "kbps_produced": 188.5
+  },
+  "cbr300/full": {
+    "psnr": 34.3345,
+    "ssim": 0.8944,
+    "edge_sharpness": 0.758,
+    "kbps_produced": 239.1
+  },
+  "cbr300/shrink": {
+    "psnr": 33.9292,
+    "ssim": 0.9029,
+    "edge_sharpness": 0.764,
+    "kbps_produced": 213.6
+  },
+  "cbr300/restore": {
+    "psnr": 32.91,
+    "ssim": 0.8925,
+    "edge_sharpness": 1.187,
+    "kbps_produced": 213.6
+  }
+}

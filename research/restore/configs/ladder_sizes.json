@@ -1,0 +1,22 @@
+{
+  "5k": {
+    "width": 13,
+    "params": 4848,
+    "macs_per_src_px": 4797
+  },
+  "10k": {
+    "width": 20,
+    "params": 9972,
+    "macs_per_src_px": 9900
+  },
+  "50k": {
+    "width": 49,
+    "params": 49992,
+    "macs_per_src_px": 49833
+  },
+  "200k": {
+    "width": 102,
+    "params": 201360,
+    "macs_per_src_px": 201042
+  }
+}
