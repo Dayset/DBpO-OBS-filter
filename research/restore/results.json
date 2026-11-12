@@ -138,5 +138,41 @@
     "psnr": 30.6065,
     "ssim": 0.8591,
     "edge_sharpness": 0.902
+  },
+  "cbr250/full": {
+    "psnr": 33.7923,
+    "ssim": 0.8882,
+    "edge_sharpness": 0.7315,
+    "kbps_produced": 227.0
+  },
+  "cbr250/shrink": {
+    "psnr": 33.629,
+    "ssim": 0.8998,
+    "edge_sharpness": 0.7493,
+    "kbps_produced": 188.5
+  },
+  "cbr250/restore": {
+    "psnr": 32.7557,
+    "ssim": 0.8898,
+    "edge_sharpness": 1.1703,
+    "kbps_produced": 188.5
+  },
+  "cbr300/full": {
+    "psnr": 34.3345,
+    "ssim": 0.8944,
+    "edge_sharpness": 0.758,
+    "kbps_produced": 239.1
+  },
+  "cbr300/shrink": {
+    "psnr": 33.9292,
+    "ssim": 0.9029,
+    "edge_sharpness": 0.764,
+    "kbps_produced": 213.6
+  },
+  "cbr300/restore": {
+    "psnr": 32.91,
+    "ssim": 0.8925,
+    "edge_sharpness": 1.187,
+    "kbps_produced": 213.6
   }
 }

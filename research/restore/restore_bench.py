@@ -63,6 +63,20 @@ def x264_roundtrip(frames, crf=28):
     return np.frombuffer(dec, np.uint8).reshape(n, h, w, 3).copy(), len(enc) * 8
 
 
+def cbr_roundtrip(frames, kbps, fps=60):
+    """Encode and decode uint8 RGB frames as a fixed-bitrate stream (x264 veryfast, 2 s GOP, the same
+    settings as foveation_bench.encode). Returns (decoded, kbit/s actually produced)."""
+    n, h, w, _ = frames.shape
+    enc = subprocess.run(
+        ["ffmpeg", "-loglevel", "error", "-f", "rawvideo", "-pix_fmt", "rgb24", "-s", f"{w}x{h}", "-r", str(fps),
+         "-i", "-", "-c:v", "libx264", "-preset", "veryfast", "-b:v", f"{kbps}k", "-maxrate", f"{kbps}k",
+         "-bufsize", f"{kbps}k", "-g", str(2 * fps), "-pix_fmt", "yuv420p", "-f", "matroska", "-"],
+        input=np.ascontiguousarray(frames).tobytes(), capture_output=True, check=True).stdout
+    dec = subprocess.run(["ffmpeg", "-loglevel", "error", "-i", "-", "-f", "rawvideo", "-pix_fmt", "rgb24", "-"],
+                         input=enc, capture_output=True, check=True).stdout
+    return np.frombuffer(dec, np.uint8).reshape(n, h, w, 3).copy(), len(enc) * 8 / (n / fps) / 1000
+
+
 def sobel_mag(x):
     """Sobel gradient magnitude of the channel mean, x: (N, H, W) float32."""
     gx = np.stack([cv2.Sobel(f, cv2.CV_32F, 1, 0, ksize=3) for f in x]) / 8
@@ -142,6 +156,41 @@ def eval_cnn(test, levels, amounts=(0, 0.4, 0.6, 0.8, 1.0, 1.2), fmt="float"):
     return evaluate([f"{arm}+unsharp{a}" for a in amounts], test, levels, fn)
 
 
+def cbr(cid, kbps, arm):
+    """One (arm, bitrate) cell on one clip, same stream budget for every arm. Full: 960x540 stream.
+    Shrink: 540 level (480x270) stream, bicubic up. Restore: the same stream, float restorer + unsharp 1.0."""
+    gt = np.load(f"{OUT}/gt/clip{cid}.npy")[:T].astype(np.float32) / 255
+    if arm == "full":
+        src = blur(clip_frames(cid))
+    else:
+        src = np.stack([cv2.resize(b, (W // SCALE["540"], H // SCALE["540"]), interpolation=cv2.INTER_AREA)
+                        for b in blur(clip_frames(cid))])
+    dec, kb = cbr_roundtrip(src, kbps)
+    dec = dec.astype(np.float32) / 255
+    if arm == "full":
+        pred = dec
+    elif arm == "shrink":
+        pred = bicubic(dec, "540")
+    else:
+        import restore_math as rm
+        w = rm.load(f"{OUT}/restorer_L540.rstr")
+        pred = unsharp(np.stack([rm.restore(f, w, SCALE["540"]) for f in dec]), 1.0)
+    return metrics(pred, gt), kb
+
+
+def run_cbr(clips, kbps, arm):
+    key = f"cbr{kbps}/{arm}"
+    res = json.load(open(RESULTS)) if os.path.exists(RESULTS) else {}
+    if key in res:
+        print(key, "already done", flush=True)
+        return
+    rows = [cbr(cid, kbps, arm) for cid in clips]
+    res[key] = {k: round(float(np.mean([m[k] for m, _ in rows])), 4) for k in rows[0][0]}
+    res[key]["kbps_produced"] = round(float(np.mean([kb for _, kb in rows])), 1)
+    print(key, res[key], flush=True)
+    json.dump(res, open(RESULTS, "w"), indent=2)
+
+
 def ids(spec):
     a, _, b = spec.partition("-")
     return range(int(a), int(b or a) + 1)
@@ -183,8 +232,14 @@ if __name__ == "__main__":
     e.add_argument("--clips", default="0-3")
     e.add_argument("--levels", default="540,360")
     e.add_argument("--format", default="float", choices=["float", "ternary"])
+    c = sub.add_parser("cbr")
+    c.add_argument("--clips", default="0-3")
+    c.add_argument("--kbps", type=int, required=True)
+    c.add_argument("--arm", required=True, choices=["full", "shrink", "restore"])
     a = ap.parse_args()
-    if a.cmd == "make":
+    if a.cmd == "cbr":
+        run_cbr(list(ids(a.clips)), a.kbps, a.arm)
+    elif a.cmd == "make":
         make(list(ids(a.clips)), a.levels.split(","))
     elif a.cmd == "baseline":
         baseline(list(ids(a.clips)), a.levels.split(","))
