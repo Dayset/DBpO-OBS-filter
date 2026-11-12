@@ -6,15 +6,27 @@
 <title>Restorer WebGL2 bench</title>
 <style>
   body { font: 14px system-ui, sans-serif; margin: 16px; color: #111; background: #fff; }
-  button { font: inherit; padding: 8px 14px; }
-  pre { background: #f4f4f4; padding: 8px; white-space: pre-wrap; word-break: break-all; }
+  button { font: inherit; padding: 8px 14px; margin: 4px 4px 4px 0; }
+  pre, textarea { background: #f4f4f4; padding: 8px; white-space: pre-wrap; word-break: break-all; }
+  textarea { width: 100%; box-sizing: border-box; height: 240px; font: 12px ui-monospace, monospace; }
+  input[type=number] { width: 5em; font: inherit; padding: 4px; }
 </style>
 </head>
 <body>
-<h3>Edge restorer, WebGL2 forward pass (issue #26, WP 26.1)</h3>
-<p>Self-test: runs the golden case from <code>golden/</code> (generated from <code>research/restore/restore_math.py</code>) and checks it against <code>restore_golden.json</code> within 1/255.</p>
+<h3>Edge restorer, WebGL2 forward pass (issue #26)</h3>
+
+<h4>WP 26.1: golden self-test</h4>
+<p>Runs the golden case from <code>golden/</code> (generated from <code>research/restore/restore_math.py</code>) and checks it against <code>restore_golden.json</code> within 1/255.</p>
 <button id="go">Run golden self-test</button>
 <pre id="log"></pre>
+
+<h4>WP 26.2: timing harness</h4>
+<p>Random weights with the 10k (width 20) and 200k (width 102) shapes. Cases: 540p full (960×540 → 1920×1080, k=2), 540p periphery (same network, final and unsharp passes limited to the outside of the centre 35–65% box), 360p full (640×360 → 1920×1080, k=3). Each frame ends with a 1-pixel read so the GPU has finished. GPU timer queries are used where <code>EXT_disjoint_timer_query_webgl2</code> exists; wall time is always recorded. The JSON below is the result to paste into the issue.</p>
+<label>Frames <input id="frames" type="number" value="30" min="1"></label>
+<label>Warm-up <input id="warm" type="number" value="5" min="0"></label>
+<button id="time">Run timing</button>
+<textarea id="json" readonly placeholder="JSON result appears here"></textarea>
+
 <script>
 "use strict";
 // Layout: conv activations are stacked layers of H rows (layer l = channels 4l..4l+3).
@@ -44,7 +56,7 @@ void main() {
                   texelFetch(uW, ivec2(bcol, row + 1), 0).r,
                   texelFetch(uW, ivec2(bcol, row + 2), 0).r,
                   texelFetch(uW, ivec2(bcol, row + 3), 0).r);
-  for (int ig = 0; ig < 8; ig++) {
+  for (int ig = 0; ig < 32; ig++) {
     if (ig >= uNIG) break;
     for (int dy = -1; dy <= 1; dy++) {
       for (int dx = -1; dx <= 1; dx++) {
@@ -79,9 +91,12 @@ void main() {
   ivec2 isz = textureSize(uImg, 0);
   int H = isz.y, W = isz.x;
   int h = P.y / uK, w = P.x / uK;
-  int comp = (P.y - h * uK) * uK + (P.x - w * uK);
+  int sub = (P.y - h * uK) * uK + (P.x - w * uK);
   vec3 res;
-  for (int c = 0; c < 3; c++) res[c] = texelFetch(uC, ivec2(w, c * H + h), 0)[comp];
+  for (int c = 0; c < 3; c++) {
+    int m = c * uK * uK + sub;  // conv4 channel index (SPEC §3 pixel shuffle)
+    res[c] = texelFetch(uC, ivec2(w, (m >> 2) * H + h), 0)[m & 3];
+  }
   vec2 fs = (vec2(P) + 0.5) / float(uK) - 0.5;
   ivec2 i0 = ivec2(floor(fs));
   vec2 t = fs - vec2(i0);
@@ -186,15 +201,15 @@ function setup(canvas, net) {
   if (!gl.getExtension("EXT_color_buffer_float")) throw new Error("EXT_color_buffer_float not available");
   const vao = gl.createVertexArray();
   const fbo = gl.createFramebuffer();
-  const R = {
+  return {
     gl, vao, fbo,
     conv: program(gl, CONV_FS), final: program(gl, FINAL_FS), sharp: program(gl, SHARP_FS),
     convs: [1, 2, 3, 4].map((k) => ({ ...convTex(gl, { w: net[`conv${k}.w`], b: net[`conv${k}.b`] }), relu: k < 4 })),
   };
-  return R;
 }
 
-function runPass(R, prog, dst, layers, layerH, setUniforms) {
+// rects (optional, single-layer passes only): scissor boxes [x, y, w, h]; the pass draws only inside them.
+function runPass(R, prog, dst, layers, layerH, setUniforms, rects) {
   const { gl } = R;
   gl.bindFramebuffer(gl.FRAMEBUFFER, R.fbo);
   gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, dst.tex, 0);
@@ -204,7 +219,14 @@ function runPass(R, prog, dst, layers, layerH, setUniforms) {
   for (let l = 0; l < layers; l++) {
     gl.viewport(0, l * layerH, dst.w, layerH);
     setUniforms(l);
-    gl.drawArrays(gl.TRIANGLES, 0, 3);
+    if (!rects) { gl.drawArrays(gl.TRIANGLES, 0, 3); continue; }
+    gl.enable(gl.SCISSOR_TEST);
+    for (const [x, y, w, h] of rects) {
+      if (w <= 0 || h <= 0) continue;
+      gl.scissor(x, y, w, h);
+      gl.drawArrays(gl.TRIANGLES, 0, 3);
+    }
+    gl.disable(gl.SCISSOR_TEST);
   }
 }
 
@@ -214,8 +236,9 @@ function bindTex(gl, unit, tex, loc) {
   gl.uniform1i(loc, unit);
 }
 
-// img: Float32Array H·W·3 in [0,1]. Returns Float32Array (H·k)·(W·k)·3.
-function forward(R, img, W, H, k, amt = 0) {
+// Runs the whole network on GPU and returns the output texture (framebuffer left bound to it).
+// img: Float32Array H·W·3 in [0,1]. Output is (H·k)×(W·k).
+function pipeline(R, img, W, H, k, amt = 0, rects = null) {
   const { gl } = R;
   const packed = new Float32Array(W * H * 4);
   for (let i = 0; i < W * H; i++) { packed[i * 4] = img[i * 3]; packed[i * 4 + 1] = img[i * 3 + 1]; packed[i * 4 + 2] = img[i * 3 + 2]; }
@@ -235,22 +258,28 @@ function forward(R, img, W, H, k, amt = 0) {
     src = dst;
   }
 
-  const tOut = makeTex(gl, W * k, H * k, null);
-  runPass(R, R.final, tOut, 1, H * k, () => {
+  let res = makeTex(gl, W * k, H * k, null);
+  runPass(R, R.final, res, 1, H * k, () => {
     bindTex(gl, 0, src, R.final.u.uC);
     bindTex(gl, 1, tImg, R.final.u.uImg);
     gl.uniform1i(R.final.u.uK, k);
-  });
+  }, rects);
 
-  let res = tOut;
   if (amt > 0) {
-    res = makeTex(gl, W * k, H * k, null);
-    runPass(R, R.sharp, res, 1, H * k, () => {
-      bindTex(gl, 0, tOut, R.sharp.u.uIn);
+    const sharp = makeTex(gl, W * k, H * k, null);
+    runPass(R, R.sharp, sharp, 1, H * k, () => {
+      bindTex(gl, 0, res, R.sharp.u.uIn);
       gl.uniform1f(R.sharp.u.uAmt, amt);
-    });
+    }, rects);
+    res = sharp;
   }
+  return res;
+}
 
+// Returns Float32Array (H·k)·(W·k)·3 in [0,1]-clipped units (unsharp output is unclipped).
+function forward(R, img, W, H, k, amt = 0) {
+  const { gl } = R;
+  const res = pipeline(R, img, W, H, k, amt);
   const rgba = new Float32Array(W * k * H * k * 4);
   gl.bindFramebuffer(gl.FRAMEBUFFER, R.fbo);
   gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, res.tex, 0);
@@ -293,6 +322,107 @@ async function selfTest() {
   }
 }
 document.getElementById("go").addEventListener("click", selfTest);
+
+// ---- WP 26.2 timing harness ----
+function randomNet(C, k, seed) {
+  let s = seed >>> 0;
+  const rnd = () => { s = (s * 1664525 + 1013904223) >>> 0; return (s / 4294967296) * 2 - 1; };
+  const mk = (shape, scale) => {
+    const data = new Float32Array(shape.reduce((a, b) => a * b, 1));
+    for (let i = 0; i < data.length; i++) data[i] = rnd() * scale;
+    return { shape, data };
+  };
+  return {
+    "conv1.w": mk([C, 3, 3, 3], 1 / Math.sqrt(27)), "conv1.b": mk([C], 0.01),
+    "conv2.w": mk([C, C, 3, 3], 1 / Math.sqrt(9 * C)), "conv2.b": mk([C], 0.01),
+    "conv3.w": mk([C, C, 3, 3], 1 / Math.sqrt(9 * C)), "conv3.b": mk([C], 0.01),
+    "conv4.w": mk([3 * k * k, C, 3, 3], 1 / Math.sqrt(9 * C)), "conv4.b": mk([3 * k * k], 0.01),
+  };
+}
+
+// Output-space ring outside the centre box (35%–65% of H and W).
+function peripheryRects(Wo, Ho) {
+  const y0 = Math.floor(0.35 * Ho), y1 = Math.ceil(0.65 * Ho);
+  const x0 = Math.floor(0.35 * Wo), x1 = Math.ceil(0.65 * Wo);
+  return [[0, 0, Wo, y0], [0, y1, Wo, Ho - y1], [0, y0, x0, y1 - y0], [x1, y0, Wo - x1, y1 - y0]];
+}
+
+const pct = (a, p) => { const s = [...a].sort((x, y) => x - y); return s[Math.min(s.length - 1, Math.floor(p * s.length))]; };
+const median = (a) => pct(a, 0.5);
+
+async function timeCase(c, frames, warm) {
+  const { W, H, k, C, periphery } = c;
+  const R = setup(document.createElement("canvas"), randomNet(C, k, 1));
+  const img = new Float32Array(W * H * 3);
+  for (let i = 0; i < img.length; i++) img[i] = Math.random();
+  const rects = periphery ? peripheryRects(W * k, H * k) : null;
+  const ext = R.gl.getExtension("EXT_disjoint_timer_query_webgl2");
+  const px = new Float32Array(4);
+  const run = () => {
+    const res = pipeline(R, img, W, H, k, 1.0, rects);
+    R.gl.bindFramebuffer(R.gl.FRAMEBUFFER, R.fbo);
+    R.gl.framebufferTexture2D(R.gl.FRAMEBUFFER, R.gl.COLOR_ATTACHMENT0, R.gl.TEXTURE_2D, res.tex, 0);
+    R.gl.readPixels(0, 0, 1, 1, R.gl.RGBA, R.gl.FLOAT, px);  // forces the GPU to finish
+  };
+  for (let i = 0; i < warm; i++) run();
+  const walls = [], queries = [];
+  const g = R.gl;
+  for (let i = 0; i < frames; i++) {
+    let q = null;
+    if (ext) { q = g.createQuery(); g.beginQuery(ext.TIME_ELAPSED_EXT, q); }
+    const t0 = performance.now();
+    run();
+    walls.push(performance.now() - t0);
+    if (ext) { g.endQuery(ext.TIME_ELAPSED_EXT); queries.push(q); }
+  }
+  let gpu = null;
+  if (ext) {
+    const t0 = performance.now();
+    while (!queries.every((q) => g.getQueryParameter(q, g.QUERY_RESULT_AVAILABLE)) && performance.now() - t0 < 5000)
+      await new Promise((r) => setTimeout(r, 10));
+    const disjoint = g.getParameter(ext.GPU_DISJOINT_EXT);
+    if (!disjoint && queries.every((q) => g.getQueryParameter(q, g.QUERY_RESULT_AVAILABLE)))
+      gpu = queries.map((q) => g.getQueryParameter(q, g.QUERY_RESULT) / 1e6);
+  }
+  const stat = (a) => a && { median: +median(a).toFixed(3), p90: +pct(a, 0.9).toFixed(3) };
+  return {
+    case: c.name, input: `${W}x${H}`, output: `${W * k}x${H * k}`, k, width: C,
+    periphery: !!periphery, frames, wall_ms: stat(walls), gpu_ms: stat(gpu),
+  };
+}
+
+async function timingRun() {
+  const out = document.getElementById("json");
+  const quick = new URLSearchParams(location.search).has("quick");
+  const frames = quick ? 1 : +document.getElementById("frames").value;
+  const warm = quick ? 0 : +document.getElementById("warm").value;
+  const cases = [];
+  for (const C of [20, 102]) {
+    cases.push({ name: "540p full", W: 960, H: 540, k: 2, C });
+    cases.push({ name: "540p periphery", W: 960, H: 540, k: 2, C, periphery: true });
+    cases.push({ name: "360p full", W: 640, H: 360, k: 3, C });
+  }
+  const list = quick ? cases.slice(0, 1) : cases;
+  const result = {
+    page: "viewer/restore-bench/index.html", issue: 26, wp: "26.2",
+    userAgent: navigator.userAgent, devicePixelRatio: window.devicePixelRatio,
+    webgl2: null, cases: [],
+    note: "periphery: the whole 540p network runs; only the final and unsharp passes are limited to the outside of the centre 35-65% box, so this is an upper bound for periphery-only restoration.",
+  };
+  const gl = document.createElement("canvas").getContext("webgl2");
+  if (gl) {
+    const d = gl.getExtension("WEBGL_debug_renderer_info");
+    result.webgl2 = { renderer: gl.getParameter(d ? d.UNMASKED_RENDERER_WEBGL : gl.RENDERER), timerQuery: !!gl.getExtension("EXT_disjoint_timer_query_webgl2") };
+  }
+  out.value = "running...";
+  for (const c of list) {
+    try { result.cases.push(await timeCase(c, frames, warm)); }
+    catch (e) { result.cases.push({ case: c.name, width: c.C, error: e.message }); }
+    out.value = JSON.stringify(result, null, 1);
+  }
+  out.value = JSON.stringify(result, null, 1);
+}
+document.getElementById("time").addEventListener("click", timingRun);
 </script>
 </body>
 </html>
