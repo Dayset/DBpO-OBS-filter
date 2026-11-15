@@ -1,0 +1,130 @@
+{
+ "750/plain": {
+  "kbps_actual": 789.6,
+  "psnr": 19.587,
+  "ssim": 0.4464,
+  "c_psnr": 18.703,
+  "c_ssim": 0.3293,
+  "psnr_sd": 0.896
+ },
+ "750/squish_720x404": {
+  "kbps_actual": 788.9,
+  "psnr": 20.659,
+  "ssim": 0.5056,
+  "c_psnr": 20.153,
+  "c_ssim": 0.4139,
+  "psnr_sd": 0.906
+ },
+ "1000/plain": {
+  "kbps_actual": 1049.8,
+  "psnr": 20.712,
+  "ssim": 0.5001,
+  "c_psnr": 19.52,
+  "c_ssim": 0.3768,
+  "psnr_sd": 0.808
+ },
+ "1000/squish_720x404": {
+  "kbps_actual": 1050.2,
+  "psnr": 21.514,
+  "ssim": 0.5475,
+  "c_psnr": 21.176,
+  "c_ssim": 0.49,
+  "psnr_sd": 1.012
+ },
+ "1500/plain": {
+  "kbps_actual": 1568.4,
+  "psnr": 21.652,
+  "ssim": 0.5472,
+  "c_psnr": 20.28,
+  "c_ssim": 0.423,
+  "psnr_sd": 0.903
+ },
+ "1500/squish_720x404": {
+  "kbps_actual": 1572.5,
+  "psnr": 23.234,
+  "ssim": 0.6414,
+  "c_psnr": 23.304,
+  "c_ssim": 0.6427,
+  "psnr_sd": 1.055
+ },
+ "2000/plain": {
+  "kbps_actual": 2088.4,
+  "psnr": 22.735,
+  "ssim": 0.606,
+  "c_psnr": 21.236,
+  "c_ssim": 0.4935,
+  "psnr_sd": 0.989
+ },
+ "2000/squish_720x404": {
+  "kbps_actual": 2095.5,
+  "psnr": 24.298,
+  "ssim": 0.7006,
+  "c_psnr": 24.762,
+  "c_ssim": 0.7303,
+  "psnr_sd": 1.027
+ },
+ "3000/plain": {
+  "kbps_actual": 3120.8,
+  "psnr": 24.968,
+  "ssim": 0.72,
+  "c_psnr": 23.321,
+  "c_ssim": 0.6435,
+  "psnr_sd": 0.959
+ },
+ "3000/squish_720x404": {
+  "kbps_actual": 3140.5,
+  "psnr": 25.622,
+  "ssim": 0.7675,
+  "c_psnr": 26.797,
+  "c_ssim": 0.8222,
+  "psnr_sd": 1.002
+ },
+ "4500/plain": {
+  "kbps_actual": 4665.4,
+  "psnr": 27.112,
+  "ssim": 0.8082,
+  "c_psnr": 25.418,
+  "c_ssim": 0.7634,
+  "psnr_sd": 0.893
+ },
+ "4500/squish_720x404": {
+  "kbps_actual": 4707.5,
+  "psnr": 26.702,
+  "ssim": 0.8151,
+  "c_psnr": 28.786,
+  "c_ssim": 0.882,
+  "psnr_sd": 1.011
+ },
+ "6000/plain": {
+  "kbps_actual": 6219.8,
+  "psnr": 28.595,
+  "ssim": 0.8541,
+  "c_psnr": 26.902,
+  "c_ssim": 0.8252,
+  "psnr_sd": 0.863
+ },
+ "6000/squish_720x404": {
+  "kbps_actual": 6272.7,
+  "psnr": 27.349,
+  "ssim": 0.8413,
+  "c_psnr": 30.262,
+  "c_ssim": 0.9131,
+  "psnr_sd": 1.028
+ },
+ "9000/plain": {
+  "kbps_actual": 9326.7,
+  "psnr": 30.69,
+  "ssim": 0.9016,
+  "c_psnr": 29.022,
+  "c_ssim": 0.8873,
+  "psnr_sd": 0.846
+ },
+ "9000/squish_720x404": {
+  "kbps_actual": 9377.2,
+  "psnr": 28.097,
+  "ssim": 0.8702,
+  "c_psnr": 32.471,
+  "c_ssim": 0.9451,
+  "psnr_sd": 1.076
+ }
+}
