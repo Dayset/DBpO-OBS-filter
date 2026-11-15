@@ -1,0 +1,62 @@
+{
+ "scale810/6000": {
+  "kbps_actual": 6321.7,
+  "psnr": 25.549,
+  "c_psnr": 23.5,
+  "vmaf": 46.33,
+  "vmaf_p5": 39.29,
+  "enc_cpu_s": 11.12,
+  "pre_cpu_s": 0.0,
+  "dec_cpu_s": 1.16,
+  "frames": 360,
+  "pixels": 1166400
+ },
+ "scale810/3000": {
+  "kbps_actual": 3206.7,
+  "psnr": 21.916,
+  "c_psnr": 20.289,
+  "vmaf": 22.06,
+  "vmaf_p5": 16.36,
+  "enc_cpu_s": 8.97,
+  "pre_cpu_s": 0.0,
+  "dec_cpu_s": 0.86,
+  "frames": 360,
+  "pixels": 1166400
+ },
+ "scale720/6000": {
+  "kbps_actual": 6227.4,
+  "psnr": 25.974,
+  "c_psnr": 23.929,
+  "vmaf": 49.63,
+  "vmaf_p5": 43.05,
+  "enc_cpu_s": 8.81,
+  "pre_cpu_s": 0.0,
+  "dec_cpu_s": 1.03,
+  "frames": 360,
+  "pixels": 921600
+ },
+ "scale720/3000": {
+  "kbps_actual": 3208.8,
+  "psnr": 22.16,
+  "c_psnr": 20.464,
+  "vmaf": 21.02,
+  "vmaf_p5": 15.92,
+  "enc_cpu_s": 7.43,
+  "pre_cpu_s": 0.0,
+  "dec_cpu_s": 0.75,
+  "frames": 360,
+  "pixels": 921600
+ },
+ "squish56-cubic-unsquish/6000": {
+  "kbps_actual": 6186.3,
+  "psnr": 25.736,
+  "c_psnr": 25.497,
+  "vmaf": 53.19,
+  "vmaf_p5": 47.04,
+  "enc_cpu_s": 10.09,
+  "pre_cpu_s": 13.87,
+  "dec_cpu_s": 1.18,
+  "frames": 360,
+  "pixels": 1166400
+ }
+}

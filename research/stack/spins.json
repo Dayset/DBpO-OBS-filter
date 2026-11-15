@@ -1,0 +1,98 @@
+{
+ "v1-plain/6000": {
+  "kbps_actual": 6262.2,
+  "psnr": 25.093,
+  "c_psnr": 23.148,
+  "vmaf": 41.23,
+  "vmaf_p5": 28.3,
+  "enc_cpu_s": 34.72,
+  "pre_cpu_s": 0.0,
+  "dec_cpu_s": 3.88,
+  "frames": 905,
+  "pixels": 2073600
+ },
+ "v1-squish56/6000": {
+  "kbps_actual": 6110.9,
+  "psnr": 27.138,
+  "c_psnr": 27.569,
+  "vmaf": 59.44,
+  "vmaf_p5": 53.97,
+  "enc_cpu_s": 21.8,
+  "pre_cpu_s": 37.96,
+  "dec_cpu_s": 2.8,
+  "frames": 905,
+  "pixels": 1166400
+ },
+ "v2-plain/6000": {
+  "kbps_actual": 6130.1,
+  "psnr": 30.459,
+  "c_psnr": 29.917,
+  "vmaf": 78.5,
+  "vmaf_p5": 71.2,
+  "enc_cpu_s": 31.02,
+  "pre_cpu_s": 0.0,
+  "dec_cpu_s": 4.33,
+  "frames": 907,
+  "pixels": 2073600
+ },
+ "v1-scale810/6000": {
+  "kbps_actual": 6083.8,
+  "psnr": 27.173,
+  "c_psnr": 25.186,
+  "vmaf": 57.82,
+  "vmaf_p5": 48.08,
+  "enc_cpu_s": 23.91,
+  "pre_cpu_s": 0.0,
+  "dec_cpu_s": 2.85,
+  "frames": 905,
+  "pixels": 1166400
+ },
+ "v2-squish56/6000": {
+  "kbps_actual": 6133.5,
+  "psnr": 27.729,
+  "c_psnr": 32.311,
+  "vmaf": 67.37,
+  "vmaf_p5": 60.95,
+  "enc_cpu_s": 19.61,
+  "pre_cpu_s": 35.39,
+  "dec_cpu_s": 3.18,
+  "frames": 907,
+  "pixels": 1166400
+ },
+ "v2-scale810/6000": {
+  "kbps_actual": 6125.7,
+  "psnr": 29.959,
+  "c_psnr": 29.112,
+  "vmaf": 80.26,
+  "vmaf_p5": 74.72,
+  "enc_cpu_s": 21.37,
+  "pre_cpu_s": 0.0,
+  "dec_cpu_s": 2.86,
+  "frames": 907,
+  "pixels": 1166400
+ },
+ "v2-squish56-cubic-unsquish/6000": {
+  "kbps_actual": 6130.3,
+  "psnr": 28.409,
+  "c_psnr": 32.31,
+  "vmaf": 73.32,
+  "vmaf_p5": 66.83,
+  "enc_cpu_s": 19.79,
+  "pre_cpu_s": 35.39,
+  "dec_cpu_s": 3.28,
+  "frames": 907,
+  "pixels": 1166400
+ },
+ "v1-squish56-cubic-unsquish/6000": {
+  "kbps_actual": 6110.2,
+  "psnr": 27.276,
+  "c_psnr": 27.568,
+  "vmaf": 62.47,
+  "vmaf_p5": 56.98,
+  "enc_cpu_s": 21.91,
+  "pre_cpu_s": 37.96,
+  "dec_cpu_s": 2.86,
+  "frames": 905,
+  "pixels": 1166400
+ }
+}

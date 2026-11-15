@@ -1,0 +1,110 @@
+{
+ "plain/6000": {
+  "kbps_actual": 6013.0,
+  "psnr": 24.68,
+  "c_psnr": 23.412,
+  "vmaf": 45.26,
+  "vmaf_p5": 25.38,
+  "enc_cpu_s": 221.68,
+  "pre_cpu_s": 0.0,
+  "dec_cpu_s": 27.95,
+  "frames": 6147,
+  "pixels": 2073600
+ },
+ "squish56/6000": {
+  "kbps_actual": 6034.3,
+  "psnr": 24.678,
+  "c_psnr": 25.577,
+  "vmaf": 48.26,
+  "vmaf_p5": 30.19,
+  "enc_cpu_s": 140.26,
+  "pre_cpu_s": 251.49,
+  "dec_cpu_s": 20.56,
+  "frames": 6147,
+  "pixels": 1166400
+ },
+ "roi2zone/6000": {
+  "kbps_actual": 6036.5,
+  "psnr": 23.242,
+  "c_psnr": 28.259,
+  "vmaf": 40.58,
+  "vmaf_p5": 26.38,
+  "enc_cpu_s": 206.44,
+  "pre_cpu_s": 0.0,
+  "dec_cpu_s": 27.89,
+  "frames": 6147,
+  "pixels": 2073600
+ },
+ "plain/12000": {
+  "kbps_actual": 12056.0,
+  "psnr": 27.224,
+  "c_psnr": 25.906,
+  "vmaf": 65.1,
+  "vmaf_p5": 43.89,
+  "enc_cpu_s": 268.86,
+  "pre_cpu_s": 0.0,
+  "dec_cpu_s": 38.53,
+  "frames": 6147,
+  "pixels": 2073600
+ },
+ "squish56/12000": {
+  "kbps_actual": 12067.3,
+  "psnr": 26.262,
+  "c_psnr": 28.175,
+  "vmaf": 63.41,
+  "vmaf_p5": 46.0,
+  "enc_cpu_s": 162.79,
+  "pre_cpu_s": 251.49,
+  "dec_cpu_s": 29.86,
+  "frames": 6147,
+  "pixels": 1166400
+ },
+ "scale810/6000": {
+  "kbps_actual": 6026.9,
+  "psnr": 25.278,
+  "c_psnr": 24.014,
+  "vmaf": 51.03,
+  "vmaf_p5": 31.01,
+  "enc_cpu_s": 150.04,
+  "pre_cpu_s": 0.0,
+  "dec_cpu_s": 18.91,
+  "frames": 6147,
+  "pixels": 1166400
+ },
+ "scale810/12000": {
+  "kbps_actual": 12050.5,
+  "psnr": 27.375,
+  "c_psnr": 26.072,
+  "vmaf": 69.1,
+  "vmaf_p5": 49.87,
+  "enc_cpu_s": 183.24,
+  "pre_cpu_s": 0.0,
+  "dec_cpu_s": 27.62,
+  "frames": 6147,
+  "pixels": 1166400
+ },
+ "squish56c/6000": {
+  "kbps_actual": 6033.7,
+  "psnr": 24.785,
+  "c_psnr": 25.574,
+  "vmaf": 50.87,
+  "vmaf_p5": 31.52,
+  "enc_cpu_s": 137.89,
+  "pre_cpu_s": 251.49,
+  "dec_cpu_s": 21.07,
+  "frames": 6147,
+  "pixels": 1166400
+ },
+ "squish56c/12000": {
+  "kbps_actual": 12070.5,
+  "psnr": 26.516,
+  "c_psnr": 28.177,
+  "vmaf": 67.14,
+  "vmaf_p5": 48.66,
+  "enc_cpu_s": 162.37,
+  "pre_cpu_s": 251.49,
+  "dec_cpu_s": 28.76,
+  "frames": 6147,
+  "pixels": 1166400
+ }
+}
