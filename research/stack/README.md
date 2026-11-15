@@ -198,6 +198,6 @@ The centre box is a fixed 30% x 30%; nothing here measures where viewers look.
 ```
 export VMAF_FFMPEG=/path/to/ffmpeg-with-libvmaf      # pip install imageio-ffmpeg ships one
 bash research/stack/run_all.sh WORK FOOTAGE          # FOOTAGE holds v1.mp4 .. v4.mp4 from the releases
-python3 research/stack/report.py WORK
+python3 research/stack/report.py WORK        # or "research/stack": the per-frame arrays of the v4 arms are committed in v4/
 ```
 About 4 hours on 2 cores and 20 GB of scratch space.
