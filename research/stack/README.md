@@ -189,7 +189,7 @@ source), then transcoded from that ingest to lower rungs. Scores are against the
 ## Limits
 
 One game. One 102 s mixed clip and three short spins. x264 for everything that carries a conclusion. No GPU encoder,
-no device timing, no viewer test. The dynamic rule and the 2 x threshold were chosen on the clip they are reported
+no device timing, no viewer test. The dynamic rule and its threshold were chosen on the clip they are reported
 on. The dynamic result is a splice simulation of two separately rate-controlled streams, not one live encode.
 The centre box is a fixed 30% x 30%; nothing here measures where viewers look.
 

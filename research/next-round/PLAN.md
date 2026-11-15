@@ -26,7 +26,7 @@ The stack has five parts. Each task below builds or proves one of them.
 
 ## Rules for every task
 
-1. Work in `Dayset/DBpO-OBS-filter`, commit to `main`, reference the task's issue number in each commit.
+1. Work in `Dayset/DBpO-OBS-filter`, commit to `main`, name the task (for example `E1`) in each commit message.
 2. Every number in a README must come from a JSON file committed next to it. Label claims C (raw file), N (one clip, or
    code-read only) or U (no data), as issue #33 does.
 3. Use the metric definitions in `research/stack/stack_bench.py` unchanged: luma PSNR, the 30% x 30% centre box,
@@ -39,8 +39,8 @@ The stack has five parts. Each task below builds or proves one of them.
 7. Footage comes from this repo's GitHub releases only. New footage needs a line in `research/stack/FOOTAGE.md` with
    source, licence and sha256. Do not download streams or videos you have no licence for.
 8. A negative result is a result. If squish loses, write that down with the numbers. Do not tune an arm until it wins.
-9. If a task's premise fails (see "Stop and report" in the task), stop that task, write the finding in its issue, and
-   flag the epic. Do not start dependent tasks.
+9. If a task's premise fails (see "Stop and report" in the task), stop that task, write the finding with its
+   numbers in the task's README section, and tell the owner. Do not start dependent tasks.
 10. New stack code must not depend on OBS, Twitch or a browser extension.
 11. "Runs on" says where the task can run: **cloud** (any Linux sandbox with ffmpeg, 2+ cores), **PC** (the owner's
     Windows 11 machine with the RTX 5080; deliver a resumable `.bat` or `.ps1` runner and let the owner start it), or
