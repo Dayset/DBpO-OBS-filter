@@ -8,6 +8,7 @@
 !/common
 !/plugins
 !/research
+!/stack
 !/viewer
 !.clang-format
 !.gersemirc
