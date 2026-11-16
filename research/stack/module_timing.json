@@ -1,0 +1,15 @@
+{
+ "note": "ms per frame, filter only, one thread, best of 3 on the 2-core sandbox (not the owner's PC); dbpo-squish -O3, v3 clip",
+ "1080p_to_1440x810": {
+  "area": 4.5,
+  "point": 3.85,
+  "unsquish_bilinear_810_to_1080": 6.74
+ },
+ "1440p_to_1920x1080": {
+  "area": 8.38,
+  "point": 6.69
+ },
+ "python_area_reference_ms": 40,
+ "opencv_remap_point_ms": 6.9,
+ "x264_saving_ms_per_frame": 16
+}
