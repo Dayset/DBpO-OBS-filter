@@ -13,7 +13,7 @@ Encoder CPU time is ffmpeg -benchmark (user + system) for the encode minus a dec
       (squishbase: area-downscale to BWxBH first, squish that to SWxSH; the viewer unsquishes, then upscales bicubic)
   stack_bench.py motion REF.mkv OUT.npy                    240x135 temporal luma difference per frame (the detector)
 $SCORE_REF scores against another reference than the encode input (server-side test: encode from a lossy ingest,
-score against the pristine source); $KEEP keeps the encoded file; $UNSQ_CUBIC makes the viewer's unsquish bicubic instead of bilinear; $CODEC = x264 | x265 | svtav1.
+score against the pristine source); $KEEP keeps the encoded file; $UNSQ_CUBIC makes the viewer's unsquish bicubic instead of bilinear; $CODEC = x264 | x265 | svtav1 | h264_nvenc | hevc_nvenc | av1_nvenc.
 Arms resume: an arm already in OUT.json is skipped. Per-frame arrays go to WORK/<NAME>_<KBPS>.npz.
 """
 import json, os, re, subprocess, sys, time
@@ -81,7 +81,10 @@ def encode(src, out, kbps, vf=None):
     rate = ["-b:v", f"{kbps}k", "-maxrate", f"{kbps}k", "-bufsize", f"{2 * kbps}k", "-g", "120", "-pix_fmt", "yuv420p"]
     codec = {"x264": ["-c:v", "libx264", "-preset", "veryfast", "-keyint_min", "120", "-sc_threshold", "0"],
              "x265": ["-c:v", "libx265", "-preset", "veryfast", "-x265-params", "keyint=120:min-keyint=120:scenecut=0:log-level=error"],
-             "svtav1": ["-c:v", "libsvtav1", "-preset", "10"]}[os.environ.get("CODEC", "x264")]  # $CODEC picks the encoder
+             "svtav1": ["-c:v", "libsvtav1", "-preset", "10"],
+             "h264_nvenc": ["-c:v", "h264_nvenc", "-preset", "p4", "-tune", "ll", "-rc", "cbr"],
+             "hevc_nvenc": ["-c:v", "hevc_nvenc", "-preset", "p4", "-tune", "ll", "-rc", "cbr"],
+             "av1_nvenc": ["-c:v", "av1_nvenc", "-preset", "p4", "-tune", "ll", "-rc", "cbr"]}[os.environ.get("CODEC", "x264")]  # $CODEC picks the encoder (GPU: *_nvenc, CPU time is then meaningless)
     if os.environ.get("CODEC") == "svtav1":  # SVT-AV1 refuses CBR outside low-delay mode: target-bitrate VBR
         rate = ["-b:v", f"{kbps}k", "-g", "120", "-pix_fmt", "yuv420p"]
     cpu = bench([FF, "-nostats", "-benchmark", "-y", "-i", src] + (["-vf", vf] if vf else []) + codec + rate + [out])
