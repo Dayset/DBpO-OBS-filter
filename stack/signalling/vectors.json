@@ -1,0 +1,83 @@
+{
+ "cfg": "FSQ1:rx=0.75,ry=0.75,cx=0.15,cy=0.15,fx=0.5,fy=0.5,px=1,py=1,ar=1.7778",
+ "encode": [
+  {
+   "seq": 120,
+   "cfg": "FSQ1:rx=0.75,ry=0.75,cx=0.15,cy=0.15,fx=0.5,fy=0.5,px=1,py=1,ar=1.7778",
+   "payload": "DBPO1;seq=120;m=1;cfg=FSQ1:rx=0.75,ry=0.75,cx=0.15,cy=0.15,fx=0.5,fy=0.5,px=1,py=1,ar=1.7778",
+   "hls": "#EXT-X-DBPO:SEQ=120,M=1,CFG=\"FSQ1:rx=0.75,ry=0.75,cx=0.15,cy=0.15,fx=0.5,fy=0.5,px=1,py=1,ar=1.7778\""
+  },
+  {
+   "seq": 121,
+   "cfg": null,
+   "payload": "DBPO1;seq=121;m=0",
+   "hls": "#EXT-X-DBPO:SEQ=121,M=0"
+  }
+ ],
+ "daterange": "#EXT-X-DATERANGE:ID=\"dbpo-120\",START-DATE=\"2026-11-15T20:00:00Z\",X-DBPO=\"DBPO1;seq=120;m=1;cfg=FSQ1:rx=0.75,ry=0.75,cx=0.15,cy=0.15,fx=0.5,fy=0.5,px=1,py=1,ar=1.7778\"",
+ "malformed": [
+  "",
+  "DBPO2;seq=1;m=0",
+  "DBPO1;seq=x;m=0",
+  "DBPO1;seq=5;m=1",
+  "DBPO1;seq=5;m=2",
+  "DBPO1;seq=5;m=1;cfg=garbage"
+ ],
+ "decide": [
+  {
+   "seq": 120,
+   "payloads": {
+    "120": "DBPO1;seq=120;m=1;cfg=FSQ1:rx=0.75,ry=0.75,cx=0.15,cy=0.15,fx=0.5,fy=0.5,px=1,py=1,ar=1.7778"
+   },
+   "expect": [
+    "squish",
+    "FSQ1:rx=0.75,ry=0.75,cx=0.15,cy=0.15,fx=0.5,fy=0.5,px=1,py=1,ar=1.7778",
+    null
+   ]
+  },
+  {
+   "seq": 121,
+   "payloads": {
+    "121": "DBPO1;seq=121;m=0"
+   },
+   "expect": [
+    "plain",
+    null,
+    null
+   ]
+  },
+  {
+   "seq": 122,
+   "payloads": {
+    "120": "DBPO1;seq=120;m=1;cfg=FSQ1:rx=0.75,ry=0.75,cx=0.15,cy=0.15,fx=0.5,fy=0.5,px=1,py=1,ar=1.7778"
+   },
+   "expect": [
+    "plain",
+    null,
+    "missing_signal"
+   ]
+  },
+  {
+   "seq": 120,
+   "payloads": {
+    "120": "DBPO1;seq=120;m=1"
+   },
+   "expect": [
+    "plain",
+    null,
+    "bad_signal"
+   ]
+  },
+  {
+   "seq": 120,
+   "payloads": {
+    "120": "DBPO1;seq=121;m=0"
+   },
+   "expect": [
+    "plain",
+    null,
+    "bad_signal"
+   ]
+  }
+ ]
+}
