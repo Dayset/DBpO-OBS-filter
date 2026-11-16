@@ -98,8 +98,8 @@ def packets(path):
 
 def score(dist, ref, W, H, dw, dh, post, log):
     vm = subprocess.Popen([VFF, "-v", "error", "-f", "rawvideo", "-pix_fmt", "rgb24", "-s", f"{W}x{H}", "-r", "60", "-i",
-        "-", "-r", "60", "-i", ref, "-lavfi", f"[0:v]format=yuv420p[d];[1:v]format=yuv420p[r];[d][r]libvmaf=log_fmt=json:"
-        f"log_path={os.path.abspath(log).replace(chr(92), '/').replace(':', chr(92) + ':')}:n_threads=2", "-f", "null", "-"], stdin=subprocess.PIPE)
+        "-", "-r", "60", "-i", os.path.abspath(ref), "-lavfi", f"[0:v]format=yuv420p[d];[1:v]format=yuv420p[r];[d][r]libvmaf=log_fmt=json:"
+        f"log_path={os.path.basename(log)}:n_threads=2", "-f", "null", "-"], stdin=subprocess.PIPE, cwd=os.path.dirname(os.path.abspath(log)))
     y0, y1, x0, x1 = int(H * (.5 - C)), int(H * (.5 + C)), int(W * (.5 - C)), int(W * (.5 + C))
     ps, cs = [], []
     for d, g in zip(frames(dist, dw, dh), frames(ref, W, H)):
