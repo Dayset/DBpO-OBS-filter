@@ -1,0 +1,29 @@
+('ref60', 'x264', 1500) 
+  plain       plain             1490k  centre30= 21.5  centre50= 21.7  whole= 21.3
+  downscale   scale1280x720     1503k  centre30= 24.2  centre50= 24.8  whole= 24.9
+  method      sq960x540_c30     1513k  centre30= 37.1  centre50= 33.0  whole= 24.7   vs downscale: centre50 +8.2  whole -0.3
+  method      sq1280x720_c30    1513k  centre30= 29.9  centre50= 29.1  whole= 25.1   vs downscale: centre50 +4.4  whole +0.2
+  ROI         roi_c50_q40       1499k  centre30= 28.0  centre50= 28.9  whole= 24.0   vs downscale: centre50 +4.1  whole -0.9
+  T12 sq960x540_c30 vs best ROI at matched whole frame: roi_c50_q40 centre50 gap +4.2
+  T12 sq1280x720_c30 vs best ROI at matched whole frame: no ROI arm comes within 1 whole-frame VMAF (method ahead on the trade-off)
+  G2: PASS (best centre50 gap +8.2)
+
+('ref60', 'x264', 3000) 
+  plain       plain             2993k  centre30= 26.0  centre50= 26.8  whole= 26.6
+  downscale   scale960x540      3024k  centre30= 30.8  centre50= 31.0  whole= 30.2
+  method      sq960x540_c30     3022k  centre30= 54.2  centre50= 45.2  whole= 30.0   vs downscale: centre50 +14.2  whole -0.2
+  method      sq1280x720_c30    3027k  centre30= 40.0  centre50= 37.5  whole= 30.1   vs downscale: centre50 +6.5  whole -0.1
+  ROI         roi_c50_q40       2875k  centre30= 30.4  centre50= 31.4  whole= 27.7   vs downscale: centre50 +0.4  whole -2.5
+  ROI         roi_c50_q20       2994k  centre30= 29.7  centre50= 30.6  whole= 27.9   vs downscale: centre50 -0.4  whole -2.3
+  T12 sq960x540_c30 vs best ROI at matched whole frame: no ROI arm comes within 1 whole-frame VMAF (method ahead on the trade-off)
+  T12 sq1280x720_c30 vs best ROI at matched whole frame: no ROI arm comes within 1 whole-frame VMAF (method ahead on the trade-off)
+
+('ref60', 'x264', 6000) 
+  plain       plain             6042k  centre30= 32.3  centre50= 33.2  whole= 33.0
+  downscale   scale960x540      6038k  centre30= 41.7  centre50= 41.1  whole= 39.4
+  method      sq960x540_c30     6036k  centre30= 72.5  centre50= 59.8  whole= 36.1   vs downscale: centre50 +18.7  whole -3.2
+  method      sq1280x720_c30    6050k  centre30= 57.8  centre50= 53.0  whole= 39.6   vs downscale: centre50 +11.9  whole +0.2
+  ROI         roi_c50_q40       5971k  centre30= 51.1  centre50= 50.7  whole= 36.7   vs downscale: centre50 +9.6  whole -2.7
+  T12 sq960x540_c30 vs best ROI at matched whole frame: roi_c50_q40 centre50 gap +9.1
+  T12 sq1280x720_c30 vs best ROI at matched whole frame: no ROI arm comes within 1 whole-frame VMAF (method ahead on the trade-off)
+

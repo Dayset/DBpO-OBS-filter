@@ -1,0 +1,19 @@
+('ref120_10s', 'x264', 3000) 
+  plain       plain             3238k  centre30= 36.4  centre50= 37.4  whole= 38.0
+  downscale   scale1024x576     3279k  centre30= 43.6  centre50= 45.0  whole= 45.2
+  method      sq960x540_c30     3263k  centre30= 71.1  centre50= 60.3  whole= 36.2   vs downscale: centre50 +15.3  whole -9.0
+  method      sq1024x576_c30    3267k  centre30= 69.1  centre50= 59.4  whole= 38.8   vs downscale: centre50 +14.4  whole -6.5
+  method      sq1152x648_c30    3279k  centre30= 64.5  centre50= 58.9  whole= 41.1   vs downscale: centre50 +13.9  whole -4.2
+  method      sq1216x684_c30    3268k  centre30= 62.4  centre50= 57.2  whole= 42.0   vs downscale: centre50 +12.2  whole -3.2
+  method      sq1280x720_c30    3267k  centre30= 60.3  centre50= 55.7  whole= 42.5   vs downscale: centre50 +10.7  whole -2.7
+
+('ref120_10s', 'x264', 6000) 
+  plain       plain             6546k  centre30= 54.1  centre50= 54.6  whole= 54.9
+  downscale   scale1280x720     6549k  centre30= 57.9  centre50= 59.0  whole= 58.9
+  method      sq1152x648_c30    6538k  centre30= 77.1  centre50= 71.5  whole= 51.4   vs downscale: centre50 +12.5  whole -7.5
+  method      sq1216x684_c30    6525k  centre30= 75.6  centre50= 70.4  whole= 53.3   vs downscale: centre50 +11.4  whole -5.6
+  method      sq1280x720_c30    6541k  centre30= 74.4  centre50= 69.5  whole= 54.6   vs downscale: centre50 +10.5  whole -4.3
+  method      sq1408x792_c30    6559k  centre30= 70.7  centre50= 67.8  whole= 55.3   vs downscale: centre50 +8.8  whole -3.6
+  method      sq1472x828_c30    6547k  centre30= 69.3  centre50= 66.5  whole= 55.9   vs downscale: centre50 +7.4  whole -3.0
+  method      sq1536x864_c30    6562k  centre30= 67.6  centre50= 65.0  whole= 55.9   vs downscale: centre50 +6.0  whole -3.0
+

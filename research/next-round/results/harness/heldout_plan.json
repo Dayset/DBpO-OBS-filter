@@ -1,0 +1,92 @@
+{
+ "x264_1500": {
+  "method_balanced": {
+   "arm": "sq960x540_c30",
+   "median_gap_centre50": 9.3,
+   "median_gap_whole": -3.7
+  },
+  "method_centre": {
+   "arm": "sq960x540_c30",
+   "median_gap_centre50": 9.3,
+   "median_gap_whole": -3.7
+  },
+  "roi_balanced": {
+   "arm": "roi_c50_q40",
+   "median_gap_centre50": 3.4,
+   "median_gap_whole": -4.3
+  },
+  "method_roi_balanced": {
+   "arm": "sq1280x720_c30_roi20",
+   "median_gap_centre50": 6.2,
+   "median_gap_whole": -4.9
+  }
+ },
+ "x264_3000": {
+  "method_balanced": {
+   "arm": "sq960x540_c30",
+   "median_gap_centre50": 11.4,
+   "median_gap_whole": -9.2
+  },
+  "method_centre": {
+   "arm": "sq960x540_c30",
+   "median_gap_centre50": 11.4,
+   "median_gap_whole": -9.2
+  },
+  "roi_balanced": {
+   "arm": "roi_c50_q20",
+   "median_gap_centre50": 2.7,
+   "median_gap_whole": -7.3
+  },
+  "method_roi_balanced": {
+   "arm": "sq1280x720_c30_roi20",
+   "median_gap_centre50": 8.0,
+   "median_gap_whole": -10.1
+  }
+ },
+ "x264_6000": {
+  "method_balanced": {
+   "arm": "sq1280x720_c50",
+   "median_gap_centre50": 10.9,
+   "median_gap_whole": -8.9
+  },
+  "method_centre": {
+   "arm": "sq960x540_c30",
+   "median_gap_centre50": 11.8,
+   "median_gap_whole": -14.6
+  },
+  "roi_balanced": {
+   "arm": "roi_c50_q40",
+   "median_gap_centre50": 11.5,
+   "median_gap_whole": -12.4
+  },
+  "method_roi_balanced": {
+   "arm": "sq1280x720_c30_roi20",
+   "median_gap_centre50": 7.3,
+   "median_gap_whole": -12.2
+  }
+ },
+ "hevc_nvenc_3000": {
+  "method_balanced": {
+   "arm": "sq1280x720_c50",
+   "median_gap_centre50": 13.2,
+   "median_gap_whole": -5.9
+  },
+  "method_centre": {
+   "arm": "sq1280x720_c50",
+   "median_gap_centre50": 13.2,
+   "median_gap_whole": -5.9
+  }
+ },
+ "hevc_nvenc_6000": {
+  "method_balanced": {
+   "arm": "sq1280x720_c50",
+   "median_gap_centre50": 13.3,
+   "median_gap_whole": -10.8
+  },
+  "method_centre": {
+   "arm": "sq1280x720_c50",
+   "median_gap_centre50": 13.3,
+   "median_gap_whole": -10.8
+  }
+ }
+}

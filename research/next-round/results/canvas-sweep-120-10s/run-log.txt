@@ -1,0 +1,361 @@
+ffmpeg version 9.0.2-full_build-www.gyan.dev Copyright (c) 2000-2026 the FFmpeg developers
+  built with gcc 16.2.0 (Rev3, Built by MSYS2 project)
+  configuration: --enable-gpl --enable-version3 --enable-static --disable-w32threads --disable-autodetect --enable-cairo --enable-fontconfig --enable-iconv --enable-gnutls --enable-lcms2 --enable-libxml2 --enable-gmp --enable-bzlib --enable-lzma --enable-libsnappy --enable-zlib --enable-librist --enable-libsrt --enable-libssh --enable-libzmq --enable-avisynth --enable-libbluray --enable-libcaca --enable-libdvdnav --enable-libdvdread --enable-sdl2 --enable-libaribb24 --enable-libaribcaption --enable-libdav1d --enable-libdavs2 --enable-libopenjpeg --enable-libquirc --enable-libuavs3d --enable-libxevd --enable-libzvbi --enable-liboapv --enable-libqrencode --enable-librav1e --enable-libsvtav1 --enable-libvvenc --enable-libwebp --enable-libx264 --enable-libx265 --enable-libxavs2 --enable-libxeve --enable-libxvid --enable-libaom --enable-libjxl --enable-libsvtjpegxs --enable-libvpx --enable-mediafoundation --enable-libass --enable-frei0r --enable-libfreetype --enable-libfribidi --enable-libharfbuzz --enable-liblensfun --enable-libvidstab --enable-libvmaf --enable-libzimg --enable-amf --enable-cuda-llvm --enable-cuvid --enable-dxva2 --enable-d3d11va --enable-d3d12va --enable-ffnvcodec --enable-libvpl --enable-nvdec --enable-nvenc --enable-vaapi --enable-vulkan --enable-libplacebo --enable-opencl --enable-libcdio --enable-openal --enable-libgme --enable-libmodplug --enable-libopenmpt --enable-libopencore-amrwb --enable-libmp3lame --enable-libshine --enable-libtheora --enable-libtwolame --enable-libvo-amrwbenc --enable-libcodec2 --enable-libilbc --enable-libgsm --enable-liblc3 --enable-libopencore-amrnb --enable-libopus --enable-libspeex --enable-libvorbis --enable-ladspa --enable-libbs2b --enable-libflite --enable-libmysofa --enable-librubberband --enable-libsoxr --enable-chromaprint --enable-whisper
+  libavutil      61.  1.102 / 61.  1.102
+  libavcodec     63.  1.102 / 63.  1.102
+  libavformat    63.  1.102 / 63.  1.102
+  libavdevice    63.  1.102 / 63.  1.102
+  libavfilter    12.  1.102 / 12.  1.102
+  libswscale     10.  1.102 / 10.  1.102
+  libswresample   7.  1.102 /  7.  1.102
+Input #0, matroska,webm, from 'c:\dbpo-lab\smoke120\ref120.mkv':
+  Metadata:
+    DATE            : 2026
+    MAJOR_BRAND     : mp42
+    MINOR_VERSION   : 0
+    COMPATIBLE_BRANDS: isommp42av01
+    ENCODER         : Lavf63.1.102
+  Duration: 00:00:30.21, start: 0.000000, bitrate: 1112289 kb/s
+  Stream #0:0: Video: ffv1, yuv420p(tv, bt709, progressive), 1920x1080, SAR 1:1 DAR 16:9, 120 fps, 120 tbr, 1k tbn (default)
+    Metadata:
+      ENCODER         : Lavc63.1.102 ffv1
+      HANDLER_NAME    : VideoHandle
+      DURATION        : 00:00:30.208000000
+  Stream #0:1: Audio: vorbis, 48000 Hz, stereo, fltp (default)
+    Metadata:
+      ENCODER         : Lavc63.1.102 libvorbis
+      HANDLER_NAME    : SoundHandle
+      NAME            : System sounds
+      DURATION        : 00:00:30.208000000
+Stream mapping:
+  Stream #0:0 -> #0:0 (copy)
+  Stream #0:1 -> #0:1 (copy)
+Output #0, matroska, to 'c:\dbpo-lab\canvas_sweep_120\ref120_10s.mkv':
+  Metadata:
+    DATE            : 2026
+    MAJOR_BRAND     : mp42
+    MINOR_VERSION   : 0
+    COMPATIBLE_BRANDS: isommp42av01
+    encoder         : Lavf63.1.102
+  Stream #0:0: Video: ffv1 (FFV1 / 0x31564646), yuv420p(tv, bt709, progressive), 1920x1080 [SAR 1:1 DAR 16:9], q=2-31, 120 fps, 120 tbr, 1k tbn (default)
+    Metadata:
+      ENCODER         : Lavc63.1.102 ffv1
+      HANDLER_NAME    : VideoHandle
+      DURATION        : 00:00:30.208000000
+  Stream #0:1: Audio: vorbis (oV[0][0] / 0x566F), 48000 Hz, stereo, fltp (default)
+    Metadata:
+      ENCODER         : Lavc63.1.102 libvorbis
+      HANDLER_NAME    : SoundHandle
+      NAME            : System sounds
+      DURATION        : 00:00:30.208000000
+Press [q] to stop, [?] for help
+[out#0/matroska @ 000001dab1f0f040] video:1306222KiB audio:103KiB subtitle:0KiB other streams:0KiB global headers:4KiB muxing overhead: 0.001880%
+frame= 1200 fps=0.0 q=-1.0 Lsize= 1306349KiB time=00:00:10.00 bitrate=1069840.5kbits/s speed=  18x elapsed=0:00:00.55
+Sweep: 19 canvas sizes at 3000,6000 kbit/s, 120 fps, 10 s clip
+ref120_10s x264 3000 sq640x360_c30 None None
+ref120_10s x264 6000 sq640x360_c30 None None
+ref120_10s x264 3000 sq704x396_c30 None None
+ref120_10s x264 6000 sq704x396_c30 None None
+[null @ 0000021b9ea7fd00] Application provided invalid, non monotonically increasing dts to muxer in stream 1: 379736 >= 379728
+[null @ 000001949acca880] Application provided invalid, non monotonically increasing dts to muxer in stream 1: 379736 >= 379728
+[null @ 0000021f8a99e640] Application provided invalid, non monotonically increasing dts to muxer in stream 1: 379736 >= 379728
+ref120_10s x264 3000 plain 3237.6 37.39
+[null @ 0000025c69a4db40] Application provided invalid, non monotonically increasing dts to muxer in stream 1: 379736 >= 379728
+[null @ 00000254c2a7f300] Application provided invalid, non monotonically increasing dts to muxer in stream 1: 379736 >= 379728
+[null @ 000001d4141c00c0] Application provided invalid, non monotonically increasing dts to muxer in stream 1: 379736 >= 379728
+ref120_10s x264 6000 plain 6546.3 54.6
+[null @ 0000014f2ef1c840] Application provided invalid, non monotonically increasing dts to muxer in stream 1: 379736 >= 379728
+[null @ 0000014816481900] Application provided invalid, non monotonically increasing dts to muxer in stream 1: 379736 >= 379728
+[null @ 0000020c136e3440] Application provided invalid, non monotonically increasing dts to muxer in stream 1: 379736 >= 379728
+ref120_10s x264 3000 scale640x360 3263.7 38.98
+[null @ 0000014fcf77c400] Application provided invalid, non monotonically increasing dts to muxer in stream 1: 379736 >= 379728
+[null @ 000002068ac76d40] Application provided invalid, non monotonically increasing dts to muxer in stream 1: 379736 >= 379728
+[null @ 000001e0f3ccebc0] Application provided invalid, non monotonically increasing dts to muxer in stream 1: 379736 >= 379728
+ref120_10s x264 6000 scale640x360 6489.8 47.96
+[null @ 000001be9b37b400] Application provided invalid, non monotonically increasing dts to muxer in stream 1: 379736 >= 379728
+[null @ 0000020e63466bc0] Application provided invalid, non monotonically increasing dts to muxer in stream 1: 379736 >= 379728
+[null @ 000001f2ee646d40] Application provided invalid, non monotonically increasing dts to muxer in stream 1: 379736 >= 379728
+ref120_10s x264 3000 scale704x396 3258.6 40.99
+[null @ 000001c84b695c80] Application provided invalid, non monotonically increasing dts to muxer in stream 1: 379736 >= 379728
+[null @ 0000023a52f1ed00] Application provided invalid, non monotonically increasing dts to muxer in stream 1: 379736 >= 379728
+[null @ 0000021e966ac240] Application provided invalid, non monotonically increasing dts to muxer in stream 1: 379736 >= 379728
+ref120_10s x264 6000 scale704x396 6447.7 50.74
+[null @ 000001bde83fe8c0] Application provided invalid, non monotonically increasing dts to muxer in stream 1: 379736 >= 379728
+[null @ 0000021f6c21d280] Application provided invalid, non monotonically increasing dts to muxer in stream 1: 379736 >= 379728
+[null @ 000002f2f1686d40] Application provided invalid, non monotonically increasing dts to muxer in stream 1: 379736 >= 379728
+ref120_10s x264 3000 scale768x432 3259.9 42.71
+[null @ 0000027dcd62b400] Application provided invalid, non monotonically increasing dts to muxer in stream 1: 379736 >= 379728
+[null @ 00000235dd4e3a00] Application provided invalid, non monotonically increasing dts to muxer in stream 1: 379736 >= 379728
+[null @ 000001bf7988ec00] Application provided invalid, non monotonically increasing dts to muxer in stream 1: 379736 >= 379728
+ref120_10s x264 6000 scale768x432 6449.4 53.07
+[null @ 000002c9d8bdea00] Application provided invalid, non monotonically increasing dts to muxer in stream 1: 379736 >= 379728
+[null @ 00000226ec36a380] Application provided invalid, non monotonically increasing dts to muxer in stream 1: 379736 >= 379728
+[null @ 000002078509e980] Application provided invalid, non monotonically increasing dts to muxer in stream 1: 379736 >= 379728
+ref120_10s x264 3000 scale832x468 3271.2 43.3
+[null @ 0000023b5a621d00] Application provided invalid, non monotonically increasing dts to muxer in stream 1: 379736 >= 379728
+[null @ 0000012dfa5f9e80] Application provided invalid, non monotonically increasing dts to muxer in stream 1: 379736 >= 379728
+[null @ 00000269ddb300c0] Application provided invalid, non monotonically increasing dts to muxer in stream 1: 379736 >= 379728
+ref120_10s x264 6000 scale832x468 6503.0 54.46
+[null @ 000001be1e106c00] Application provided invalid, non monotonically increasing dts to muxer in stream 1: 379736 >= 379728
+[null @ 00000199b370b3c0] Application provided invalid, non monotonically increasing dts to muxer in stream 1: 379736 >= 379728
+[null @ 000002c9c873b200] Application provided invalid, non monotonically increasing dts to muxer in stream 1: 379736 >= 379728
+ref120_10s x264 3000 scale896x504 3274.4 43.98
+[null @ 000001a1482500c0] Application provided invalid, non monotonically increasing dts to muxer in stream 1: 379736 >= 379728
+[null @ 0000021a7db1c000] Application provided invalid, non monotonically increasing dts to muxer in stream 1: 379736 >= 379728
+[null @ 000001eecd27b540] Application provided invalid, non monotonically increasing dts to muxer in stream 1: 379736 >= 379728
+ref120_10s x264 6000 scale896x504 6502.1 55.91
+[null @ 0000024bdfb6a280] Application provided invalid, non monotonically increasing dts to muxer in stream 1: 379736 >= 379728
+[null @ 0000017e35327c40] Application provided invalid, non monotonically increasing dts to muxer in stream 1: 379736 >= 379728
+[null @ 000001951341c780] Application provided invalid, non monotonically increasing dts to muxer in stream 1: 379736 >= 379728
+ref120_10s x264 3000 scale960x540 3276.7 44.52
+[null @ 000001d5653421c0] Application provided invalid, non monotonically increasing dts to muxer in stream 1: 379736 >= 379728
+[null @ 000001f0467c6b80] Application provided invalid, non monotonically increasing dts to muxer in stream 1: 379736 >= 379728
+[null @ 000001fe976bca40] Application provided invalid, non monotonically increasing dts to muxer in stream 1: 379736 >= 379728
+ref120_10s x264 6000 scale960x540 6521.4 56.69
+[null @ 0000018a090a8f80] Application provided invalid, non monotonically increasing dts to muxer in stream 1: 379736 >= 379728
+[null @ 000001e0736e7f00] Application provided invalid, non monotonically increasing dts to muxer in stream 1: 379736 >= 379728
+[null @ 00000262b9e29300] Application provided invalid, non monotonically increasing dts to muxer in stream 1: 379736 >= 379728
+ref120_10s x264 3000 scale1024x576 3279.2 45.02
+[null @ 000001e964711680] Application provided invalid, non monotonically increasing dts to muxer in stream 1: 379736 >= 379728
+[null @ 0000018061e68700] [null @ 0000021fbde3c480] Application provided invalid, non monotonically increasing dts to muxer in stream 1: 379736 >= 379728
+Application provided invalid, non monotonically increasing dts to muxer in stream 1: 379736 >= 379728
+ref120_10s x264 6000 scale1024x576 6529.5 57.94
+[null @ 000002978942ecc0] Application provided invalid, non monotonically increasing dts to muxer in stream 1: 379736 >= 379728
+[null @ 00000282d5c900c0] Application provided invalid, non monotonically increasing dts to muxer in stream 1: 379736 >= 379728
+[null @ 0000021e65588880] Application provided invalid, non monotonically increasing dts to muxer in stream 1: 379736 >= 379728
+ref120_10s x264 3000 scale1088x612 3284.2 44.55
+[null @ 000001ea1a0d5240] Application provided invalid, non monotonically increasing dts to muxer in stream 1: 379736 >= 379728
+[null @ 0000021c72d12040] Application provided invalid, non monotonically increasing dts to muxer in stream 1: 379736 >= 379728
+[null @ 000001f467c9db40] Application provided invalid, non monotonically increasing dts to muxer in stream 1: 379736 >= 379728
+ref120_10s x264 6000 scale1088x612 6536.7 58.07
+[null @ 000001c31dc8a740] Application provided invalid, non monotonically increasing dts to muxer in stream 1: 379736 >= 379728
+[null @ 000001dbacbbc300] Application provided invalid, non monotonically increasing dts to muxer in stream 1: 379736 >= 379728
+[null @ 000001b57ec67bc0] Application provided invalid, non monotonically increasing dts to muxer in stream 1: 379736 >= 379728
+ref120_10s x264 3000 scale1152x648 3282.4 44.44
+[null @ 000002ccd10b3f00] Application provided invalid, non monotonically increasing dts to muxer in stream 1: 379736 >= 379728
+[null @ 000001e8dff53b00] Application provided invalid, non monotonically increasing dts to muxer in stream 1: 379736 >= 379728
+[null @ 0000025328013300] Application provided invalid, non monotonically increasing dts to muxer in stream 1: 379736 >= 379728
+ref120_10s x264 6000 scale1152x648 6555.9 58.5
+[null @ 0000020c2eabe600] Application provided invalid, non monotonically increasing dts to muxer in stream 1: 379736 >= 379728
+[null @ 000001a853d93ec0] Application provided invalid, non monotonically increasing dts to muxer in stream 1: 379736 >= 379728
+[null @ 00000152a5b3b4c0] Application provided invalid, non monotonically increasing dts to muxer in stream 1: 379736 >= 379728
+ref120_10s x264 3000 scale1216x684 3274.3 44.22
+[null @ 0000029d577620c0] Application provided invalid, non monotonically increasing dts to muxer in stream 1: 379736 >= 379728
+[null @ 000001e89f234ac0] Application provided invalid, non monotonically increasing dts to muxer in stream 1: 379736 >= 379728
+[null @ 0000024a59cb9e00] Application provided invalid, non monotonically increasing dts to muxer in stream 1: 379736 >= 379728
+ref120_10s x264 6000 scale1216x684 6531.6 58.82
+[null @ 000001f4f086b400] Application provided invalid, non monotonically increasing dts to muxer in stream 1: 379736 >= 379728
+[null @ 000001edbdd99fc0] Application provided invalid, non monotonically increasing dts to muxer in stream 1: 379736 >= 379728
+[null @ 0000016ef86dbfc0] Application provided invalid, non monotonically increasing dts to muxer in stream 1: 379736 >= 379728
+ref120_10s x264 3000 scale1280x720 3279.5 43.98
+[null @ 0000028c68eacd80] Application provided invalid, non monotonically increasing dts to muxer in stream 1: 379736 >= 379728
+[null @ 000001f04d2f2000] Application provided invalid, non monotonically increasing dts to muxer in stream 1: 379736 >= 379728
+[null @ 0000014d0252c100] Application provided invalid, non monotonically increasing dts to muxer in stream 1: 379736 >= 379728
+ref120_10s x264 6000 scale1280x720 6549.4 59.02
+[null @ 0000015b564ae5c0] Application provided invalid, non monotonically increasing dts to muxer in stream 1: 379736 >= 379728
+[null @ 000001d1e353a000] Application provided invalid, non monotonically increasing dts to muxer in stream 1: 379736 >= 379728
+[null @ 000001f995a17140] Application provided invalid, non monotonically increasing dts to muxer in stream 1: 379736 >= 379728
+ref120_10s x264 3000 scale1344x756 3279.9 43.4
+[null @ 000001832e09c540] Application provided invalid, non monotonically increasing dts to muxer in stream 1: 379736 >= 379728
+[null @ 000001e89ec90080] Application provided invalid, non monotonically increasing dts to muxer in stream 1: 379736 >= 379728
+[null @ 000001630593a880] Application provided invalid, non monotonically increasing dts to muxer in stream 1: 379736 >= 379728
+ref120_10s x264 6000 scale1344x756 6561.6 58.59
+[null @ 00000224c63bb400] [null @ 0000020db197e580] Application provided invalid, non monotonically increasing dts to muxer in stream 1: 379736 >= 379728
+Application provided invalid, non monotonically increasing dts to muxer in stream 1: 379736 >= 379728
+[null @ 00000210ee1d5980] Application provided invalid, non monotonically increasing dts to muxer in stream 1: 379736 >= 379728
+ref120_10s x264 3000 scale1408x792 3267.0 42.69
+[null @ 0000013233e700c0] Application provided invalid, non monotonically increasing dts to muxer in stream 1: 379736 >= 379728
+[null @ 000001960c299540] Application provided invalid, non monotonically increasing dts to muxer in stream 1: 379736 >= 379728
+[null @ 000001daf0a1ebc0] Application provided invalid, non monotonically increasing dts to muxer in stream 1: 379736 >= 379728
+ref120_10s x264 6000 scale1408x792 6559.4 58.47
+[null @ 000001c76acdfb00] Application provided invalid, non monotonically increasing dts to muxer in stream 1: 379736 >= 379728
+[null @ 00000240fcc62b80] Application provided invalid, non monotonically increasing dts to muxer in stream 1: 379736 >= 379728
+[null @ 0000026fbd136d40] Application provided invalid, non monotonically increasing dts to muxer in stream 1: 379736 >= 379728
+ref120_10s x264 3000 scale1472x828 3266.2 42.41
+[null @ 00000271272d6d40] Application provided invalid, non monotonically increasing dts to muxer in stream 1: 379736 >= 379728
+[null @ 000002a82e6d2980] Application provided invalid, non monotonically increasing dts to muxer in stream 1: 379736 >= 379728
+[null @ 000001e1484d9ec0] Application provided invalid, non monotonically increasing dts to muxer in stream 1: 379736 >= 379728
+ref120_10s x264 6000 scale1472x828 6551.3 58.42
+[null @ 000001dbd1b53640] Application provided invalid, non monotonically increasing dts to muxer in stream 1: 379736 >= 379728
+[null @ 000002ce0f28dd80] Application provided invalid, non monotonically increasing dts to muxer in stream 1: 379736 >= 379728
+[null @ 0000020080c8e940] Application provided invalid, non monotonically increasing dts to muxer in stream 1: 379736 >= 379728
+ref120_10s x264 3000 scale1536x864 3255.1 41.87
+[null @ 000001bab15c7480] Application provided invalid, non monotonically increasing dts to muxer in stream 1: 379736 >= 379728
+[null @ 0000021467c2b440] Application provided invalid, non monotonically increasing dts to muxer in stream 1: 379736 >= 379728
+[null @ 0000010b37de6440] Application provided invalid, non monotonically increasing dts to muxer in stream 1: 379736 >= 379728
+ref120_10s x264 6000 scale1536x864 6549.2 58.39
+[null @ 000002013ac600c0] Application provided invalid, non monotonically increasing dts to muxer in stream 1: 379736 >= 379728
+[null @ 0000022f1a568b00] [null @ 000001d6e1867540] Application provided invalid, non monotonically increasing dts to muxer in stream 1: 379736 >= 379728
+Application provided invalid, non monotonically increasing dts to muxer in stream 1: 379736 >= 379728
+ref120_10s x264 3000 scale1600x900 3247.9 41.04
+[null @ 0000014c5a8b0a80] Application provided invalid, non monotonically increasing dts to muxer in stream 1: 379736 >= 379728
+[null @ 0000028d429048c0] Application provided invalid, non monotonically increasing dts to muxer in stream 1: 379736 >= 379728
+[null @ 0000023c33bd25c0] Application provided invalid, non monotonically increasing dts to muxer in stream 1: 379736 >= 379728
+ref120_10s x264 6000 scale1600x900 6561.4 57.7
+[null @ 0000021430ae7400] Application provided invalid, non monotonically increasing dts to muxer in stream 1: 379736 >= 379728
+[null @ 0000029ca129dc40] Application provided invalid, non monotonically increasing dts to muxer in stream 1: 379736 >= 379728
+[null @ 00000167c79d00c0] Application provided invalid, non monotonically increasing dts to muxer in stream 1: 379736 >= 379728
+ref120_10s x264 3000 scale1664x936 3239.8 40.51
+[null @ 0000020aacffa4c0] Application provided invalid, non monotonically increasing dts to muxer in stream 1: 379736 >= 379728
+[null @ 000002ddabf77c00] Application provided invalid, non monotonically increasing dts to muxer in stream 1: 379736 >= 379728
+[null @ 0000022d4cf0cec0] Application provided invalid, non monotonically increasing dts to muxer in stream 1: 379736 >= 379728
+ref120_10s x264 6000 scale1664x936 6558.8 57.43
+[null @ 0000023041073580] Application provided invalid, non monotonically increasing dts to muxer in stream 1: 379736 >= 379728
+[null @ 00000165246db600] Application provided invalid, non monotonically increasing dts to muxer in stream 1: 379736 >= 379728
+[null @ 0000015f84607a80] Application provided invalid, non monotonically increasing dts to muxer in stream 1: 379736 >= 379728
+ref120_10s x264 3000 scale1728x972 3254.4 39.85
+[null @ 0000028104a5eb40] Application provided invalid, non monotonically increasing dts to muxer in stream 1: 379736 >= 379728
+[null @ 000001aa70e02bc0] Application provided invalid, non monotonically increasing dts to muxer in stream 1: 379736 >= 379728
+[null @ 0000023799f5a180] Application provided invalid, non monotonically increasing dts to muxer in stream 1: 379736 >= 379728
+ref120_10s x264 6000 scale1728x972 6563.6 57.14
+[null @ 000001f6e878d280] Application provided invalid, non monotonically increasing dts to muxer in stream 1: 379736 >= 379728
+[null @ 000001b1d3115b40] Application provided invalid, non monotonically increasing dts to muxer in stream 1: 379736 >= 379728
+[null @ 00000160a3c1e980] Application provided invalid, non monotonically increasing dts to muxer in stream 1: 379736 >= 379728
+ref120_10s x264 3000 scale1792x1008 3245.8 39.39
+[null @ 0000021899bab4c0] Application provided invalid, non monotonically increasing dts to muxer in stream 1: 379736 >= 379728
+[null @ 0000022ecc400b00] Application provided invalid, non monotonically increasing dts to muxer in stream 1: 379736 >= 379728
+[null @ 00000227fe7820c0] Application provided invalid, non monotonically increasing dts to muxer in stream 1: 379736 >= 379728
+ref120_10s x264 6000 scale1792x1008 6549.3 56.79
+[null @ 0000016bd3170300] Application provided invalid, non monotonically increasing dts to muxer in stream 1: 379736 >= 379728
+[null @ 000002557ad462c0] Application provided invalid, non monotonically increasing dts to muxer in stream 1: 379736 >= 379728
+[null @ 00000184cb857bc0] Application provided invalid, non monotonically increasing dts to muxer in stream 1: 379736 >= 379728
+ref120_10s x264 3000 sq768x432_c30 3258.0 50.82
+[null @ 000002920ced1780] Application provided invalid, non monotonically increasing dts to muxer in stream 1: 379736 >= 379728
+[null @ 000001ca1b1f00c0] Application provided invalid, non monotonically increasing dts to muxer in stream 1: 379736 >= 379728
+[null @ 000002a0eabfde40] Application provided invalid, non monotonically increasing dts to muxer in stream 1: 379736 >= 379728
+ref120_10s x264 6000 sq768x432_c30 6413.8 58.37
+[null @ 000001c2052f7c00] Application provided invalid, non monotonically increasing dts to muxer in stream 1: 379736 >= 379728
+[null @ 000002ca13cb4d80] Application provided invalid, non monotonically increasing dts to muxer in stream 1: 379736 >= 379728
+[null @ 000001c74783e540] Application provided invalid, non monotonically increasing dts to muxer in stream 1: 379736 >= 379728
+ref120_10s x264 3000 sq832x468_c30 3267.2 55.63
+[null @ 00000202483a4280] [null @ 0000020b03d5f680] Application provided invalid, non monotonically increasing dts to muxer in stream 1: 379736 >= 379728
+Application provided invalid, non monotonically increasing dts to muxer in stream 1: 379736 >= 379728
+[null @ 0000013d64381fc0] Application provided invalid, non monotonically increasing dts to muxer in stream 1: 379736 >= 379728
+ref120_10s x264 6000 sq832x468_c30 6505.8 64.82
+[null @ 000001d0109b89c0] Application provided invalid, non monotonically increasing dts to muxer in stream 1: 379736 >= 379728
+[null @ 000001e5c3a600c0] Application provided invalid, non monotonically increasing dts to muxer in stream 1: 379736 >= 379728
+[null @ 0000025c55f8be40] Application provided invalid, non monotonically increasing dts to muxer in stream 1: 379736 >= 379728
+ref120_10s x264 3000 sq896x504_c30 3275.7 56.09
+[null @ 0000012f43c87700] Application provided invalid, non monotonically increasing dts to muxer in stream 1: 379736 >= 379728
+[null @ 00000245535fe940] Application provided invalid, non monotonically increasing dts to muxer in stream 1: 379736 >= 379728
+[null @ 00000131c45cb400] Application provided invalid, non monotonically increasing dts to muxer in stream 1: 379736 >= 379728
+ref120_10s x264 6000 sq896x504_c30 6493.8 65.94
+[null @ 000002458cf37d80] Application provided invalid, non monotonically increasing dts to muxer in stream 1: 379736 >= 379728
+[null @ 0000028d41ab6d40] Application provided invalid, non monotonically increasing dts to muxer in stream 1: 379736 >= 379728
+[null @ 0000027c1bf700c0] Application provided invalid, non monotonically increasing dts to muxer in stream 1: 379736 >= 379728
+ref120_10s x264 3000 sq960x540_c30 3263.1 60.3
+[null @ 0000024530031140] Application provided invalid, non monotonically increasing dts to muxer in stream 1: 379736 >= 379728
+[null @ 0000023537ee7640] [null @ 00000273f3deef80] Application provided invalid, non monotonically increasing dts to muxer in stream 1: 379736 >= 379728
+Application provided invalid, non monotonically increasing dts to muxer in stream 1: 379736 >= 379728
+ref120_10s x264 6000 sq960x540_c30 6500.4 71.02
+[null @ 00000243f9e52500] Application provided invalid, non monotonically increasing dts to muxer in stream 1: 379736 >= 379728
+[null @ 000001fa899a6880] [null @ 0000025dcd2d5f40] Application provided invalid, non monotonically increasing dts to muxer in stream 1: 379736 >= 379728
+Application provided invalid, non monotonically increasing dts to muxer in stream 1: 379736 >= 379728
+ref120_10s x264 3000 sq1024x576_c30 3267.0 59.39
+[null @ 000001c4cbc56d40] Application provided invalid, non monotonically increasing dts to muxer in stream 1: 379736 >= 379728
+[null @ 00000211e2b36880] Application provided invalid, non monotonically increasing dts to muxer in stream 1: 379736 >= 379728
+[null @ 00000158d2cc00c0] Application provided invalid, non monotonically increasing dts to muxer in stream 1: 379736 >= 379728
+ref120_10s x264 6000 sq1024x576_c30 6507.3 70.62
+[null @ 000001507a35c3c0] Application provided invalid, non monotonically increasing dts to muxer in stream 1: 379736 >= 379728
+[null @ 0000012e3a16b540] Application provided invalid, non monotonically increasing dts to muxer in stream 1: 379736 >= 379728
+[null @ 000001a1692ea880] Application provided invalid, non monotonically increasing dts to muxer in stream 1: 379736 >= 379728
+ref120_10s x264 3000 sq1088x612_c30 3274.4 57.82
+[null @ 000002ba6bb6e540] Application provided invalid, non monotonically increasing dts to muxer in stream 1: 379736 >= 379728
+[null @ 000001ea16857a40] Application provided invalid, non monotonically increasing dts to muxer in stream 1: 379736 >= 379728
+[null @ 00000182c447e240] Application provided invalid, non monotonically increasing dts to muxer in stream 1: 379736 >= 379728
+ref120_10s x264 6000 sq1088x612_c30 6520.9 69.7
+[null @ 00000201fcaac800] Application provided invalid, non monotonically increasing dts to muxer in stream 1: 379736 >= 379728
+[null @ 000001ff8876d180] Application provided invalid, non monotonically increasing dts to muxer in stream 1: 379736 >= 379728
+[null @ 0000029ea2d54f00] Application provided invalid, non monotonically increasing dts to muxer in stream 1: 379736 >= 379728
+ref120_10s x264 3000 sq1152x648_c30 3278.9 58.89
+[null @ 000001e7da9c7100] Application provided invalid, non monotonically increasing dts to muxer in stream 1: 379736 >= 379728
+[null @ 0000024363a23240] Application provided invalid, non monotonically increasing dts to muxer in stream 1: 379736 >= 379728
+[null @ 0000027d6f2f9e00] Application provided invalid, non monotonically increasing dts to muxer in stream 1: 379736 >= 379728
+ref120_10s x264 6000 sq1152x648_c30 6537.6 71.54
+[null @ 000001a65794d600] Application provided invalid, non monotonically increasing dts to muxer in stream 1: 379736 >= 379728
+[null @ 000002e81524ae00] Application provided invalid, non monotonically increasing dts to muxer in stream 1: 379736 >= 379728
+[null @ 0000021d922c00c0] Application provided invalid, non monotonically increasing dts to muxer in stream 1: 379736 >= 379728
+ref120_10s x264 3000 sq1216x684_c30 3267.8 57.25
+[null @ 00000193515fb5c0] Application provided invalid, non monotonically increasing dts to muxer in stream 1: 379736 >= 379728
+[null @ 000001e14a3b4c40] [null @ 000001d3529f00c0] Application provided invalid, non monotonically increasing dts to muxer in stream 1: 379736 >= 379728
+Application provided invalid, non monotonically increasing dts to muxer in stream 1: 379736 >= 379728
+ref120_10s x264 6000 sq1216x684_c30 6525.0 70.41
+[null @ 0000015493807c00] Application provided invalid, non monotonically increasing dts to muxer in stream 1: 379736 >= 379728
+[null @ 0000024bb73c6040] Application provided invalid, non monotonically increasing dts to muxer in stream 1: 379736 >= 379728
+[null @ 000002095f8b7900] Application provided invalid, non monotonically increasing dts to muxer in stream 1: 379736 >= 379728
+ref120_10s x264 3000 sq1280x720_c30 3267.4 55.69
+[null @ 000001472351bf80] Application provided invalid, non monotonically increasing dts to muxer in stream 1: 379736 >= 379728
+[null @ 0000024d0bc08c00] Application provided invalid, non monotonically increasing dts to muxer in stream 1: 379736 >= 379728
+[null @ 000001c2264900c0] Application provided invalid, non monotonically increasing dts to muxer in stream 1: 379736 >= 379728
+ref120_10s x264 6000 sq1280x720_c30 6541.1 69.54
+[null @ 000001a77c4146c0] Application provided invalid, non monotonically increasing dts to muxer in stream 1: 379736 >= 379728
+[null @ 000001e69c843540] Application provided invalid, non monotonically increasing dts to muxer in stream 1: 379736 >= 379728
+[null @ 000001c842c2d8c0] Application provided invalid, non monotonically increasing dts to muxer in stream 1: 379736 >= 379728
+ref120_10s x264 3000 sq1344x756_c30 3267.0 54.39
+[null @ 0000019244dd8bc0] Application provided invalid, non monotonically increasing dts to muxer in stream 1: 379736 >= 379728
+[null @ 000001fdb10f7bc0] Application provided invalid, non monotonically increasing dts to muxer in stream 1: 379736 >= 379728
+[null @ 0000015d86430980] Application provided invalid, non monotonically increasing dts to muxer in stream 1: 379736 >= 379728
+ref120_10s x264 6000 sq1344x756_c30 6545.2 69.14
+[null @ 000002610b8a3240] Application provided invalid, non monotonically increasing dts to muxer in stream 1: 379736 >= 379728
+[null @ 000001bbc9367d40] Application provided invalid, non monotonically increasing dts to muxer in stream 1: 379736 >= 379728
+[null @ 0000026ac2d34c80] Application provided invalid, non monotonically increasing dts to muxer in stream 1: 379736 >= 379728
+ref120_10s x264 3000 sq1408x792_c30 3264.9 52.47
+[null @ 000001d65fc46f40] Application provided invalid, non monotonically increasing dts to muxer in stream 1: 379736 >= 379728
+[null @ 000002a2b148bb00] Application provided invalid, non monotonically increasing dts to muxer in stream 1: 379736 >= 379728
+[null @ 00000235d3266d40] Application provided invalid, non monotonically increasing dts to muxer in stream 1: 379736 >= 379728
+ref120_10s x264 6000 sq1408x792_c30 6558.9 67.81
+[null @ 000001a8b43bcc40] Application provided invalid, non monotonically increasing dts to muxer in stream 1: 379736 >= 379728
+[null @ 000001a39e70d340] Application provided invalid, non monotonically increasing dts to muxer in stream 1: 379736 >= 379728
+[null @ 00000209fc798780] Application provided invalid, non monotonically increasing dts to muxer in stream 1: 379736 >= 379728
+ref120_10s x264 3000 sq1472x828_c30 3275.8 50.71
+[null @ 0000023ace9d7580] Application provided invalid, non monotonically increasing dts to muxer in stream 1: 379736 >= 379728
+[null @ 00000221f4be5e80] Application provided invalid, non monotonically increasing dts to muxer in stream 1: 379736 >= 379728
+[null @ 0000021b3cf35500] Application provided invalid, non monotonically increasing dts to muxer in stream 1: 379736 >= 379728
+ref120_10s x264 6000 sq1472x828_c30 6547.4 66.46
+[null @ 000001a6b78ab200] Application provided invalid, non monotonically increasing dts to muxer in stream 1: 379736 >= 379728
+[null @ 000002033e5f5240] Application provided invalid, non monotonically increasing dts to muxer in stream 1: 379736 >= 379728
+[null @ 000002247cca4a80] Application provided invalid, non monotonically increasing dts to muxer in stream 1: 379736 >= 379728
+ref120_10s x264 3000 sq1536x864_c30 3276.4 48.82
+[null @ 00000293a98d3bc0] Application provided invalid, non monotonically increasing dts to muxer in stream 1: 379736 >= 379728
+[null @ 0000015bbc8c4240] Application provided invalid, non monotonically increasing dts to muxer in stream 1: 379736 >= 379728
+[null @ 000001f95514fe80] Application provided invalid, non monotonically increasing dts to muxer in stream 1: 379736 >= 379728
+ref120_10s x264 6000 sq1536x864_c30 6562.2 65.03
+[null @ 0000022b23e800c0] Application provided invalid, non monotonically increasing dts to muxer in stream 1: 379736 >= 379728
+[null @ 0000015ca63fd000] Application provided invalid, non monotonically increasing dts to muxer in stream 1: 379736 >= 379728
+[null @ 0000012eb8d661c0] Application provided invalid, non monotonically increasing dts to muxer in stream 1: 379736 >= 379728
+ref120_10s x264 3000 sq1600x900_c30 3277.5 46.66
+[null @ 000001a7a6dd9fc0] Application provided invalid, non monotonically increasing dts to muxer in stream 1: 379736 >= 379728
+[null @ 000001756cefcbc0] Application provided invalid, non monotonically increasing dts to muxer in stream 1: 379736 >= 379728
+[null @ 000002468868e640] Application provided invalid, non monotonically increasing dts to muxer in stream 1: 379736 >= 379728
+ref120_10s x264 6000 sq1600x900_c30 6563.7 63.4
+[null @ 0000022f99912c40] Application provided invalid, non monotonically increasing dts to muxer in stream 1: 379736 >= 379728
+[null @ 000001ea51d09b00] Application provided invalid, non monotonically increasing dts to muxer in stream 1: 379736 >= 379728
+[null @ 0000023a0c58e480] Application provided invalid, non monotonically increasing dts to muxer in stream 1: 379736 >= 379728
+ref120_10s x264 3000 sq1664x936_c30 3268.3 44.55
+[null @ 000002c9001fb100] Application provided invalid, non monotonically increasing dts to muxer in stream 1: 379736 >= 379728
+[null @ 00000177be98a880] Application provided invalid, non monotonically increasing dts to muxer in stream 1: 379736 >= 379728
+[null @ 00000208c9667a40] Application provided invalid, non monotonically increasing dts to muxer in stream 1: 379736 >= 379728
+ref120_10s x264 6000 sq1664x936_c30 6560.6 61.73
+[null @ 000001ab97480e40] Application provided invalid, non monotonically increasing dts to muxer in stream 1: 379736 >= 379728
+[null @ 0000028a9735e600] Application provided invalid, non monotonically increasing dts to muxer in stream 1: 379736 >= 379728
+[null @ 0000023871654200] Application provided invalid, non monotonically increasing dts to muxer in stream 1: 379736 >= 379728
+ref120_10s x264 3000 sq1728x972_c30 3264.8 42.93
+[null @ 000001697cb500c0] Application provided invalid, non monotonically increasing dts to muxer in stream 1: 379736 >= 379728
+[null @ 0000021456bd34c0] Application provided invalid, non monotonically increasing dts to muxer in stream 1: 379736 >= 379728
+[null @ 00000202940400c0] Application provided invalid, non monotonically increasing dts to muxer in stream 1: 379736 >= 379728
+ref120_10s x264 6000 sq1728x972_c30 6549.7 60.28
+[null @ 00000183705c8580] Application provided invalid, non monotonically increasing dts to muxer in stream 1: 379736 >= 379728
+[null @ 000001b8b9584300] Application provided invalid, non monotonically increasing dts to muxer in stream 1: 379736 >= 379728
+[null @ 000002548af8b100] Application provided invalid, non monotonically increasing dts to muxer in stream 1: 379736 >= 379728
+ref120_10s x264 3000 sq1792x1008_c30 3265.1 41.11
+[null @ 000001c7a5097980] Application provided invalid, non monotonically increasing dts to muxer in stream 1: 379736 >= 379728
+[null @ 000001f7446cce80] Application provided invalid, non monotonically increasing dts to muxer in stream 1: 379736 >= 379728
+[null @ 00000222adfa9600] Application provided invalid, non monotonically increasing dts to muxer in stream 1: 379736 >= 379728
+ref120_10s x264 6000 sq1792x1008_c30 6562.0 58.75
+Traceback (most recent call last):
+  File "c:\dbpo-lab\research\next-round\t2_summary.py", line 9, in <module>
+    rows = [json.loads(l) for l in open(sys.argv[1])]
+                                   ~~~~^^^^^^^^^^^^^
+PermissionError: [Errno 13] Permission denied: 'c:\\dbpo-lab\\canvas_sweep_120\\out120'
+Done. Summary: c:\dbpo-lab\canvas_sweep_120\summary120.txt
+Press any key to continue . . .

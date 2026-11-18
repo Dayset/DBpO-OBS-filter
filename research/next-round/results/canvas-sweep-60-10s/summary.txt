@@ -1,0 +1,22 @@
+('ref60_10s', 'x264', 3000) 
+  plain       plain             2820k  centre30= 21.9  centre50= 21.3  whole= 22.9
+  downscale   scale1024x576     2913k  centre30= 26.8  centre50= 26.6  whole= 27.7
+  method      sq960x540_c30     2892k  centre30= 59.6  centre50= 47.6  whole= 22.2   vs downscale: centre50 +21.0  whole -5.5
+  method      sq1024x576_c30    2898k  centre30= 56.7  centre50= 45.9  whole= 23.8   vs downscale: centre50 +19.3  whole -3.8
+  method      sq1152x648_c30    2903k  centre30= 50.5  centre50= 44.2  whole= 25.8   vs downscale: centre50 +17.6  whole -1.9
+  method      sq1216x684_c30    2902k  centre30= 48.0  centre50= 42.1  whole= 26.3   vs downscale: centre50 +15.5  whole -1.4
+  method      sq1280x720_c30    2894k  centre30= 45.2  centre50= 39.8  whole= 26.3   vs downscale: centre50 +13.3  whole -1.4
+  method      sq1344x756_c30    2899k  centre30= 42.0  centre50= 38.6  whole= 26.7   vs downscale: centre50 +12.1  whole -0.9
+
+('ref60_10s', 'x264', 6000) 
+  plain       plain             5821k  centre30= 34.6  centre50= 34.2  whole= 34.7
+  downscale   scale1024x576     5735k  centre30= 39.7  centre50= 40.0  whole= 40.9
+  method      sq960x540_c30     5721k  centre30= 71.1  centre50= 59.4  whole= 28.1   vs downscale: centre50 +19.5  whole -12.8
+  method      sq1024x576_c30    5745k  centre30= 69.0  centre50= 58.4  whole= 31.4   vs downscale: centre50 +18.4  whole -9.5
+  method      sq1152x648_c30    5780k  centre30= 64.3  centre50= 58.2  whole= 34.9   vs downscale: centre50 +18.3  whole -6.0
+  method      sq1216x684_c30    5779k  centre30= 62.5  centre50= 56.6  whole= 36.5   vs downscale: centre50 +16.7  whole -4.4
+  method      sq1280x720_c30    5767k  centre30= 60.2  centre50= 54.9  whole= 37.5   vs downscale: centre50 +14.9  whole -3.4
+  method      sq1344x756_c30    5796k  centre30= 57.2  centre50= 54.2  whole= 37.7   vs downscale: centre50 +14.2  whole -3.3
+  method      sq1408x792_c30    5781k  centre30= 55.3  centre50= 52.3  whole= 38.2   vs downscale: centre50 +12.3  whole -2.7
+  method      sq1472x828_c30    5786k  centre30= 53.2  centre50= 50.2  whole= 38.5   vs downscale: centre50 +10.3  whole -2.5
+

@@ -1,0 +1,24 @@
+('ref120', 'x264', 1500) 
+  plain       plain             1496k  centre30= 17.6  centre50= 17.4  whole= 16.9
+  downscale   scale1280x720     1511k  centre30= 19.4  centre50= 19.8  whole= 19.8
+  method      sq960x540_c30     1517k  centre30= 30.8  centre50= 27.4  whole= 20.4   vs downscale: centre50 +7.7  whole +0.6
+  ROI         roi_c50_q40       1502k  centre30= 20.6  centre50= 21.2  whole= 18.6   vs downscale: centre50 +1.5  whole -1.2
+  T12 sq960x540_c30 vs best ROI at matched whole frame: no ROI arm comes within 1 whole-frame VMAF (method ahead on the trade-off)
+  G2: PASS (best centre50 gap +7.7)
+
+('ref120', 'x264', 3000) 
+  plain       plain             2999k  centre30= 20.1  centre50= 20.7  whole= 20.7
+  downscale   scale960x540      3031k  centre30= 27.4  centre50= 27.1  whole= 25.7
+  method      sq960x540_c30     3029k  centre30= 48.2  centre50= 39.5  whole= 25.7   vs downscale: centre50 +12.4  whole -0.0
+  ROI         roi_c50_q40       3019k  centre30= 26.1  centre50= 27.2  whole= 23.2   vs downscale: centre50 +0.1  whole -2.5
+  T12 sq960x540_c30 vs best ROI at matched whole frame: no ROI arm comes within 1 whole-frame VMAF (method ahead on the trade-off)
+
+('ref120', 'x264', 6000) 
+  plain       plain             6043k  centre30= 26.0  centre50= 27.2  whole= 27.8
+  downscale   scale960x540      6058k  centre30= 39.9  centre50= 38.5  whole= 35.3
+  method      sq960x540_c30     6054k  centre30= 66.8  centre50= 54.0  whole= 31.9   vs downscale: centre50 +15.5  whole -3.4
+  method      sq1280x720_c30    6054k  centre30= 54.3  centre50= 49.1  whole= 35.8   vs downscale: centre50 +10.5  whole +0.5
+  ROI         roi_c50_q40       6048k  centre30= 33.7  centre50= 34.0  whole= 29.5   vs downscale: centre50 -4.5  whole -5.8
+  T12 sq960x540_c30 vs best ROI at matched whole frame: no ROI arm comes within 1 whole-frame VMAF (method ahead on the trade-off)
+  T12 sq1280x720_c30 vs best ROI at matched whole frame: no ROI arm comes within 1 whole-frame VMAF (method ahead on the trade-off)
+
