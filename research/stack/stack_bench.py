@@ -38,8 +38,8 @@ def frames(path, w, h, vf=None):
         yield np.frombuffer(b, np.uint8).reshape(h, w, 3)
     p.wait()
 
-def lossless_writer(w, h, out):
-    return subprocess.Popen([FF, "-v", "error", "-y", "-f", "rawvideo", "-pix_fmt", "rgb24", "-s", f"{w}x{h}", "-r", "60",
+def lossless_writer(w, h, out, fps=60):
+    return subprocess.Popen([FF, "-v", "error", "-y", "-f", "rawvideo", "-pix_fmt", "rgb24", "-s", f"{w}x{h}", "-r", str(fps),
         "-i", "-", "-c:v", "libx264", "-preset", "ultrafast", "-qp", "0", "-pix_fmt", "yuv420p", out], stdin=subprocess.PIPE)
 
 class Squish:
@@ -78,15 +78,19 @@ def bench(cmd):
     return float(m.group(1)) + float(m.group(2))
 
 def encode(src, out, kbps, vf=None):
-    rate = ["-b:v", f"{kbps}k", "-maxrate", f"{kbps}k", "-bufsize", f"{2 * kbps}k", "-g", "120", "-pix_fmt", "yuv420p"]
-    codec = {"x264": ["-c:v", "libx264", "-preset", "veryfast", "-keyint_min", "120", "-sc_threshold", "0"],
-             "x265": ["-c:v", "libx265", "-preset", "veryfast", "-x265-params", "keyint=120:min-keyint=120:scenecut=0:log-level=error"],
+    gop = int(round(float(os.environ.get("KEYINT_S", "2")) * 60))  # keyframe interval in frames at 60 fps; default 2 s = 120
+    rate = ["-b:v", f"{kbps}k", "-maxrate", f"{kbps}k", "-bufsize", f"{2 * kbps}k", "-g", str(gop), "-pix_fmt", "yuv420p"]
+    codec = {"x264": ["-c:v", "libx264", "-preset", "veryfast", "-keyint_min", str(gop), "-sc_threshold", "0"],
+             "x265": ["-c:v", "libx265", "-preset", "veryfast", "-x265-params", f"keyint={gop}:min-keyint={gop}:scenecut=0:log-level=error"],
              "svtav1": ["-c:v", "libsvtav1", "-preset", "10"],
              "h264_nvenc": ["-c:v", "h264_nvenc", "-preset", "p4", "-tune", "ll", "-rc", "cbr"],
              "hevc_nvenc": ["-c:v", "hevc_nvenc", "-preset", "p4", "-tune", "ll", "-rc", "cbr"],
              "av1_nvenc": ["-c:v", "av1_nvenc", "-preset", "p4", "-tune", "ll", "-rc", "cbr"]}[os.environ.get("CODEC", "x264")]  # $CODEC picks the encoder (GPU: *_nvenc, CPU time is then meaningless)
     if os.environ.get("CODEC") == "svtav1":  # SVT-AV1 refuses CBR outside low-delay mode: target-bitrate VBR
-        rate = ["-b:v", f"{kbps}k", "-g", "120", "-pix_fmt", "yuv420p"]
+        rate = ["-b:v", f"{kbps}k", "-g", str(gop), "-pix_fmt", "yuv420p"]
+    if os.environ.get("QP_MODE"):  # R1 fixed-QP mode: the kbps argument is the QP value, no rate control
+        if "-rc" in codec: i = codec.index("-rc"); del codec[i:i + 2]
+        rate = ["-g", str(gop), "-pix_fmt", "yuv420p", "-qp", str(kbps)] + (["-rc", "constqp"] if "-rc" not in codec and "nvenc" in os.environ.get("CODEC", "") else [])
     cpu = bench([FF, "-nostats", "-benchmark", "-y", "-i", src] + (["-vf", vf] if vf else []) + codec + rate + [out])
     return cpu - bench([FF, "-nostats", "-benchmark", "-i", src, "-f", "null", "-"])
 

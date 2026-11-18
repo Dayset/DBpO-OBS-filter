@@ -20,6 +20,7 @@ with this program. If not, see <https://www.gnu.org/licenses/>
 
 OBS_DECLARE_MODULE()
 OBS_MODULE_AUTHOR("dayset")
+OBS_MODULE_USE_DEFAULT_LOCALE("gauss-frame-hold", "en-US")
 
 extern struct obs_source_info gauss_frame_hold_filter;
 
