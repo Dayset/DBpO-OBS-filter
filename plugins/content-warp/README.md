@@ -8,3 +8,5 @@ Experimental. Takes a 16:9 picture and warps its sides by detail, so the sides a
 - **Mode B:** the 4:3 picture is centred in the 16:9 frame with black bars. This keeps the canvas at 16:9, so it saves no pixels. It's a control for the bitrate.
 
 The filter itself can't change the canvas size.
+
+- **Picture height (%):** 60–100% of the canvas height. Below 100 the picture is shorter and black bars are added at the top and bottom.

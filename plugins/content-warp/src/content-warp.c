@@ -34,6 +34,7 @@ struct cw_info {
 	uint32_t tick;
 	uint32_t cache;
 	float centre;
+	float height;
 	bool mode_a;
 	int view;
 };
@@ -81,6 +82,7 @@ static void cw_update(void *data, obs_data_t *settings)
 	struct cw_info *f = data;
 	f->cache = (uint32_t)obs_data_get_int(settings, "cache");
 	f->centre = (float)obs_data_get_int(settings, "centre") / 100.0f;
+	f->height = (float)obs_data_get_int(settings, "height") / 100.0f;
 	f->mode_a = obs_data_get_int(settings, "mode") == 0;
 	f->view = (int)obs_data_get_int(settings, "view");
 }
@@ -89,6 +91,7 @@ static void cw_defaults(obs_data_t *settings)
 {
 	obs_data_set_default_int(settings, "centre", 20);
 	obs_data_set_default_int(settings, "cache", 3);
+	obs_data_set_default_int(settings, "height", 100);
 	obs_data_set_default_int(settings, "mode", 0);
 	obs_data_set_default_int(settings, "view", 0);
 }
@@ -145,6 +148,9 @@ static obs_properties_t *cw_properties(void *data)
 
 	obs_property_t *c = obs_properties_add_int_slider(ppts, "centre", "Centre 1:1 width (%)", 5, 60, 1);
 	obs_property_set_long_description(c, "Width of the untouched 1:1 band in the middle, as a percent of the source.");
+
+	obs_property_t *h = obs_properties_add_int_slider(ppts, "height", "Picture height (% of canvas)", 60, 100, 1);
+	obs_property_set_long_description(h, "Height of the picture. Less than 100 adds black bars at the top and bottom.");
 
 	obs_property_t *n = obs_properties_add_int_slider(ppts, "cache", "Recompute warp every N frames", 2, 20, 1);
 	obs_property_set_long_description(n, "How often the detail is measured. Higher is cheaper but reacts more slowly.");
@@ -238,12 +244,14 @@ static void cw_video_render(void *data, gs_effect_t *effect)
 	gs_eparam_t *srcW_p = gs_effect_get_param_by_name(f->fx, "srcW");
 	gs_eparam_t *srcH_p = gs_effect_get_param_by_name(f->fx, "srcH");
 	gs_eparam_t *ew_p = gs_effect_get_param_by_name(f->fx, "ew");
+	gs_eparam_t *ph_p = gs_effect_get_param_by_name(f->fx, "ph");
 	gs_eparam_t *mode_p = gs_effect_get_param_by_name(f->fx, "mode_a");
 	gs_eparam_t *view_p = gs_effect_get_param_by_name(f->fx, "view");
 
 	gs_effect_set_float(srcW_p, (float)cx);
 	gs_effect_set_float(srcH_p, (float)cy);
 	gs_effect_set_float(ew_p, ew);
+	gs_effect_set_float(ph_p, roundf((float)cy * f->height));
 	gs_effect_set_int(mode_p, f->mode_a ? 1 : 0);
 	gs_effect_set_int(view_p, f->view);
 

@@ -10,6 +10,7 @@ uniform texture2d warp;
 uniform float srcW;
 uniform float srcH;
 uniform float ew;
+uniform float ph;
 uniform int mode_a;
 uniform int view;
 
@@ -57,8 +58,13 @@ float4 PSRender(VertData v_in) : TARGET
 			return float4(0.0, 0.0, 0.0, 1.0);
 		ex = local / ew;
 	}
+	float ey = v_in.uv.y;
+	float vlocal = v_in.uv.y * srcH - (srcH - ph) * 0.5;
+	if (vlocal < 0.0 || vlocal >= ph)
+		return float4(0.0, 0.0, 0.0, 1.0);
+	ey = vlocal / ph;
 	float u = warp.Sample(s, float2(ex, 0.5)).r;
-	return image.Sample(s, float2(u, v_in.uv.y));
+	return image.Sample(s, float2(u, ey));
 }
 
 float4 PSShow(VertData v_in) : TARGET
