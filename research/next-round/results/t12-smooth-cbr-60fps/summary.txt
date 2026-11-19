@@ -1,0 +1,72 @@
+('PlanetsideDifferentSpeed', 'x264', 1500) 
+  plain       plain             1493k  centre30= 21.7  centre50= 21.2  whole= 20.3
+  downscale   scale960x540      1530k  centre30= 27.8  centre50= 27.5  whole= 27.1
+  method      sq960x540_c30     1525k  centre30= 46.5  centre50= 37.1  whole= 20.4   vs downscale: centre50 +9.6  whole -6.7
+  method      sq1280x720_c30    1504k  centre30= 34.1  centre50= 30.4  whole= 22.4   vs downscale: centre50 +2.9  whole -4.7
+  ROI         roi_c50_q40       1460k  centre30= 29.0  centre50= 28.8  whole= 19.5   vs downscale: centre50 +1.3  whole -7.6
+  ROI         roi_c50_q20       1489k  centre30= 26.8  centre50= 26.4  whole= 20.5   vs downscale: centre50 -1.1  whole -6.6
+  T12 sq960x540_c30 vs best ROI at matched whole frame: roi_c50_q40 centre50 gap +8.3
+  T12 sq1280x720_c30 vs best ROI at matched whole frame: no ROI arm comes within 1 whole-frame VMAF (method ahead on the trade-off)
+  G2: PASS (best centre50 gap +9.6)
+
+('PlanetsideDifferentSpeed', 'x264', 3000) 
+  plain       plain             3010k  centre30= 31.5  centre50= 31.3  whole= 31.5
+  downscale   scale960x540      3047k  centre30= 40.6  centre50= 40.6  whole= 40.4
+  method      sq960x540_c30     3042k  centre30= 62.6  centre50= 51.0  whole= 27.8   vs downscale: centre50 +10.4  whole -12.6
+  method      sq1280x720_c30    3042k  centre30= 51.2  centre50= 46.3  whole= 34.4   vs downscale: centre50 +5.7  whole -6.0
+  ROI         roi_c50_q40       2975k  centre30= 50.0  centre50= 50.4  whole= 28.4   vs downscale: centre50 +9.8  whole -11.9
+  ROI         roi_c50_q20       2987k  centre30= 46.9  centre50= 47.2  whole= 30.9   vs downscale: centre50 +6.6  whole -9.4
+  T12 sq960x540_c30 vs best ROI at matched whole frame: roi_c50_q40 centre50 gap +0.6
+  T12 sq1280x720_c30 vs best ROI at matched whole frame: no ROI arm comes within 1 whole-frame VMAF (method ahead on the trade-off)
+
+('Planetside_2_2026_11_15___21_26_27_05', 'x264', 1500) 
+  plain       plain             1462k  centre30= 64.4  centre50= 64.8  whole= 62.5
+  downscale   scale1280x720     1530k  centre30= 66.2  centre50= 66.5  whole= 65.1
+  method      sq960x540_c30     1559k  centre30= 85.5  centre50= 78.2  whole= 44.4   vs downscale: centre50 +11.7  whole -20.7
+  method      sq1280x720_c30    1541k  centre30= 79.5  centre50= 75.9  whole= 58.5   vs downscale: centre50 +9.4  whole -6.6
+  ROI         roi_c50_q40       1452k  centre30= 83.0  centre50= 83.8  whole= 42.2   vs downscale: centre50 +17.3  whole -22.9
+  ROI         roi_c50_q20       1469k  centre30= 80.7  centre50= 80.9  whole= 56.5   vs downscale: centre50 +14.4  whole -8.7
+  T12 sq960x540_c30 vs best ROI at matched whole frame: roi_c50_q20 centre50 gap -2.8
+  T12 sq1280x720_c30 vs best ROI at matched whole frame: no ROI arm comes within 1 whole-frame VMAF (method ahead on the trade-off)
+  G2: PASS (best centre50 gap +11.7)
+
+('Planetside_2_2026_11_15___21_26_27_05', 'x264', 3000) 
+  plain       plain             3034k  centre30= 79.1  centre50= 79.5  whole= 77.6
+  downscale   scale1280x720     3099k  centre30= 76.7  centre50= 76.8  whole= 76.0
+  method      sq1280x720_c30    3116k  centre30= 87.7  centre50= 84.5  whole= 67.7   vs downscale: centre50 +7.6  whole -8.3
+  ROI         roi_c50_q40       3056k  centre30= 90.9  centre50= 91.3  whole= 56.3   vs downscale: centre50 +14.5  whole -19.7
+  ROI         roi_c50_q20       3044k  centre30= 88.8  centre50= 89.1  whole= 73.3   vs downscale: centre50 +12.3  whole -2.8
+  T12 sq1280x720_c30 vs best ROI at matched whole frame: roi_c50_q20 centre50 gap -4.7
+
+('Planetside_2_2026_11_15___21_29_34_08', 'x264', 1500) 
+  plain       plain             1524k  centre30= 17.2  centre50= 18.6  whole= 17.6
+  downscale   scale960x540      1529k  centre30= 19.2  centre50= 20.6  whole= 19.8
+  method      sq960x540_c30     1530k  centre30= 33.0  centre50= 29.5  whole= 20.8   vs downscale: centre50 +8.8  whole +1.0
+  ROI         roi_c50_q40       1475k  centre30= 20.3  centre50= 22.3  whole= 18.8   vs downscale: centre50 +1.7  whole -1.0
+  T12 sq960x540_c30 vs best ROI at matched whole frame: no ROI arm comes within 1 whole-frame VMAF (method ahead on the trade-off)
+  G2: PASS (best centre50 gap +8.8)
+
+('Planetside_2_2026_11_15___21_29_34_08', 'x264', 3000) 
+  plain       plain             3020k  centre30= 21.0  centre50= 23.0  whole= 22.5
+  downscale   scale960x540      3043k  centre30= 28.4  centre50= 29.8  whole= 29.5
+  method      sq960x540_c30     3033k  centre30= 49.8  centre50= 42.3  whole= 27.3   vs downscale: centre50 +12.5  whole -2.2
+  method      sq1280x720_c30    3004k  centre30= 36.9  centre50= 35.5  whole= 28.0   vs downscale: centre50 +5.6  whole -1.4
+  ROI         roi_c50_q40       2957k  centre30= 28.2  centre50= 30.2  whole= 24.6   vs downscale: centre50 +0.3  whole -4.9
+  T12 sq960x540_c30 vs best ROI at matched whole frame: no ROI arm comes within 1 whole-frame VMAF (method ahead on the trade-off)
+  T12 sq1280x720_c30 vs best ROI at matched whole frame: no ROI arm comes within 1 whole-frame VMAF (method ahead on the trade-off)
+
+('ref60', 'x264', 1500) 
+  plain       plain             1437k  centre30= 17.5  centre50= 15.8  whole= 12.3
+  downscale   scale960x540      1441k  centre30= 19.1  centre50= 18.5  whole= 15.6
+  method      sq960x540_c30     1459k  centre30= 31.5  centre50= 27.2  whole= 17.7   vs downscale: centre50 +8.7  whole +2.0
+  ROI         roi_c50_q40       1491k  centre30= 26.6  centre50= 25.7  whole= 17.9   vs downscale: centre50 +7.2  whole +2.2
+  T12 sq960x540_c30 vs best ROI at matched whole frame: roi_c50_q40 centre50 gap +1.5
+  G2: PASS (best centre50 gap +8.7)
+
+('ref60', 'x264', 3000) 
+  plain       plain             2956k  centre30= 22.8  centre50= 21.9  whole= 19.1
+  downscale   scale960x540      2895k  centre30= 29.4  centre50= 29.2  whole= 27.9
+  method      sq960x540_c30     2906k  centre30= 56.8  centre50= 47.0  whole= 27.8   vs downscale: centre50 +17.8  whole -0.1
+  ROI         roi_c50_q40       2884k  centre30= 31.5  centre50= 31.1  whole= 22.5   vs downscale: centre50 +1.9  whole -5.4
+  T12 sq960x540_c30 vs best ROI at matched whole frame: no ROI arm comes within 1 whole-frame VMAF (method ahead on the trade-off)
+
