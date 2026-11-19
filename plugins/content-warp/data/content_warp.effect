@@ -1,0 +1,107 @@
+// Content Warp shaders.
+// Energy: column detail of the source, 240 bins, read back to the CPU.
+// Render: samples the source through the warp map that the CPU built.
+// Show:   debug view (0 final is Render; 1 source; 2 energy; 3 warp map).
+
+uniform float4x4 ViewProj;
+uniform texture2d image;
+uniform texture2d energy_tex;
+uniform texture2d warp;
+uniform float srcW;
+uniform float srcH;
+uniform float ew;
+uniform float ph;
+uniform int mode_a;
+uniform int view;
+
+sampler_state s {
+	Filter = Linear;
+	AddressU = Clamp;
+	AddressV = Clamp;
+};
+
+struct VertData {
+	float4 pos : POSITION;
+	float2 uv : TEXCOORD0;
+};
+
+VertData VSMask(VertData v_in)
+{
+	VertData v_out;
+	v_out.pos = mul(float4(v_in.pos.xyz, 1.0), ViewProj);
+	v_out.uv = v_in.uv;
+	return v_out;
+}
+
+float lum(float2 q)
+{
+	return dot(image.Sample(s, q).rgb, float3(0.3, 0.59, 0.11));
+}
+
+float4 PSEnergy(VertData v_in) : TARGET
+{
+	float e = 0.0;
+	[loop] for (int j = 0; j < 128; j++) {
+		float2 q = float2(v_in.uv.x, (float(j) + 0.5) / 128.0);
+		e += abs(lum(q + float2(1.0 / srcW, 0.0)) - lum(q));
+		e += abs(lum(q + float2(0.0, 1.0 / srcH)) - lum(q));
+	}
+	return float4(e / 128.0, 0.0, 0.0, 1.0);
+}
+
+float4 PSRender(VertData v_in) : TARGET
+{
+	float ex = v_in.uv.x;
+	if (mode_a == 0) {
+		float local = v_in.uv.x * srcW - (srcW - ew) * 0.5;
+		if (local < 0.0 || local >= ew)
+			return float4(0.0, 0.0, 0.0, 1.0);
+		ex = local / ew;
+	}
+	float ey = v_in.uv.y;
+	float vlocal = v_in.uv.y * srcH - (srcH - ph) * 0.5;
+	if (vlocal < 0.0 || vlocal >= ph)
+		return float4(0.0, 0.0, 0.0, 1.0);
+	ey = vlocal / ph;
+	float u = warp.Sample(s, float2(ex, 0.5)).r;
+	return image.Sample(s, float2(u, ey));
+}
+
+float4 PSShow(VertData v_in) : TARGET
+{
+	if (view == 1)
+		return image.Sample(s, v_in.uv);
+	if (view == 2) {
+		float e = min(1.0, energy_tex.Sample(s, float2(v_in.uv.x, 0.5)).r * 8.0);
+		return float4(e, e, e, 1.0);
+	}
+	float m = warp.Sample(s, float2(v_in.uv.x, 0.5)).r;
+	return float4(m, m, m, 1.0);
+}
+
+technique Energy
+{
+	pass
+	{
+		vertex_shader = VSMask(v_in);
+		pixel_shader = PSEnergy(v_in);
+	}
+}
+
+technique Render
+{
+	pass
+	{
+		vertex_shader = VSMask(v_in);
+		pixel_shader = PSRender(v_in);
+	}
+}
+
+technique Show
+{
+	pass
+	{
+		vertex_shader = VSMask(v_in);
+		pixel_shader = PSShow(v_in);
+	}
+}
