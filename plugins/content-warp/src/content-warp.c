@@ -232,9 +232,7 @@ static void cw_video_render(void *data, gs_effect_t *effect)
 		return;
 	}
 	if (cx != f->cx || cy != f->cy || !f->fresh) {
-		obs_enter_graphics();
 		cw_free_textures(f);
-		obs_leave_graphics();
 		f->cx = cx;
 		f->cy = cy;
 		f->fresh = gs_texrender_create(GS_RGBA, GS_ZS_NONE);
