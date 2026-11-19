@@ -224,21 +224,22 @@ static obs_properties_t *gh_properties(void *data)
 	obs_property_set_long_description(region, "Hold different frame rates in rings from the centre outwards.");
 	obs_property_t *rect = obs_properties_add_bool(ppts, "rect", "Rectangle shape (off = oval)");
 	obs_property_set_long_description(rect, "Shape of the rings: rectangles (on) or ovals (off).");
-	obs_property_t *feather = obs_properties_add_int_slider(ppts, "feather", "Smooth edges between rates (%)", 0, 100, 1);
-	obs_property_set_long_description(feather, "Blends neighbouring rates across a band so the boundary is less visible.");
+	obs_property_t *feather =
+		obs_properties_add_int_slider(ppts, "feather", "Smooth edges between rates (%)", 0, 100, 1);
+	obs_property_set_long_description(feather,
+					  "Blends neighbouring rates across a band so the boundary is less visible.");
 
 	static const char *labels[BANDS] = {"120 fps share of screen (%)", "60 fps share of screen (%)",
 					    "40 fps share of screen (%)",  "30 fps share of screen (%)",
 					    "24 fps share of screen (%)",  "20 fps share of screen (%)",
 					    "15 fps share of screen (%)"};
-	static const char *hints[BANDS] = {
-		"Share of the picture, from the centre, that holds 120 fps.",
-		"Share of the picture that holds 60 fps.",
-		"Share of the picture that holds 40 fps.",
-		"Share of the picture that holds 30 fps.",
-		"Share of the picture that holds 24 fps.",
-		"Share of the picture that holds 20 fps.",
-		"Share of the picture at the outer edges that holds 15 fps."};
+	static const char *hints[BANDS] = {"Share of the picture, from the centre, that holds 120 fps.",
+					   "Share of the picture that holds 60 fps.",
+					   "Share of the picture that holds 40 fps.",
+					   "Share of the picture that holds 30 fps.",
+					   "Share of the picture that holds 24 fps.",
+					   "Share of the picture that holds 20 fps.",
+					   "Share of the picture at the outer edges that holds 15 fps."};
 	for (int k = 0; k < BANDS; k++) {
 		obs_property_t *sp = obs_properties_add_int_slider(ppts, PCT_KEYS[k], labels[k], 0, 100, 1);
 		obs_property_set_long_description(sp, hints[k]);

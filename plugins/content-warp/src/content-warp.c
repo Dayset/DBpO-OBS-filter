@@ -11,7 +11,7 @@ warp map is built on the CPU (warp-math.c). The map is uploaded as a 1-row textu
 #include "warp-math.h"
 #include "embedded-effect.h"
 
-#define BINS 240 /* detail bins across the source width */
+#define BINS 240           /* detail bins across the source width */
 #define BLEND_PERIODS 4.0f /* the shown warp glides to each new measurement over this many recompute periods */
 
 struct cw_info {
@@ -147,15 +147,19 @@ static obs_properties_t *cw_properties(void *data)
 	obs_property_set_long_description(p, "A: set the canvas to 4:3. B: keep 16:9 and add black bars.");
 
 	obs_property_t *c = obs_properties_add_int_slider(ppts, "centre", "Centre 1:1 width (%)", 5, 60, 1);
-	obs_property_set_long_description(c, "Width of the untouched 1:1 band in the middle, as a percent of the source.");
+	obs_property_set_long_description(c,
+					  "Width of the untouched 1:1 band in the middle, as a percent of the source.");
 
 	obs_property_t *h = obs_properties_add_int_slider(ppts, "height", "Picture height (% of canvas)", 60, 100, 1);
-	obs_property_set_long_description(h, "Height of the picture. Less than 100 adds black bars at the top and bottom.");
+	obs_property_set_long_description(
+		h, "Height of the picture. Less than 100 adds black bars at the top and bottom.");
 
 	obs_property_t *n = obs_properties_add_int_slider(ppts, "cache", "Recompute warp every N frames", 2, 20, 1);
-	obs_property_set_long_description(n, "How often the detail is measured. Higher is cheaper but reacts more slowly.");
+	obs_property_set_long_description(
+		n, "How often the detail is measured. Higher is cheaper but reacts more slowly.");
 
-	obs_property_t *v = obs_properties_add_list(ppts, "view", "Debug view", OBS_COMBO_TYPE_LIST, OBS_COMBO_FORMAT_INT);
+	obs_property_t *v =
+		obs_properties_add_list(ppts, "view", "Debug view", OBS_COMBO_TYPE_LIST, OBS_COMBO_FORMAT_INT);
 	obs_property_list_add_int(v, "Final", 0);
 	obs_property_list_add_int(v, "Source (no warp)", 1);
 	obs_property_list_add_int(v, "Energy (detail per column)", 2);
@@ -214,7 +218,8 @@ static void cw_video_render(void *data, gs_effect_t *effect)
 			/* no detail yet: even spread, so the picture is never blank */
 			cw_build_target(f);
 			memcpy(f->shown, f->target, sizeof(float) * (size_t)map_w);
-			gs_texture_set_image(f->warp, (const uint8_t *)f->shown, (uint32_t)(sizeof(float) * (size_t)map_w), false);
+			gs_texture_set_image(f->warp, (const uint8_t *)f->shown,
+					     (uint32_t)(sizeof(float) * (size_t)map_w), false);
 		}
 	}
 
