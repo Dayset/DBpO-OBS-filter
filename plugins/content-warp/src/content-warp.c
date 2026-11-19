@@ -308,6 +308,7 @@ static void cw_video_render(void *data, gs_effect_t *effect)
 
 	/* Every frame: sample the source through the cached map. */
 	gs_effect_set_texture(image, fresh_tex);
+	gs_effect_set_texture(energy_p, gs_texrender_get_texture(f->energy));
 	gs_effect_set_texture(warp_p, gs_texrender_get_texture(f->map));
 	gs_blend_state_push();
 	gs_blend_function(GS_BLEND_ONE, GS_BLEND_ZERO);
