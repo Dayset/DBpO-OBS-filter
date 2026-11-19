@@ -12,6 +12,7 @@ warp map is built on the CPU (warp-math.c). The map is uploaded as a 1-row textu
 #include "embedded-effect.h"
 
 #define BINS 240 /* detail bins across the source width */
+#define BLEND_PERIODS 4.0f /* the shown warp glides to each new measurement over this many recompute periods */
 
 struct cw_info {
 	obs_source_t *source;
@@ -22,6 +23,8 @@ struct cw_info {
 	bool stage_full[2];
 	int stage_i;
 	gs_texture_t *warp;
+	float *shown;  /* warp map drawn this frame; glides towards target */
+	float *target; /* warp map from the latest detail measurement */
 	int map_w;
 	float bins[BINS];
 	float p;
@@ -49,19 +52,28 @@ static void cw_free_textures(struct cw_info *f)
 	gs_stagesurface_destroy(f->stage[0]);
 	gs_stagesurface_destroy(f->stage[1]);
 	gs_texture_destroy(f->warp);
+	bfree(f->shown);
+	bfree(f->target);
 	f->fresh = f->energy = NULL;
 	f->stage[0] = f->stage[1] = NULL;
 	f->warp = NULL;
+	f->shown = f->target = NULL;
 	f->stage_full[0] = f->stage_full[1] = false;
 }
 
-/* Caller must be inside the graphics context. */
-static void cw_upload_map(struct cw_info *f)
+/* Called after each detail measurement. */
+static void cw_build_target(struct cw_info *f)
 {
-	float *map = bmalloc(sizeof(float) * (size_t)f->map_w);
-	cw_build_map(f->bins, BINS, f->p, f->ew, (float)f->cx, map, f->map_w);
-	gs_texture_set_image(f->warp, (const uint8_t *)map, (uint32_t)(sizeof(float) * (size_t)f->map_w), false);
-	bfree(map);
+	cw_build_map(f->bins, BINS, f->p, f->ew, (float)f->cx, f->target, f->map_w);
+}
+
+/* Called every frame: move the shown map a step towards the target and upload it. */
+static void cw_blend_map(struct cw_info *f)
+{
+	float k = 1.0f / (BLEND_PERIODS * (float)(f->cache ? f->cache : 1));
+	for (int x = 0; x < f->map_w; x++)
+		f->shown[x] += (f->target[x] - f->shown[x]) * k;
+	gs_texture_set_image(f->warp, (const uint8_t *)f->shown, (uint32_t)(sizeof(float) * (size_t)f->map_w), false);
 }
 
 static void cw_update(void *data, obs_data_t *settings)
@@ -131,7 +143,7 @@ static obs_properties_t *cw_properties(void *data)
 	obs_property_list_add_int(p, "B: 16:9 canvas, 4:3 picture with black bars", 1);
 	obs_property_set_long_description(p, "A: set the canvas to 4:3. B: keep 16:9 and add black bars.");
 
-	obs_property_t *c = obs_properties_add_int_slider(ppts, "centre", "Centre 1:1 width (%)", 5, 30, 1);
+	obs_property_t *c = obs_properties_add_int_slider(ppts, "centre", "Centre 1:1 width (%)", 5, 60, 1);
 	obs_property_set_long_description(c, "Width of the untouched 1:1 band in the middle, as a percent of the source.");
 
 	obs_property_t *n = obs_properties_add_int_slider(ppts, "cache", "Recompute warp every N frames", 2, 20, 1);
@@ -190,8 +202,14 @@ static void cw_video_render(void *data, gs_effect_t *effect)
 		memset(f->bins, 0, sizeof(f->bins));
 		f->p = 0.0f;
 		f->ew = ew;
-		if (f->warp)
-			cw_upload_map(f); /* no detail yet: even spread, so the picture is never blank */
+		f->shown = bzalloc(sizeof(float) * (size_t)map_w);
+		f->target = bzalloc(sizeof(float) * (size_t)map_w);
+		if (f->warp) {
+			/* no detail yet: even spread, so the picture is never blank */
+			cw_build_target(f);
+			memcpy(f->shown, f->target, sizeof(float) * (size_t)map_w);
+			gs_texture_set_image(f->warp, (const uint8_t *)f->shown, (uint32_t)(sizeof(float) * (size_t)map_w), false);
+		}
 	}
 
 	f->ew = ew;
@@ -262,14 +280,16 @@ static void cw_video_render(void *data, gs_effect_t *effect)
 					for (int i = 0; i < BINS; i++)
 						f->bins[i] = row[i * 4];
 					gs_stagesurface_unmap(f->stage[r]);
-					cw_upload_map(f);
+					cw_build_target(f);
 				}
 				f->stage_full[r] = false;
 			}
 		}
 	}
 
-	/* Every frame: draw. */
+	/* Every frame: glide the shown map towards the latest target, then draw. */
+	if (f->warp)
+		cw_blend_map(f);
 	gs_blend_state_push();
 	gs_blend_function(GS_BLEND_ONE, GS_BLEND_ZERO);
 	if (f->view == 0) {
