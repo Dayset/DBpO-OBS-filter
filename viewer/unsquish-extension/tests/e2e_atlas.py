@@ -61,7 +61,7 @@ def play(cfg, frame_u8, tmp, name):
 <div id="player" style="width:{OUT_W}px;height:{OUT_H}px;position:relative">
 <video id="v" src="{name}.webm" muted loop autoplay playsinline style="width:100%;height:100%"></video></div>
 <script>
-const store = {{ enabled: true, autoDetect: false, config: {json.dumps(cfg)} }};
+const store = {{ enabled: true, autoDetect: false, config: {json.dumps(cfg)} , enhance: {{ kernel: "bilinear", area: "periphery", deblock: 0, sharpen: 0, snap: 0, vibrance: 0, posterize: 0, dither: 0, grain: 0 }} }};
 window.chrome = {{ storage: {{
   sync: {{ get: (d, cb) => cb({{ ...d, ...store }}), set: (o, cb) => cb && cb() }},
   local: {{ get: (d, cb) => cb(d), set: (o, cb) => cb && cb() }},

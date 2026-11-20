@@ -51,7 +51,7 @@ def page_html():
 <div id="player" style="width:{W}px;height:{H}px;position:relative">
 <video id="v" src="v.webm" muted loop autoplay playsinline style="width:100%;height:100%"></video></div>
 <script>
-const store = {{ enabled: true, autoDetect: false, config: {json.dumps(CFG)} }};
+const store = {{ enabled: true, autoDetect: false, config: {json.dumps(CFG)} , enhance: {{ kernel: "bilinear", area: "periphery", deblock: 0, sharpen: 0, snap: 0, vibrance: 0, posterize: 0, dither: 0, grain: 0 }} }};
 window.chrome = {{ storage: {{
   sync: {{ get: (d, cb) => cb({{ ...d, ...store }}), set: (o, cb) => cb && cb() }},
   local: {{ get: (d, cb) => cb(d), set: (o, cb) => cb && cb() }},
