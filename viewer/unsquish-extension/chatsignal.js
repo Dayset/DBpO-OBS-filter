@@ -74,7 +74,8 @@
 	try {
 		chrome.storage.sync.get({ chatSignal: true, chatDelayMs: DEFAULT_DELAY_MS }, (s) => {
 			if (!s.chatSignal) return;
-			delayMs = Number(s.chatDelayMs) || DEFAULT_DELAY_MS;
+			const d = Number(s.chatDelayMs);
+			delayMs = Number.isFinite(d) && d >= 0 ? d : DEFAULT_DELAY_MS;
 			connect();
 		});
 	} catch (e) {
