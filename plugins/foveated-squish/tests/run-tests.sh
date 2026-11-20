@@ -28,6 +28,7 @@ python3 "$here/compare_reference.py" "C plugin" <"$out/c.txt"
 if command -v node >/dev/null; then
 	node "$root/viewer/unsquish-extension/tests/look_code.js"
 	node "$root/viewer/unsquish-extension/tests/starvation.js"
+	node "$root/viewer/unsquish-extension/tests/chatsignal_test.js"
 	node "$root/viewer/unsquish-extension/tests/compare.js" >"$out/js.txt"
 	python3 "$here/compare_reference.py" "JS extension" <"$out/js.txt"
 else
