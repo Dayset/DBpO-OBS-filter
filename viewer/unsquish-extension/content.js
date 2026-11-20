@@ -277,7 +277,7 @@ void main() { v_uv = a_pos * 0.5 + 0.5; gl_Position = vec4(a_pos, 0.0, 1.0); }`;
 	 * bypass (Alt+Shift+U), a split view (left: plain bilinear, right: enhanced) and a benchmark over the options.
 	 */
 	const BENCH_STEPS = [
-		["baseline (bilinear)", {}],
+		["baseline (bilinear)", { kernel: "bilinear" }],
 		["lanczos3 unwarp", { kernel: "lanczos" }],
 		["lanczos3 + deblock 0.5", { kernel: "lanczos", deblock: 0.5 }],
 		["lanczos3 + sharpen 0.5", { kernel: "lanczos", sharpen: 0.5 }],

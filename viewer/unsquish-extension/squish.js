@@ -631,7 +631,7 @@ void main() {
 		["posterize", "Posterize"], ["dither", "Dither"], ["grain", "Grain"],
 	];
 	const NO_ENHANCE = Object.freeze({
-		kernel: "bilinear", area: "periphery", ...Object.fromEntries(ENHANCE_FIELDS.map(([k]) => [k, 0])),
+		kernel: "bicubic", area: "periphery", ...Object.fromEntries(ENHANCE_FIELDS.map(([k]) => [k, 0])),
 	});
 	const ENHANCE_PRESETS = {
 		off: { ...NO_ENHANCE },
@@ -642,7 +642,7 @@ void main() {
 
 	/** Clamped copy of enhancement settings from storage (missing values = off). */
 	function cleanEnhance(e) {
-		const out = { kernel: e && (e.kernel === "lanczos" || e.kernel === "bicubic") ? e.kernel : "bilinear", area: e && e.area === "all" ? "all" : "periphery" };
+		const out = { kernel: e && (e.kernel === "lanczos" || e.kernel === "bilinear") ? e.kernel : "bicubic", area: e && e.area === "all" ? "all" : "periphery" };
 		for (const [k] of ENHANCE_FIELDS) out[k] = clamp01(Number(e && e[k]) || 0);
 		return out;
 	}
@@ -650,7 +650,7 @@ void main() {
 	/** Which render stages an enhancement needs. */
 	function enhanceStages(e) {
 		return {
-			lanczos: e.kernel === "lanczos",
+			lanczos: e.kernel === "lanczos" || e.kernel === "bicubic",
 			deblock: e.deblock > 0,
 			edge: e.sharpen > 0 || e.snap > 0 || e.vibrance > 0 || e.posterize > 0 || e.dither > 0 || e.grain > 0,
 		};

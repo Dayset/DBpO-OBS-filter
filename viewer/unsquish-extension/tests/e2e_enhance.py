@@ -73,10 +73,13 @@ def main():
         # freeze the video so frames are comparable
         page.evaluate("document.querySelector('video').pause()")
         page.wait_for_timeout(300)
+        page.evaluate("(e) => window.__set({ enhance: e })", {"kernel": "bilinear"})
+        page.wait_for_timeout(500)
         base = page.evaluate(READ)
         results = {}
         for name, enh in {
             "lanczos": {"kernel": "lanczos"},
+            "bicubic": {"kernel": "bicubic"},
             "deblock": {"deblock": 0.8},
             "edge": {"sharpen": 0.8, "snap": 1, "vibrance": 0.5, "posterize": 0.6, "dither": 0.5, "grain": 0.5},
             "all": {"kernel": "lanczos", "deblock": 0.5, "sharpen": 0.5, "snap": 0.8, "vibrance": 0.3},
@@ -87,8 +90,9 @@ def main():
             results[name] = (diff(base, cur, (0.38, 0.62), (0.38, 0.62)), diff(base, cur, (0.0, 0.2)))
             print(f"{name:8} center diff {results[name][0]:.3f}, left periphery diff {results[name][1]:.3f}")
         # centre must stay exactly untouched by every option (except grain/dither which are weight-limited)
-        for name, floor in (("lanczos", 0.2), ("deblock", 0.05), ("all", 0.2)):
+        for name, floor in (("lanczos", 0.2), ("bicubic", 0.2), ("deblock", 0.05), ("all", 0.2)):
             ok &= results[name][0] < 0.05 and results[name][1] > floor
+        ok &= results["bicubic"][1] < 5.0  # periphery changed, but not broken (sanity bound)
         ok &= results["edge"][0] < 0.5 and results["edge"][1] > 1.0
         attr = page.evaluate("document.documentElement.dataset.dbpoEnhance")
         print("data-dbpo-enhance:", attr)
