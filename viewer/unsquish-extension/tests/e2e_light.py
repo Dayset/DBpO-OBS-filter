@@ -5,6 +5,8 @@ Usage: python3 viewer/unsquish-extension/tests/e2e_light.py
 import http.server
 import json
 import os
+
+import _links
 import subprocess
 import sys
 import tempfile
@@ -29,7 +31,7 @@ window.chrome = { storage: {
 def main():
     tmp = tempfile.mkdtemp()
     for n in ("squish.js", "content.js"):
-        os.symlink(os.path.join(EXT, n), os.path.join(tmp, n))
+        _links.link(os.path.join(EXT, n), os.path.join(tmp, n))
     subprocess.run(["ffmpeg", "-loglevel", "error", "-y", "-f", "lavfi", "-i", "testsrc2=s=640x360:r=30:d=2",
                     "-c:v", "libvpx-vp9", "-pix_fmt", "yuv420p", os.path.join(tmp, "clip.webm")], check=True)
     for q in ("full", "light"):

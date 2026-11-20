@@ -6,6 +6,8 @@ Usage: python3 viewer/unsquish-extension/tests/color.py
 import http.server
 import json
 import os
+
+import _links
 import subprocess
 import sys
 import tempfile
@@ -51,7 +53,7 @@ def main():
     subprocess.run(["ffmpeg", "-loglevel", "error", "-y", "-loop", "1", "-i", os.path.join(tmp, "f.png"), "-t", "3",
                     "-r", "30", "-c:v", "libvpx-vp9", "-crf", "4", "-b:v", "0", "-pix_fmt", "yuv444p",
                     os.path.join(tmp, "v.webm")], check=True)
-    os.symlink(os.path.abspath(os.path.join(EXT, "..", "userscript", "dbpo-unsquish.user.js")), os.path.join(tmp, "us.js"))
+    _links.link(os.path.abspath(os.path.join(EXT, "..", "userscript", "dbpo-unsquish.user.js")), os.path.join(tmp, "us.js"))
 
     from playwright.sync_api import sync_playwright
 

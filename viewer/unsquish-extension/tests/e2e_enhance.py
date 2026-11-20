@@ -6,6 +6,8 @@ Usage: python3 viewer/unsquish-extension/tests/e2e_enhance.py
 import http.server
 import json
 import os
+
+import _links
 import subprocess
 import sys
 import tempfile
@@ -47,7 +49,7 @@ def diff(a, b, cols, rows=(0.0, 1.0)):
 def main():
     tmp = tempfile.mkdtemp()
     for n in ("squish.js", "content.js"):
-        os.symlink(os.path.join(EXT, n), os.path.join(tmp, n))
+        _links.link(os.path.join(EXT, n), os.path.join(tmp, n))
     subprocess.run(["ffmpeg", "-loglevel", "error", "-y", "-f", "lavfi", "-i", "testsrc2=s=640x360:r=30:d=2",
                     "-c:v", "libvpx-vp9", "-pix_fmt", "yuv420p", os.path.join(tmp, "clip.webm")], check=True)
     store = {"enabled": True, "autoDetect": False, "config": CFG, "quality": "full", "debug": True}

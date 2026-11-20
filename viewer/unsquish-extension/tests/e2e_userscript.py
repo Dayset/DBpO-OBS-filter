@@ -10,6 +10,8 @@ Usage: python3 viewer/unsquish-extension/tests/e2e_userscript.py
 import http.server
 import json
 import os
+
+import _links
 import subprocess
 import sys
 import tempfile
@@ -37,7 +39,7 @@ def main():
                     os.path.join(tmp, "v.webm")], check=True)
     subprocess.run(["ffmpeg", "-loglevel", "error", "-y", "-i", os.path.join(tmp, "v.webm"), "-frames:v", "1",
                     os.path.join(tmp, "dec.png")], check=True)
-    os.symlink(os.path.abspath(USERSCRIPT), os.path.join(tmp, "us.js"))
+    _links.link(os.path.abspath(USERSCRIPT), os.path.join(tmp, "us.js"))
     store = json.dumps({"enabled": True, "autoDetect": False, "config": ea.CFG})
     with open(os.path.join(tmp, "index.html"), "w") as f:
         f.write(f"""<!doctype html><html><head><title>Test stream</title></head><body style="margin:0;background:#000">

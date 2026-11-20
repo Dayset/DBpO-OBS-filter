@@ -10,6 +10,8 @@ Usage: python3 viewer/unsquish-extension/tests/e2e_starvation.py
 import http.server
 import json
 import os
+
+import _links
 import subprocess
 import sys
 import tempfile
@@ -71,7 +73,7 @@ def new_dir():
     tmp = tempfile.mkdtemp()
     open(os.path.join(tmp, "index.html"), "w").write(page_html())
     for n in ("squish.js", "starvation.js", "content.js"):
-        os.symlink(os.path.join(EXT, n), os.path.join(tmp, n))
+        _links.link(os.path.join(EXT, n), os.path.join(tmp, n))
     return tmp
 
 

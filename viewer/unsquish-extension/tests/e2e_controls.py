@@ -9,6 +9,8 @@ Usage: python3 viewer/unsquish-extension/tests/e2e_controls.py
 """
 import http.server
 import os
+
+import _links
 import subprocess
 import sys
 import tempfile
@@ -43,7 +45,7 @@ window.chrome = { storage: {
 def main():
     tmp = tempfile.mkdtemp()
     for n in ("squish.js", "content.js"):
-        os.symlink(os.path.join(EXT, n), os.path.join(tmp, n))
+        _links.link(os.path.join(EXT, n), os.path.join(tmp, n))
     subprocess.run(["ffmpeg", "-loglevel", "error", "-y", "-f", "lavfi", "-i", f"testsrc2=s={W}x{H}:r=30:d=2",
                     "-c:v", "libvpx-vp9", "-pix_fmt", "yuv420p", os.path.join(tmp, "clip.webm")], check=True)
     open(os.path.join(tmp, "p.html"), "w").write(PAGE.replace("@@CFG@@", CFG))
