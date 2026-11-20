@@ -298,7 +298,7 @@ uniform vec2 u_texel; // 1 / video size
 uniform int u_nrgn;
 uniform vec4 u_rgn[4];  // sharp region in view uv: x0, y0, x1, y1
 uniform vec4 u_slot[4]; // its slot in the video frame uv: x, y, w, h
-uniform int u_kernel;   // 0 bilinear, 1 Lanczos3 (squeezed periphery only; the 1:1 center stays bilinear)
+uniform int u_kernel;   // 0 bilinear, 1 Lanczos3, 2 bicubic (Keys a = -0.75, as OpenCV INTER_CUBIC); squeezed periphery only, the 1:1 center stays bilinear
 varying vec2 v_uv;
 float lz3(float x) {
 	x = abs(x);
@@ -316,6 +316,29 @@ vec4 sample_lanczos(vec2 u) {
 		float wy = lz3(p.y - (f.y + float(j)));
 		for (int i = -2; i <= 3; i++) {
 			float w = lz3(p.x - (f.x + float(i))) * wy;
+			vec2 q = clamp((f + vec2(float(i), float(j)) + 0.5) * u_texel, lo, hi);
+			acc += texture2D(u_video, q) * w;
+			wsum += w;
+		}
+	}
+	return clamp(acc / wsum, 0.0, 1.0);
+}
+float cub(float x) {
+	x = abs(x);
+	const float a = -0.75;
+	if (x <= 1.0) return ((a + 2.0) * x - (a + 3.0)) * x * x + 1.0;
+	if (x < 2.0) return (((x - 5.0) * x + 8.0) * x - 4.0) * a;
+	return 0.0;
+}
+vec4 sample_cubic(vec2 u) {
+	vec2 p = u / u_texel - 0.5, f = floor(p);
+	vec2 lo = u_box.xy + 0.5 * u_texel, hi = u_box.xy + u_box.zw - 0.5 * u_texel;
+	vec4 acc = vec4(0.0);
+	float wsum = 0.0;
+	for (int j = -1; j <= 2; j++) {
+		float wy = cub(p.y - (f.y + float(j)));
+		for (int i = -1; i <= 2; i++) {
+			float w = cub(p.x - (f.x + float(i))) * wy;
 			vec2 q = clamp((f + vec2(float(i), float(j)) + 0.5) * u_texel, lo, hi);
 			acc += texture2D(u_video, q) * w;
 			wsum += w;
@@ -350,6 +373,7 @@ void main() {
 	u = clamp(u, u_box.xy + 0.5 * u_texel, u_box.xy + u_box.zw - 0.5 * u_texel);
 	bool center = v_uv.x >= u_ax_a.x && v_uv.x <= u_ax_a.y && v_uv.y >= u_ay_a.x && v_uv.y <= u_ay_a.y;
 	if (u_kernel == 1 && !center) gl_FragColor = vec4(sample_lanczos(u).rgb, 1.0);
+	else if (u_kernel == 2 && !center) gl_FragColor = vec4(sample_cubic(u).rgb, 1.0);
 	else gl_FragColor = texture2D(u_video, u);
 }`;
 
@@ -618,7 +642,7 @@ void main() {
 
 	/** Clamped copy of enhancement settings from storage (missing values = off). */
 	function cleanEnhance(e) {
-		const out = { kernel: e && e.kernel === "lanczos" ? "lanczos" : "bilinear", area: e && e.area === "all" ? "all" : "periphery" };
+		const out = { kernel: e && (e.kernel === "lanczos" || e.kernel === "bicubic") ? e.kernel : "bilinear", area: e && e.area === "all" ? "all" : "periphery" };
 		for (const [k] of ENHANCE_FIELDS) out[k] = clamp01(Number(e && e[k]) || 0);
 		return out;
 	}
@@ -643,6 +667,7 @@ void main() {
 		let n = 1; // unwarp
 		const parts = ["unwarp"];
 		if (e && e.kernel === "lanczos") { n += 35; parts[0] = "unwarp lanczos3"; }
+		if (e && e.kernel === "bicubic") { n += 15; parts[0] = "unwarp bicubic"; }
 		if (e && e.deblock > 0) { n += 26; parts.push("deblock"); }
 		const st = e ? enhanceStages(e) : {};
 		if (st.edge) { n += 10; parts.push("edge"); }

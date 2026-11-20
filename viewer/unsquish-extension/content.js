@@ -539,7 +539,7 @@ void main() { v_uv = a_pos * 0.5 + 0.5; gl_Position = vec4(a_pos, 0.0, 1.0); }`;
 	function renderOnce(s, look, enh, rect) {
 		const gl = s.gl;
 		s.rect = rect;
-		gl.uniform1i(s.loc.u_kernel, enh && enh.kernel === "lanczos" ? 1 : 0);
+		gl.uniform1i(s.loc.u_kernel, enh && enh.kernel === "lanczos" ? 1 : enh && enh.kernel === "bicubic" ? 2 : 0);
 		const st = enh ? FSQ.enhanceStages(enh) : {};
 		let lookOn = FSQ.lookActive(look) && !s.lookFailed;
 		if ((lookOn || st.deblock || st.edge) && !s.lookFailed) {
