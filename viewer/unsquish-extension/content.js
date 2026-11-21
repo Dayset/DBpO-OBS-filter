@@ -26,7 +26,20 @@ void main() { v_uv = a_pos * 0.5 + 0.5; gl_Position = vec4(a_pos, 0.0, 1.0); }`;
 	// One live copy per page: after an extension update a fresh copy is injected
 	// and the old one (cut off from settings) must step aside.
 	const GEN = String(Date.now()) + Math.random();
-	document.documentElement.dataset.dbpoUnsquishGen = GEN;
+	const OWNER = typeof chrome !== "undefined" && chrome.runtime && chrome.runtime.id; // undefined in the userscript
+	// Claiming the page makes this copy the live one; the others see it is superseded and step aside.
+	const claim = () => {
+		document.documentElement.dataset.dbpoUnsquishGen = GEN;
+		if (OWNER) document.documentElement.dataset.dbpoUnsquishOwner = OWNER;
+	};
+	claim();
+	if (typeof chrome !== "undefined" && chrome.runtime && chrome.runtime.onMessage)
+		chrome.runtime.onMessage.addListener((m, _sender, reply) => {
+			if (m && m.type === "dbpo-claim") {
+				claim();
+				reply(true);
+			}
+		});
 	const superseded = () => document.documentElement.dataset.dbpoUnsquishGen !== GEN;
 	for (const old of document.querySelectorAll("canvas[data-dbpo-unsquish]")) old.remove();
 
@@ -588,7 +601,8 @@ void main() { v_uv = a_pos * 0.5 + 0.5; gl_Position = vec4(a_pos, 0.0, 1.0); }`;
 	function draw() {
 		if (superseded()) {
 			detach();
-			return; // a newer copy of the extension took over
+			// A newer copy took the page. Keep checking slowly so this copy resumes if the page is claimed again.
+			return setTimeout(() => requestAnimationFrame(draw), 500);
 		}
 		let cfg = activeConfig();
 		let video = cfg ? findVideo() : null;

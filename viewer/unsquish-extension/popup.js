@@ -97,30 +97,64 @@ function render(s, detected) {
 	} else {
 		st.textContent = "No config yet: paste the streamer's FSQ1 string, or turn on auto-detect.";
 	}
+	if (otherOwner) st.textContent = `Another installed copy of DBpO Unsquish is running on this page. Changing the config here switches to this copy. ${st.textContent}`;
 }
+
+let pageTabId = null; // tab the popup controls (null when there is none)
+let otherOwner = ""; // id of another installed copy that owns the page, if any
 
 function load() {
 	const go = () =>
 		chrome.storage.sync.get(defaults, (s) =>
 			chrome.storage.local.get({ detectedBy: {} }, (l) => render(s, l.detectedBy[tabKey] || ""))
 		);
+	// Which copy owns the page: a second installed copy would otherwise be silently ignored.
+	const owner = (then) => {
+		otherOwner = "";
+		if (pageTabId === null || !chrome.scripting) return then();
+		chrome.scripting.executeScript(
+			{ target: { tabId: pageTabId }, func: () => document.documentElement.dataset.dbpoUnsquishOwner || "" },
+			(r) => {
+				void chrome.runtime.lastError; // pages the extension cannot touch
+				const id = r && r[0] && r[0].result;
+				if (id && id !== chrome.runtime.id) otherOwner = id;
+				then();
+			}
+		);
+	};
 	// The userscript panel lives in the page itself; the extension popup asks for the active tab.
+	// Only a real web page can own a config (not the popup's own tab or a browser page). When the popup is opened
+	// as a tab, the active tab is the popup itself, so fall back to the window's web page.
+	const useTab = (tab) => {
+		const web = !!tab && /^https?:/i.test(tab.url || "");
+		tabKey = web ? FSQ.pageKey(tab.url) : "";
+		pageTabId = web ? tab.id : null;
+		owner(go);
+	};
 	if (chrome.tabs && chrome.tabs.query)
 		chrome.tabs.query({ active: true, currentWindow: true }, (t) => {
-			// Only a real web page can own a config (not the popup's own tab or a browser page).
-			const url = (t[0] && t[0].url) || "";
-			tabKey = /^https?:/i.test(url) ? FSQ.pageKey(url) : "";
-			go();
+			if (t[0] && /^https?:/i.test(t[0].url || "")) return useTab(t[0]);
+			chrome.tabs.query({ currentWindow: true, url: ["http://*/*", "https://*/*"] }, (w) => useTab(w[0]));
 		});
 	else ((tabKey = FSQ.pageKey(location.href)), go());
 }
 
-$("save").onclick = () => chrome.storage.sync.set({ config: $("config").value.trim(), configPage: tabKey }, load);
+// Changing the config here makes this copy the page's live one, so a second installed copy can't silently take over.
+function claimPage(then) {
+	if (pageTabId === null || !chrome.tabs || !chrome.tabs.sendMessage) return then();
+	chrome.tabs.sendMessage(pageTabId, { type: "dbpo-claim" }, () => {
+		void chrome.runtime.lastError; // page without the content script
+		then();
+	});
+}
+const saveConfig = (cfg) => claimPage(() => chrome.storage.sync.set({ config: cfg, configPage: tabKey }, load));
+
+$("save").onclick = () => saveConfig($("config").value.trim());
 // Apply as soon as a valid string is pasted or typed (no Save click needed).
 $("config").addEventListener("input", () => {
 	const text = $("config").value.trim();
 	const cfg = FSQ.parse(text);
-	if (cfg) chrome.storage.sync.set({ config: cfg.text, configPage: tabKey }, load);
+	if (cfg) saveConfig(cfg.text);
 });
 $("clear").onclick = () => chrome.storage.sync.set({ config: "", configPage: "" }, load);
 $("enabled").onchange = (e) => chrome.storage.sync.set({ enabled: e.target.checked }, load);

@@ -198,6 +198,9 @@ window.chrome = {{ storage: {{
         grab({"config": "", "lookMode": "mine"})
         img, info = grab({"plainVideos": True, "myLook": all_on})
         if img is None:
+            page.wait_for_timeout(2500)  # the draw loop can sleep 500 ms between checks; a real stall stays missing
+            img, info = grab({"plainVideos": True, "myLook": all_on})
+        if img is None:
             print("FAIL plain video: no canvas")
             ok = False
         else:
